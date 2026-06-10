@@ -21,6 +21,7 @@ const zh = {
     username: '用户名', password: '密码',
     signIn: '登录', signingIn: '登录中...',
     error: '用户名或密码错误',
+    rateLimited: '登录尝试次数过多，请 15 分钟后重试',
   },
   accounts: {
     title: 'Telegram 账户', addBtn: '+ 添加账户',
@@ -128,6 +129,7 @@ const en: typeof zh = {
     username: 'Username', password: 'Password',
     signIn: 'Sign in', signingIn: 'Signing in...',
     error: 'Invalid username or password',
+    rateLimited: 'Too many login attempts. Please try again in 15 minutes.',
   },
   accounts: {
     title: 'Telegram Accounts', addBtn: '+ Add Account',

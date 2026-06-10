@@ -26,6 +26,9 @@ const DISPLAY_HOST = process.env.DISPLAY_HOST ?? BIND_HOST;
 app.use(cors());
 app.use(express.json());
 
+// Health check -- no auth required
+app.get('/api/health', (_req: express.Request, res: express.Response) => res.json({ status: 'ok' }));
+
 // Public routes
 app.use('/api/auth', authRouter);
 

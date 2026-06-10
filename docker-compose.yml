@@ -8,20 +8,8 @@ services:
       - /docker/bemby-data:/app/data
     environment:
       PORT: 3000
-      DB_PATH: /app/data/bemby.db
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}    # change this
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme} # change this
       # Secret used to sign login tokens — set to any long random string, e.g. openssl rand -hex 32
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       TZ: ${TZ:-Australia/Sydney}
-    healthcheck:
-      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:3000/"]
-      interval: 30s
-      timeout: 5s
-      start_period: 15s
-      retries: 3
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"

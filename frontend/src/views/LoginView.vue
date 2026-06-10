@@ -41,8 +41,9 @@ async function submit() {
     const { token } = await authApi.login(form.username, form.password);
     localStorage.setItem('token', token);
     router.push('/accounts');
-  } catch {
-    error.value = t('login.error');
+  } catch (err: unknown) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    error.value = status === 429 ? t('login.rateLimited') : t('login.error');
   } finally {
     loading.value = false;
   }
