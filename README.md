@@ -52,11 +52,28 @@ cp env.example .env
 docker compose up -d
 ```
 
-应用运行在 `http://<主机>:3000`。SQLite 数据库存储在 Docker 命名卷（`bemby-data`）中，重新部署后数据依然保留。
+应用运行在 `http://<主机>:3000`。数据库存储在宿主机的 `/docker/bemby-data` 目录中，重新部署后数据依然保留。
 
 ```bash
 # 停止服务
 docker compose down
+```
+
+**没有 Docker Compose？** 也可以直接使用 `docker run`：
+
+```bash
+docker run -d \
+  --name bemby \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  -v /docker/bemby-data:/app/data \
+  -e PORT=3000 \
+  -e DB_PATH=/app/data/bemby.db \
+  -e ADMIN_USERNAME=admin \
+  -e ADMIN_PASSWORD=changeme \
+  -e JWT_SECRET=请替换为随机字符串 \
+  -e TZ=Australia/Sydney \
+  liveinaus/bemby:latest
 ```
 
 ---
@@ -278,11 +295,28 @@ Edit `.env`:
 docker compose up -d
 ```
 
-The app is served on `http://<host>:3000`. The SQLite database is stored in a named Docker volume (`bemby-data`) so it persists across redeployments.
+The app is served on `http://<host>:3000`. The database is stored on the host at `/docker/bemby-data` so it persists across redeployments.
 
 ```bash
 # Stop
 docker compose down
+```
+
+**No Docker Compose?** Use `docker run` instead:
+
+```bash
+docker run -d \
+  --name bemby \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  -v /docker/bemby-data:/app/data \
+  -e PORT=3000 \
+  -e DB_PATH=/app/data/bemby.db \
+  -e ADMIN_USERNAME=admin \
+  -e ADMIN_PASSWORD=changeme \
+  -e JWT_SECRET=replace-with-a-random-string \
+  -e TZ=Australia/Sydney \
+  liveinaus/bemby:latest
 ```
 
 ---
