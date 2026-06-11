@@ -74,6 +74,7 @@ export type CheckinAttemptLog = {
   buttonResponseHasMedia?: boolean;
   buttonResponseImage?: string;
   buttonResponseButtons?: string[][];
+  aiDurationMs?: number;
   error?: string;
 };
 

@@ -101,7 +101,10 @@
 
                           <!-- Sent: which button was clicked (right) -->
                           <div v-if="a.buttonClicked" class="chat-row-sent">
-                            <div class="bubble-sent">{{ a.buttonClicked }}</div>
+                            <div>
+                              <div class="bubble-sent">{{ a.buttonClicked }}</div>
+                              <div v-if="a.aiDurationMs != null" class="ai-badge">AI · {{ a.aiDurationMs }}ms</div>
+                            </div>
                           </div>
 
                           <!-- Received: bot's follow-up message after button click -->
@@ -325,6 +328,16 @@ function fmtDate(iso: string) {
   color: #111;
   max-width: 75%;
   word-break: break-all;
+}
+
+/* AI selection indicator shown below the sent button bubble */
+.ai-badge {
+  font-size: 11px;
+  color: #6366f1;
+  text-align: right;
+  margin-top: 3px;
+  padding-right: 2px;
+  font-weight: 500;
 }
 
 /* Callback answer bubble (left) — smaller, italic */

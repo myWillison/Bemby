@@ -13,11 +13,12 @@ export type CheckinAttemptLog = {
   availableButtons: string[][];
   buttonClicked?: string;
   callbackAnswer?: string;
-  // Bot's follow-up message after the button click
   buttonResponseHtml?: string;
   buttonResponseHasMedia?: boolean;
   buttonResponseImage?: string;
   buttonResponseButtons?: string[][];
+  /** Set when {aiBtn} was used; records how long the AI took to pick a button */
+  aiDurationMs?: number;
   error?: string;
 };
 
@@ -326,6 +327,36 @@ function waitForBotMessageEdit(
   });
 }
 
+// Waits for any new message from the bot within the given timeout.
+// Never rejects -- resolves null on timeout or abort.
+function waitForNewBotMessage(
+  client: TelegramClient,
+  botUsername: string,
+  maxMs: number,
+  signal?: AbortSignal,
+): Promise<Api.Message | null> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) { resolve(null); return; }
+
+    const finish = (msg: Api.Message | null) => {
+      clearTimeout(timer);
+      client.removeEventHandler(handler, new NewMessage({}));
+      signal?.removeEventListener('abort', onAbort);
+      resolve(msg);
+    };
+
+    const timer = setTimeout(() => finish(null), maxMs);
+    const onAbort = () => finish(null);
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    const handler = async (event: NewMessageEvent) => {
+      finish(event.message as Api.Message);
+    };
+
+    client.addEventHandler(handler, new NewMessage({ fromUsers: [botUsername] }));
+  });
+}
+
 export async function runCheckin(
   apiId: number,
   apiHash: string,
@@ -394,7 +425,9 @@ export async function runCheckin(
       targetText = flat[Math.floor(Math.random() * flat.length)];
       useExactMatch = true;
     } else if (checkinButton === '{aiBtn}') {
+      const aiStart = Date.now();
       targetText = await selectButtonWithAI(log.availableButtons, log.commandResponseHtml, log.commandResponseImage);
+      log.aiDurationMs = Date.now() - aiStart;
       useExactMatch = true;
     } else {
       targetText = checkinButton;
@@ -408,8 +441,10 @@ export async function runCheckin(
       for (const btn of row) {
         const matches = useExactMatch ? btn.text === targetText : btn.text.includes(targetText);
         if (matches) {
-          // Start watching for an edit BEFORE invoking to avoid a race condition
+          // Start watching BEFORE invoking to avoid a race condition.
+          // Bots respond either by editing the original message or sending a new one.
           const editPromise = waitForBotMessageEdit(client, buttonsMsg.id, 10_000, signal);
+          const newMsgPromise = waitForNewBotMessage(client, botUsername, 10_000, signal);
 
           const callbackData = (btn.button as Api.KeyboardButtonCallback).data;
           const answer = await client.invoke(new Api.messages.GetBotCallbackAnswer({
@@ -421,10 +456,10 @@ export async function runCheckin(
           if (answer.message) log.callbackAnswer = answer.message;
           clicked = true;
 
-          // Wait for the bot to edit the original message in place
-          const editedMsg = await editPromise;
-          if (editedMsg && !signal?.aborted) {
-            const bp = await parseMessages([editedMsg], client, signal);
+          // Take whichever response arrives first
+          const responseMsg = await Promise.race([editPromise, newMsgPromise]);
+          if (responseMsg && !signal?.aborted) {
+            const bp = await parseMessages([responseMsg], client, signal);
             if (bp.html || bp.hasMedia) {
               log.buttonResponseHtml = bp.html || undefined;
               log.buttonResponseHasMedia = bp.hasMedia || undefined;

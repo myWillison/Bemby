@@ -244,9 +244,12 @@
               <li>右侧绿色气泡显示发送的命令（含模板展开后的实际内容）。</li>
               <li>左侧灰色气泡显示机器人回复（图片、文字、网页预览）及内联键盘，已点击的按钮以绿色高亮。</li>
               <li>右侧绿色气泡显示实际点击的按钮文字。</li>
-              <li>若机器人在按钮点击后更新了消息，左侧会再显示一个更新后的气泡。</li>
+              <li>若机器人在按钮点击后有响应（原地编辑或发送新消息），左侧会再显示一个响应气泡。</li>
               <li>若有多次重试，每次尝试均单独展示。</li>
             </ol>
+            <p class="help-note">
+              使用 <code>{aiBtn}</code> 时，点击气泡下方会显示 <strong>AI · Xms</strong> 标识，表示 AI 选择所用时长。
+            </p>
             <p class="help-note">
               对于状态为<strong>运行中</strong>的任务，详情面板每 2 秒自动刷新。
               可点击消息列的<strong>停止</strong>按钮随时中止正在运行的签到任务。
@@ -271,9 +274,12 @@
               <li>A green bubble on the right shows the command that was sent (with any template placeholders already expanded).</li>
               <li>A grey bubble on the left shows the bot's reply — photo, text, web preview — with the inline keyboard below it. The clicked button is highlighted green.</li>
               <li>A green bubble on the right shows which button was clicked.</li>
-              <li>If the bot edited its message after the button click, the updated content appears as a second grey bubble on the left.</li>
+              <li>If the bot responded after the button click -- whether by editing its original message or sending a new one -- the response appears as a second grey bubble on the left.</li>
               <li>If the job retried, each attempt is shown separately.</li>
             </ol>
+            <p class="help-note">
+              When <code>{aiBtn}</code> is used, an <strong>AI · Xms</strong> badge appears below the clicked button bubble, showing how long the AI took to pick.
+            </p>
             <p class="help-note">
               While a job is <strong>Running</strong>, the detail panel refreshes automatically every 2 seconds.
               Click the <strong>Stop</strong> button in the message column to cancel a running check-in at any time.
