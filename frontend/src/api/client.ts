@@ -61,14 +61,28 @@ export type Job = {
   checkinButton: string;
 };
 
+export type CheckinAttemptLog = {
+  attempt: number;
+  commandSent: string;
+  hasMedia: boolean;
+  commandResponseHtml: string;
+  commandResponseImage?: string;
+  availableButtons: string[][];
+  buttonClicked?: string;
+  callbackAnswer?: string;
+  error?: string;
+};
+
 export type Log = {
   id: number;
   jobId: number;
   jobName: string | null;
+  jobType: string | null;
   accountName: string | null;
   ranAt: string;
   status: 'success' | 'failed' | 'running';
   message: string | null;
+  detail?: CheckinAttemptLog[] | null;
 };
 
 export type ScheduleStatus = {
@@ -117,6 +131,7 @@ export const logsApi = {
   list: (params?: { jobId?: number; limit?: number; offset?: number }) =>
     api.get<Log[]>('/logs', { params }).then(r => r.data),
   getOne: (id: number) => api.get<Log>(`/logs/${id}`).then(r => r.data),
+  cancel: (id: number) => api.post<{ message: string }>(`/logs/${id}/cancel`).then(r => r.data),
 };
 
 // ── Status ────────────────────────────────────────────────────────────────────

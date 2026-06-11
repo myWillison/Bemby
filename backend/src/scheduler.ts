@@ -2,6 +2,8 @@ import { DateTime } from 'luxon';
 import { db } from './db/database';
 import { runJob } from './jobs/runner';
 import type { Job, TgAccount } from './types';
+import type { CheckinAttemptLog } from './jobs/checkin';
+import { registerJob, unregisterJob } from './jobs/cancellation';
 
 type ScheduleEntry = {
   job: Job;
@@ -90,6 +92,8 @@ function loadEligibleJobs(): Array<{ job: Job; account: TgAccount | null }> {
       enabled: Boolean(row.enabled),
       createdAt: row.created_at,
       config: row.config ?? null,
+      startCommand: row.start_command || '/start',
+      checkinButton: row.checkin_button || '签到',
     } as Job,
     account: row.account_id != null ? {
       id: row.account_id,
@@ -110,6 +114,8 @@ async function executeJob(job: Job, account: TgAccount | null): Promise<void> {
     "INSERT INTO job_logs (job_id, ran_at, status, message) VALUES (?, ?, 'running', 'Scheduled')"
   ).run(job.id, ranAt);
 
+  const attemptLogs: CheckinAttemptLog[] = [];
+  const signal = registerJob(Number(logId));
   try {
     // Re-fetch session for checkin jobs in case it was updated since scheduling
     if (account) {
@@ -117,13 +123,18 @@ async function executeJob(job: Job, account: TgAccount | null): Promise<void> {
       if (fresh?.session_string) account = { ...account, sessionString: fresh.session_string };
     }
 
-    await runJob(job, account);
-    db.prepare("UPDATE job_logs SET status = 'success', message = 'Completed' WHERE id = ?").run(logId);
+    await runJob(job, account, attemptLogs, signal);
+    const detail = attemptLogs.length ? JSON.stringify(attemptLogs) : null;
+    db.prepare("UPDATE job_logs SET status = 'success', message = 'Completed', detail = ? WHERE id = ?").run(detail, logId);
     console.log(`[scheduler] "${job.name}" completed`);
   } catch (err: any) {
-    db.prepare("UPDATE job_logs SET status = 'failed', message = ? WHERE id = ?").run(err.message, logId);
+    const isCancelled = err?.message === 'Job cancelled';
+    const detail = attemptLogs.length ? JSON.stringify(attemptLogs) : null;
+    db.prepare("UPDATE job_logs SET status = 'failed', message = ?, detail = ? WHERE id = ?")
+      .run(isCancelled ? 'Cancelled' : err.message, detail, logId);
     console.error(`[scheduler] "${job.name}" failed:`, err.message);
   } finally {
+    unregisterJob(Number(logId));
     scheduleOne(job, account, true);
   }
 }

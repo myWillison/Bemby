@@ -1,19 +1,37 @@
 import type { Job, TgAccount, EmbywatchConfig } from '../types';
-import { runCheckin } from './checkin';
+import { runCheckin, CheckinError, type CheckinAttemptLog } from './checkin';
 import { runEmbywatch } from './embywatch';
 
 const RETRY_DELAY_MS = 5_000;
 
-export async function runJob(job: Job, account: TgAccount | null): Promise<void> {
+function delayAbortable(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) { reject(new Error('Job cancelled')); return; }
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('Job cancelled')); }, { once: true });
+  });
+}
+
+export async function runJob(
+  job: Job,
+  account: TgAccount | null,
+  attemptLogs?: CheckinAttemptLog[],
+  signal?: AbortSignal,
+): Promise<void> {
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= job.retryMax; attempt++) {
+    if (signal?.aborted) throw new Error('Job cancelled');
     try {
       switch (job.jobType) {
         case 'checkin': {
           if (!account) throw new Error('No account linked to this job');
           if (!account.sessionString) throw new Error('Account has no session -- authenticate first');
-          await runCheckin(account.apiId, account.apiHash, account.sessionString, job.botUsername, job.replyTimeoutMs, job.startCommand, job.checkinButton);
+          const log = await runCheckin(
+            account.apiId, account.apiHash, account.sessionString,
+            job.botUsername, job.replyTimeoutMs, job.startCommand, job.checkinButton, attempt, signal,
+          );
+          attemptLogs?.push(log);
           break;
         }
         case 'embywatch': {
@@ -21,7 +39,6 @@ export async function runJob(job: Job, account: TgAccount | null): Promise<void>
           // Migrate legacy double-encoded records
           if (typeof config === 'string') config = JSON.parse(config) as EmbywatchConfig;
           if (!config.username || !config.password) throw new Error('Emby username and password are required');
-          // botUsername holds the server URL for embywatch jobs
           await runEmbywatch(job.botUsername, config);
           break;
         }
@@ -30,9 +47,12 @@ export async function runJob(job: Job, account: TgAccount | null): Promise<void>
       }
       return;
     } catch (err) {
+      if (err instanceof CheckinError) attemptLogs?.push(err.log);
       lastError = err;
       console.error(`[runner] Job "${job.name}" attempt ${attempt}/${job.retryMax} failed:`, err);
-      if (attempt < job.retryMax) {
+      if (attempt < job.retryMax && signal) {
+        await delayAbortable(RETRY_DELAY_MS, signal).catch(() => { throw lastError; });
+      } else if (attempt < job.retryMax) {
         await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
       }
     }

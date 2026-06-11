@@ -3,6 +3,8 @@ import { db } from '../db/database';
 import { runJob } from '../jobs/runner';
 import { refreshScheduler } from '../scheduler';
 import type { Job, TgAccount } from '../types';
+import type { CheckinAttemptLog } from '../jobs/checkin';
+import { registerJob, unregisterJob } from '../jobs/cancellation';
 
 const router = Router();
 
@@ -183,13 +185,20 @@ router.post('/:id/run', async (req, res) => {
 
   res.json({ message: 'Job triggered', logId });
 
-  runJob(job, account)
+  const attemptLogs: CheckinAttemptLog[] = [];
+  const signal = registerJob(Number(logId));
+  runJob(job, account, attemptLogs, signal)
     .then(() => {
-      db.prepare("UPDATE job_logs SET status = 'success', message = 'Completed' WHERE id = ?").run(logId);
+      const detail = attemptLogs.length ? JSON.stringify(attemptLogs) : null;
+      db.prepare("UPDATE job_logs SET status = 'success', message = 'Completed', detail = ? WHERE id = ?").run(detail, logId);
     })
     .catch((err: Error) => {
-      db.prepare("UPDATE job_logs SET status = 'failed', message = ? WHERE id = ?").run(err.message, logId);
-    });
+      const isCancelled = err.message === 'Job cancelled';
+      const detail = attemptLogs.length ? JSON.stringify(attemptLogs) : null;
+      db.prepare("UPDATE job_logs SET status = 'failed', message = ?, detail = ? WHERE id = ?")
+        .run(isCancelled ? 'Cancelled' : err.message, detail, logId);
+    })
+    .finally(() => unregisterJob(Number(logId)));
 });
 
 export default router;
