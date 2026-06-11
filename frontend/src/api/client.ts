@@ -70,6 +70,10 @@ export type CheckinAttemptLog = {
   availableButtons: string[][];
   buttonClicked?: string;
   callbackAnswer?: string;
+  buttonResponseHtml?: string;
+  buttonResponseHasMedia?: boolean;
+  buttonResponseImage?: string;
+  buttonResponseButtons?: string[][];
   error?: string;
 };
 

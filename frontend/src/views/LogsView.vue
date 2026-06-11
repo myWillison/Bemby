@@ -71,60 +71,63 @@
                         :style="expandedDetail.length > 1 ? 'margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #e5e7eb' : ''"
                       >
                         <!-- Attempt header — only shown when there were retries -->
-                        <div v-if="expandedDetail.length > 1" style="font-size:12px;font-weight:600;color:#666;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.04em">
+                        <div v-if="expandedDetail.length > 1" style="font-size:11px;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:0.05em;text-align:center;margin-bottom:10px">
                           {{ t('logs.detail.attempt').replace('{n}', String(a.attempt)) }}
-                          <span v-if="a.error" style="color:#e63946;font-weight:400;margin-left:6px">— {{ a.error }}</span>
                         </div>
 
-                        <!-- Command sent -->
-                        <div style="margin-bottom:10px">
-                          <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">
-                            {{ t('logs.detail.commandSent') }}
+                        <!-- Chat-style sent / received layout -->
+                        <div class="chat-bg">
+                        <div class="chat-log">
+                          <!-- Sent: command (right) -->
+                          <div class="chat-row-sent">
+                            <div class="bubble-sent">{{ a.commandSent }}</div>
                           </div>
-                          <code style="font-size:13px;background:#eee;padding:2px 6px;border-radius:4px">{{ a.commandSent }}</code>
-                        </div>
 
-                        <!-- Telegram-style message bubble -->
-                        <div style="margin-bottom:12px">
-                          <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px">
-                            {{ t('logs.detail.botResponse') }}
-                          </div>
-                          <div class="tg-bubble">
-                            <img v-if="a.commandResponseImage" :src="a.commandResponseImage" class="tg-bubble-img" alt="" />
-                            <div v-else-if="a.hasMedia" class="tg-bubble-img-placeholder">📷</div>
-                            <div v-if="a.commandResponseHtml" class="tg-bubble-text" v-html="a.commandResponseHtml" />
-                            <div v-else-if="!a.hasMedia" class="tg-bubble-text" style="color:#aaa;font-style:italic">
-                              {{ t('logs.detail.noText') }}
+                          <!-- Received: bot response bubble + keyboard (left) -->
+                          <div v-if="a.commandResponseHtml || a.hasMedia" class="chat-row-recv">
+                            <div>
+                              <div class="tg-bubble">
+                                <img v-if="a.commandResponseImage" :src="a.commandResponseImage" class="tg-bubble-img" alt="" />
+                                <div v-else-if="a.hasMedia" class="tg-bubble-img-placeholder">📷</div>
+                                <div v-if="a.commandResponseHtml" class="tg-bubble-text" v-html="a.commandResponseHtml" />
+                              </div>
+                              <div v-if="a.availableButtons?.length" class="tg-keyboard">
+                                <div v-for="(row, ri) in a.availableButtons" :key="ri" class="tg-keyboard-row">
+                                  <div v-for="btn in row" :key="btn" :class="btn === a.buttonClicked ? 'tg-btn tg-btn-active' : 'tg-btn'">{{ btn }}</div>
+                                </div>
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        <!-- Telegram-style inline keyboard -->
-                        <div v-if="a.availableButtons?.length" style="margin-bottom:12px;max-width:320px">
-                          <div
-                            v-for="(row, ri) in a.availableButtons"
-                            :key="ri"
-                            style="display:flex;gap:4px;margin-bottom:4px"
-                          >
-                            <div
-                              v-for="btn in row"
-                              :key="btn"
-                              :class="btn === a.buttonClicked ? 'tg-btn tg-btn-active' : 'tg-btn'"
-                            >{{ btn }}</div>
+                          <!-- Sent: which button was clicked (right) -->
+                          <div v-if="a.buttonClicked" class="chat-row-sent">
+                            <div class="bubble-sent">{{ a.buttonClicked }}</div>
                           </div>
-                        </div>
 
-                        <!-- Callback answer -->
-                        <div v-if="a.callbackAnswer">
-                          <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">
-                            {{ t('logs.detail.callbackAnswer') }}
+                          <!-- Received: bot's follow-up message after button click -->
+                          <div v-if="a.buttonResponseHtml || a.buttonResponseHasMedia" class="chat-row-recv">
+                            <div>
+                              <div class="tg-bubble">
+                                <img v-if="a.buttonResponseImage" :src="a.buttonResponseImage" class="tg-bubble-img" alt="" />
+                                <div v-else-if="a.buttonResponseHasMedia" class="tg-bubble-img-placeholder">📷</div>
+                                <div v-if="a.buttonResponseHtml" class="tg-bubble-text" v-html="a.buttonResponseHtml" />
+                              </div>
+                              <div v-if="a.buttonResponseButtons?.length" class="tg-keyboard">
+                                <div v-for="(row, ri) in a.buttonResponseButtons" :key="ri" class="tg-keyboard-row">
+                                  <div v-for="btn in row" :key="btn" class="tg-btn">{{ btn }}</div>
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                          <div style="font-size:13px;color:#333">{{ a.callbackAnswer }}</div>
-                        </div>
 
-                        <!-- Error for single-attempt failures -->
-                        <div v-if="a.error && expandedDetail.length === 1" style="margin-top:8px">
-                          <div style="font-size:13px;color:#e63946">{{ a.error }}</div>
+                          <!-- Received: callback answer toast as a small bubble -->
+                          <div v-if="a.callbackAnswer" class="chat-row-recv">
+                            <div class="bubble-callback">{{ a.callbackAnswer }}</div>
+                          </div>
+
+                          <!-- Error shown centred between bubbles -->
+                          <div v-if="a.error" class="chat-error">{{ a.error }}</div>
+                        </div>
                         </div>
                       </div>
                     </div>
@@ -286,14 +289,71 @@ function fmtDate(iso: string) {
   background: #f0f4ff;
 }
 
-/* Telegram-style message bubble */
+/* Chat background container */
+.chat-bg {
+  display: inline-block;
+  background: #eef1f5;
+  border-radius: 10px;
+  padding: 12px 14px;
+  max-width: 420px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Chat layout */
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.chat-row-sent {
+  display: flex;
+  justify-content: flex-end;
+}
+.chat-row-recv {
+  display: flex;
+  justify-content: flex-start;
+}
+
+/* Outgoing bubble (right) — green like Telegram */
+.bubble-sent {
+  background: #dcf8c6;
+  border-radius: 14px 14px 4px 14px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: monospace;
+  color: #111;
+  max-width: 75%;
+  word-break: break-all;
+}
+
+/* Callback answer bubble (left) — smaller, italic */
+.bubble-callback {
+  background: #e9e9eb;
+  border-radius: 14px 14px 14px 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #333;
+  max-width: 75%;
+  font-style: italic;
+}
+
+/* Error shown as centred note between bubbles */
+.chat-error {
+  font-size: 12px;
+  color: #e63946;
+  text-align: center;
+  padding: 2px 0;
+}
+
+/* Incoming message bubble (left) */
 .tg-bubble {
   display: inline-block;
   background: #e9e9eb;
-  border-radius: 14px;
+  border-radius: 14px 14px 14px 4px;
   overflow: hidden;
-  max-width: 320px;
-  min-width: 100px;
+  max-width: 300px;
+  min-width: 80px;
 }
 .tg-bubble-img {
   width: 100%;
@@ -317,7 +377,16 @@ function fmtDate(iso: string) {
 .tg-bubble-text code { background: #d4d4d6; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
 .tg-bubble-text pre { background: #d4d4d6; padding: 8px; border-radius: 4px; overflow-x: auto; }
 
-/* Telegram-style inline keyboard */
+/* Inline keyboard sits below the incoming bubble */
+.tg-keyboard {
+  margin-top: 4px;
+  max-width: 300px;
+}
+.tg-keyboard-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
 .tg-btn {
   flex: 1;
   font-size: 12px;

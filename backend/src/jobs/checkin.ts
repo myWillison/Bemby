@@ -1,17 +1,22 @@
 import { TelegramClient, Api, Logger } from 'telegram';
 import { LogLevel } from 'telegram/extensions/Logger';
 import { StringSession } from 'telegram/sessions';
-import { NewMessage, NewMessageEvent } from 'telegram/events';
+import { NewMessage, NewMessageEvent, Raw } from 'telegram/events';
 
 export type CheckinAttemptLog = {
   attempt: number;
   commandSent: string;
   hasMedia: boolean;
   commandResponseHtml: string;
-  commandResponseImage?: string; // base64 data URL for photo messages
-  availableButtons: string[][];  // button rows matching Telegram keyboard layout
+  commandResponseImage?: string;
+  availableButtons: string[][];
   buttonClicked?: string;
   callbackAnswer?: string;
+  // Bot's follow-up message after the button click
+  buttonResponseHtml?: string;
+  buttonResponseHasMedia?: boolean;
+  buttonResponseImage?: string;
+  buttonResponseButtons?: string[][];
   error?: string;
 };
 
@@ -19,6 +24,14 @@ export class CheckinError extends Error {
   constructor(message: string, public readonly log: CheckinAttemptLog) {
     super(message);
     this.name = 'CheckinError';
+  }
+}
+
+// Carries partial messages when timeout fires before a buttons-message arrives
+class BotReplyTimeoutError extends Error {
+  constructor(ms: number, public readonly partial: Api.Message[]) {
+    super(`Timed out after ${ms}ms waiting for bot reply`);
+    this.name = 'BotReplyTimeoutError';
   }
 }
 
@@ -60,10 +73,13 @@ function messageToHtml(text: string, entities?: Api.TypeMessageEntity[]): string
       const url = escapeHtml((e as Api.MessageEntityTextUrl).url ?? '');
       ins.push({ pos: e.offset, html: `<a href="${url}" target="_blank" rel="noopener">`, isClose: false });
       ins.push({ pos: end, html: '</a>', isClose: true });
+    } else if (e instanceof Api.MessageEntityBotCommand) {
+      ins.push({ pos: e.offset, html: '<span style="color:#2563eb">', isClose: false });
+      ins.push({ pos: end, html: '</span>', isClose: true });
     }
   }
 
-  // Sort: by position; close tags before open tags at the same position (correct nesting)
+  // Sort: by position; close tags before open tags at same position (correct nesting)
   ins.sort((a, b) => a.pos - b.pos || (a.isClose ? -1 : 1) - (b.isClose ? -1 : 1));
 
   let result = '';
@@ -77,14 +93,87 @@ function messageToHtml(text: string, entities?: Api.TypeMessageEntity[]): string
   return result.replace(/\n/g, '<br>');
 }
 
+// Renders a Telegram web page preview as inline HTML (inline styles required for v-html)
+function webpageToHtml(wp: Api.WebPage): string {
+  const site = escapeHtml(wp.siteName || wp.displayUrl || '');
+  const title = escapeHtml(wp.title ?? '');
+  const desc = escapeHtml(wp.description ?? '');
+  let html = '<div style="border-left:3px solid #4a9eff;padding:3px 0 3px 8px;margin-top:6px;font-size:12px;line-height:1.4">';
+  if (site) html += `<div style="color:#4a9eff;font-weight:500">${site}</div>`;
+  if (title) html += `<div style="font-weight:600;color:#111">${title}</div>`;
+  if (desc) html += `<div style="color:#555;margin-top:1px">${desc}</div>`;
+  html += '</div>';
+  return html;
+}
+
+type ParsedMessages = {
+  html: string;
+  hasMedia: boolean;
+  image?: string;
+  buttons: string[][];
+};
+
+// Extracts display data from a set of bot messages
+async function parseMessages(
+  messages: Api.Message[],
+  client: TelegramClient,
+  signal?: AbortSignal,
+): Promise<ParsedMessages> {
+  const hasMedia = messages.some(
+    m => m.media instanceof Api.MessageMediaPhoto || m.media instanceof Api.MessageMediaDocument,
+  );
+
+  const htmlParts: string[] = [];
+  for (const m of messages) {
+    const textHtml = messageToHtml(m.message, m.entities as Api.TypeMessageEntity[] | undefined);
+    let msgHtml = textHtml;
+    if (m.media instanceof Api.MessageMediaWebPage && m.media.webpage instanceof Api.WebPage) {
+      msgHtml += webpageToHtml(m.media.webpage);
+    }
+    if (msgHtml.trim()) htmlParts.push(msgHtml);
+  }
+  const html = htmlParts.join('<hr style="margin:8px 0;border:none;border-top:1px solid #d0d0d0">');
+
+  const buttons: string[][] = [];
+  const buttonsMsg = [...messages].reverse().find(m => m.buttons);
+  if (buttonsMsg) {
+    for (const row of (buttonsMsg as any).buttons ?? []) {
+      const rowTexts = (row as any[]).map((btn: any) => btn.text as string);
+      if (rowTexts.length) buttons.push(rowTexts);
+    }
+  }
+
+  let image: string | undefined;
+  const mediaMsg = messages.find(m => m.media instanceof Api.MessageMediaPhoto);
+  if (mediaMsg?.media instanceof Api.MessageMediaPhoto && !signal?.aborted) {
+    try {
+      const photo = mediaMsg.media.photo;
+      if (photo instanceof Api.Photo) {
+        const mSize = photo.sizes.find(
+          (s): s is Api.PhotoSize => s instanceof Api.PhotoSize && s.type === 'm'
+        ) ?? photo.sizes[1] ?? photo.sizes[0];
+        if (mSize) {
+          const bytes = await client.downloadMedia(mediaMsg, { thumb: mSize }) as Buffer | undefined;
+          if (bytes) image = `data:image/jpeg;base64,${bytes.toString('base64')}`;
+        }
+      }
+    } catch { /* skip image on error */ }
+  }
+
+  return { html, hasMedia, image, buttons };
+}
+
+// Collects ALL bot messages; resolves when one has buttons, times out otherwise
 function waitForBotReply(
   client: TelegramClient,
   botUsername: string,
   timeoutMs: number,
   signal?: AbortSignal,
-): Promise<Api.Message> {
+): Promise<Api.Message[]> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(new Error('Job cancelled')); return; }
+
+    const collected: Api.Message[] = [];
 
     const cleanup = () => {
       clearTimeout(timer);
@@ -94,19 +183,55 @@ function waitForBotReply(
 
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error(`Timed out after ${timeoutMs}ms waiting for bot reply`));
+      reject(new BotReplyTimeoutError(timeoutMs, collected));
     }, timeoutMs);
 
     const onAbort = () => { cleanup(); reject(new Error('Job cancelled')); };
     signal?.addEventListener('abort', onAbort, { once: true });
 
     const handler = async (event: NewMessageEvent) => {
-      if (!event.message.buttons) return;
-      cleanup();
-      resolve(event.message as Api.Message);
+      const msg = event.message as Api.Message;
+      collected.push(msg);
+      if (msg.buttons) { cleanup(); resolve(collected); }
     };
 
     client.addEventHandler(handler, new NewMessage({ fromUsers: [botUsername] }));
+  });
+}
+
+// Watches for an in-place edit of a specific message (bot edits the original reply).
+// Uses raw Telegram updates since GramJS has no dedicated EditedMessage event.
+// Never rejects -- resolves null on timeout or abort.
+function waitForBotMessageEdit(
+  client: TelegramClient,
+  originalMsgId: number,
+  maxMs: number,
+  signal?: AbortSignal,
+): Promise<Api.Message | null> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) { resolve(null); return; }
+
+    const finish = (msg: Api.Message | null) => {
+      clearTimeout(timer);
+      client.removeEventHandler(handler, new Raw({}));
+      signal?.removeEventListener('abort', onAbort);
+      resolve(msg);
+    };
+
+    const timer = setTimeout(() => finish(null), maxMs);
+    const onAbort = () => finish(null);
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    const handler = async (update: any) => {
+      const isEdit =
+        update.className === 'UpdateEditMessage' ||
+        update.className === 'UpdateEditChannelMessage';
+      if (isEdit && (update.message as Api.Message)?.id === originalMsgId) {
+        finish(update.message as Api.Message);
+      }
+    };
+
+    client.addEventHandler(handler, new Raw({}));
   });
 }
 
@@ -121,7 +246,10 @@ export async function runCheckin(
   attempt = 1,
   signal?: AbortSignal,
 ): Promise<CheckinAttemptLog> {
-  const log: CheckinAttemptLog = { attempt, commandSent: startCommand, hasMedia: false, commandResponseHtml: '', availableButtons: [] as string[][] };
+  const log: CheckinAttemptLog = {
+    attempt, commandSent: startCommand, hasMedia: false,
+    commandResponseHtml: '', availableButtons: [] as string[][],
+  };
 
   const client = new TelegramClient(new StringSession(sessionString), apiId, apiHash, {
     connectionRetries: 5,
@@ -135,49 +263,61 @@ export async function runCheckin(
     if (signal?.aborted) throw new Error('Job cancelled');
     const replyPromise = waitForBotReply(client, botUsername, replyTimeoutMs, signal);
     await client.sendMessage(botUsername, { message: startCommand });
-    const msg = await replyPromise;
 
-    log.hasMedia = msg.media != null;
-    log.commandResponseHtml = messageToHtml(msg.message, msg.entities as Api.TypeMessageEntity[] | undefined);
-
-    // Collect button rows preserving Telegram keyboard layout
-    for (const row of (msg as any).buttons ?? []) {
-      const rowTexts = (row as any[]).map((btn: any) => btn.text as string);
-      if (rowTexts.length) log.availableButtons.push(rowTexts);
+    let messages: Api.Message[];
+    try {
+      messages = await replyPromise;
+    } catch (err) {
+      if (err instanceof BotReplyTimeoutError && err.partial.length > 0) {
+        const parsed = await parseMessages(err.partial, client, signal);
+        log.hasMedia = parsed.hasMedia;
+        log.commandResponseHtml = parsed.html;
+        log.commandResponseImage = parsed.image;
+        log.availableButtons = parsed.buttons;
+      }
+      throw err;
     }
 
-    // Download photo thumbnail for display (non-critical)
-    if (msg.media instanceof Api.MessageMediaPhoto && !signal?.aborted) {
-      try {
-        const photo = msg.media.photo;
-        if (photo instanceof Api.Photo) {
-          const mSize = photo.sizes.find(
-            (s): s is Api.PhotoSize => s instanceof Api.PhotoSize && s.type === 'm'
-          ) ?? photo.sizes[1] ?? photo.sizes[0];
-          if (mSize) {
-            const bytes = await client.downloadMedia(msg, { thumb: mSize }) as Buffer | undefined;
-            if (bytes) log.commandResponseImage = `data:image/jpeg;base64,${bytes.toString('base64')}`;
-          }
-        }
-      } catch { /* skip image on error */ }
-    }
+    const parsed = await parseMessages(messages, client, signal);
+    log.hasMedia = parsed.hasMedia;
+    log.commandResponseHtml = parsed.html;
+    log.commandResponseImage = parsed.image;
+    log.availableButtons = parsed.buttons;
+
+    const buttonsMsg = [...messages].reverse().find(m => m.buttons);
+    if (!buttonsMsg) throw new Error('No message with buttons received');
 
     if (signal?.aborted) throw new Error('Job cancelled');
     const peer = await client.getInputEntity(botUsername);
     let clicked = false;
 
-    for (const row of (msg as any).buttons ?? []) {
+    for (const row of (buttonsMsg as any).buttons ?? []) {
       for (const btn of row) {
         if (btn.text.includes(checkinButton)) {
+          // Start watching for an edit BEFORE invoking to avoid a race condition
+          const editPromise = waitForBotMessageEdit(client, buttonsMsg.id, 10_000, signal);
+
           const callbackData = (btn.button as Api.KeyboardButtonCallback).data;
           const answer = await client.invoke(new Api.messages.GetBotCallbackAnswer({
             peer,
-            msgId: msg.id,
+            msgId: buttonsMsg.id,
             data: callbackData,
           })) as Api.messages.BotCallbackAnswer;
           log.buttonClicked = btn.text;
           if (answer.message) log.callbackAnswer = answer.message;
           clicked = true;
+
+          // Wait for the bot to edit the original message in place
+          const editedMsg = await editPromise;
+          if (editedMsg && !signal?.aborted) {
+            const bp = await parseMessages([editedMsg], client, signal);
+            if (bp.html || bp.hasMedia) {
+              log.buttonResponseHtml = bp.html || undefined;
+              log.buttonResponseHasMedia = bp.hasMedia || undefined;
+              log.buttonResponseImage = bp.image;
+              log.buttonResponseButtons = bp.buttons.length ? bp.buttons : undefined;
+            }
+          }
           break;
         }
       }
