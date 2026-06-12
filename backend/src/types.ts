@@ -38,6 +38,21 @@ export type EmbywatchConfig = {
   password: string;
   playDuration?: number;
   userAgent?: string;
+  /** Mark the episode as watched after playback completes. Defaults to true. */
+  markWatched?: boolean;
+};
+
+export type EmbywatchLog = {
+  itemType: string;
+  title: string;
+  seriesName?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  runtimeSeconds: number;
+  startSeconds: number;
+  endSeconds: number;
+  watchedSeconds: number;
+  markedWatched: boolean;
 };
 
 export type JobLog = {

@@ -1,6 +1,8 @@
-import type { Job, TgAccount, EmbywatchConfig } from '../types';
+import type { Job, TgAccount, EmbywatchConfig, EmbywatchLog } from '../types';
 import { runCheckin, CheckinError, type CheckinAttemptLog } from './checkin';
 import { runEmbywatch } from './embywatch';
+
+export type JobDetailLog = CheckinAttemptLog | EmbywatchLog;
 
 const RETRY_DELAY_MS = 5_000;
 
@@ -15,7 +17,7 @@ function delayAbortable(ms: number, signal: AbortSignal): Promise<void> {
 export async function runJob(
   job: Job,
   account: TgAccount | null,
-  attemptLogs?: CheckinAttemptLog[],
+  detailLogs?: JobDetailLog[],
   signal?: AbortSignal,
 ): Promise<void> {
   let lastError: unknown;
@@ -31,7 +33,7 @@ export async function runJob(
             account.apiId, account.apiHash, account.sessionString,
             job.botUsername, job.replyTimeoutMs, job.startCommand, job.checkinButton, attempt, signal,
           );
-          attemptLogs?.push(log);
+          detailLogs?.push(log);
           break;
         }
         case 'embywatch': {
@@ -39,7 +41,8 @@ export async function runJob(
           // Migrate legacy double-encoded records
           if (typeof config === 'string') config = JSON.parse(config) as EmbywatchConfig;
           if (!config.username || !config.password) throw new Error('Emby username and password are required');
-          await runEmbywatch(job.botUsername, config);
+          const log = await runEmbywatch(job.botUsername, config);
+          detailLogs?.push(log);
           break;
         }
         default:
@@ -47,7 +50,7 @@ export async function runJob(
       }
       return;
     } catch (err) {
-      if (err instanceof CheckinError) attemptLogs?.push(err.log);
+      if (err instanceof CheckinError) detailLogs?.push(err.log);
       lastError = err;
       console.error(`[runner] Job "${job.name}" attempt ${attempt}/${job.retryMax} failed:`, err);
       if (attempt < job.retryMax && signal) {

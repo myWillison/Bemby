@@ -39,6 +39,7 @@ export type EmbywatchConfig = {
   password: string;
   playDuration?: number;
   userAgent?: string;
+  markWatched?: boolean;
 };
 
 export type Job = {
@@ -59,6 +60,19 @@ export type Job = {
   config: string | null;
   startCommand: string;
   checkinButton: string;
+};
+
+export type EmbywatchLog = {
+  itemType: string;
+  title: string;
+  seriesName?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  runtimeSeconds: number;
+  startSeconds: number;
+  endSeconds: number;
+  watchedSeconds: number;
+  markedWatched: boolean;
 };
 
 export type CheckinAttemptLog = {
@@ -87,7 +101,7 @@ export type Log = {
   ranAt: string;
   status: 'success' | 'failed' | 'running';
   message: string | null;
-  detail?: CheckinAttemptLog[] | null;
+  detail?: CheckinAttemptLog[] | EmbywatchLog[] | null;
 };
 
 export type ScheduleStatus = {

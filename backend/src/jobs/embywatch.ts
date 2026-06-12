@@ -1,5 +1,5 @@
 import { db } from '../db/database';
-import type { EmbywatchConfig } from '../types';
+import type { EmbywatchConfig, EmbywatchLog } from '../types';
 
 const DEFAULT_UA = 'SenPlayer/6.1.0 CFNetwork/1490.0.4 Darwin/23.2.0';
 const PROGRESS_INTERVAL_S = 30;
@@ -43,7 +43,7 @@ async function embyRequest<T = any>(
   return text ? JSON.parse(text) : (null as T);
 }
 
-export async function runEmbywatch(serverUrl: string, config: EmbywatchConfig): Promise<void> {
+export async function runEmbywatch(serverUrl: string, config: EmbywatchConfig): Promise<EmbywatchLog> {
   const ua = config.userAgent ?? getSetting('default_ua') ?? DEFAULT_UA;
   const playDuration = config.playDuration ?? Number(getSetting('default_play_duration') ?? 300);
   const deviceName = getSetting('default_device_name') ?? 'Yamby';
@@ -60,10 +60,10 @@ export async function runEmbywatch(serverUrl: string, config: EmbywatchConfig): 
   const userId: string = auth.User.Id;
   console.log(`[embywatch] Authenticated as "${auth.User.Name}" on ${serverUrl}`);
 
-  // 2. Pick a random video
+  // 2. Pick a random video (include RunTimeTicks in fields)
   const items = await embyRequest<any>(
     serverUrl,
-    `/Users/${userId}/Items?SortBy=Random&Limit=1&IncludeItemTypes=Episode,Movie&Recursive=true&Fields=MediaSources`,
+    `/Users/${userId}/Items?SortBy=Random&Limit=1&IncludeItemTypes=Episode,Movie&Recursive=true&Fields=MediaSources,RunTimeTicks`,
     { ua, token, deviceName }
   );
 
@@ -74,9 +74,23 @@ export async function runEmbywatch(serverUrl: string, config: EmbywatchConfig): 
   const mediaSourceId: string = item.MediaSources?.[0]?.Id ?? itemId;
   const playSessionId = `bemby-${Date.now()}`;
 
-  console.log(`[embywatch] Watching "${item.Name}" (${item.Type}) for ${playDuration}s`);
+  // 3. Calculate start position: random 5-10% into the episode
+  const runtimeSeconds = item.RunTimeTicks ? Math.floor(item.RunTimeTicks / TICKS_PER_SECOND) : 0;
+  const startPct = 0.05 + Math.random() * 0.05;
+  const startSeconds = runtimeSeconds > 0 ? Math.floor(runtimeSeconds * startPct) : 0;
+  const startTicks = startSeconds * TICKS_PER_SECOND;
 
-  // 3. Report playback started
+  // 4. Actual watch duration: playDuration + 0-10% random extra
+  const actualDuration = Math.floor(playDuration * (1 + Math.random() * 0.10));
+  // Cap so we don't overshoot the end of the episode
+  const maxWatchable = runtimeSeconds > 0 ? Math.max(0, Math.floor(runtimeSeconds * 0.97) - startSeconds) : Infinity;
+  const watchDuration = maxWatchable < Infinity ? Math.min(actualDuration, maxWatchable) : actualDuration;
+  const endSeconds = startSeconds + watchDuration;
+  const endTicks = endSeconds * TICKS_PER_SECOND;
+
+  console.log(`[embywatch] Watching "${item.Name}" (${item.Type}) from ${startSeconds}s, duration ${watchDuration}s`);
+
+  // 5. Report playback started (from the calculated start position)
   await embyRequest(serverUrl, '/Sessions/Playing', {
     method: 'POST',
     ua,
@@ -86,16 +100,16 @@ export async function runEmbywatch(serverUrl: string, config: EmbywatchConfig): 
       ItemId: itemId,
       MediaSourceId: mediaSourceId,
       PlaySessionId: playSessionId,
-      PositionTicks: 0,
+      PositionTicks: startTicks,
       IsPaused: false,
       CanSeek: true,
     },
   });
 
-  // 4. Send progress every PROGRESS_INTERVAL_S seconds
+  // 6. Send progress every PROGRESS_INTERVAL_S seconds, offset from start position
   let elapsed = 0;
-  while (elapsed < playDuration) {
-    const wait = Math.min(PROGRESS_INTERVAL_S, playDuration - elapsed);
+  while (elapsed < watchDuration) {
+    const wait = Math.min(PROGRESS_INTERVAL_S, watchDuration - elapsed);
     await new Promise(r => setTimeout(r, wait * 1000));
     elapsed += wait;
 
@@ -108,13 +122,13 @@ export async function runEmbywatch(serverUrl: string, config: EmbywatchConfig): 
         ItemId: itemId,
         MediaSourceId: mediaSourceId,
         PlaySessionId: playSessionId,
-        PositionTicks: elapsed * TICKS_PER_SECOND,
+        PositionTicks: startTicks + elapsed * TICKS_PER_SECOND,
         IsPaused: false,
       },
     });
   }
 
-  // 5. Report stopped
+  // 7. Report stopped at the final position
   await embyRequest(serverUrl, '/Sessions/Playing/Stopped', {
     method: 'POST',
     ua,
@@ -124,9 +138,38 @@ export async function runEmbywatch(serverUrl: string, config: EmbywatchConfig): 
       ItemId: itemId,
       MediaSourceId: mediaSourceId,
       PlaySessionId: playSessionId,
-      PositionTicks: playDuration * TICKS_PER_SECOND,
+      PositionTicks: endTicks,
     },
   });
 
-  console.log(`[embywatch] Session complete for "${item.Name}"`);
+  // 8. Optionally mark the item as watched (enabled by default)
+  let markedWatched = false;
+  if (config.markWatched !== false) {
+    try {
+      await embyRequest(serverUrl, `/Users/${userId}/PlayedItems/${itemId}`, {
+        method: 'POST',
+        ua,
+        token,
+        deviceName,
+      });
+      markedWatched = true;
+    } catch (e) {
+      console.warn('[embywatch] Failed to mark item as watched:', e);
+    }
+  }
+
+  console.log(`[embywatch] Session complete for "${item.Name}" — marked watched: ${markedWatched}`);
+
+  return {
+    itemType: item.Type ?? 'Unknown',
+    title: item.Name ?? 'Unknown',
+    seriesName: item.SeriesName,
+    seasonNumber: item.ParentIndexNumber,
+    episodeNumber: item.IndexNumber,
+    runtimeSeconds,
+    startSeconds,
+    endSeconds,
+    watchedSeconds: watchDuration,
+    markedWatched,
+  };
 }

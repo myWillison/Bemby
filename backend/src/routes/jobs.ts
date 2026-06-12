@@ -1,9 +1,8 @@
 import { Router } from 'express';
 import { db } from '../db/database';
-import { runJob } from '../jobs/runner';
+import { runJob, type JobDetailLog } from '../jobs/runner';
 import { refreshScheduler } from '../scheduler';
 import type { Job, TgAccount } from '../types';
-import type { CheckinAttemptLog } from '../jobs/checkin';
 import { registerJob, unregisterJob } from '../jobs/cancellation';
 
 const router = Router();
@@ -185,16 +184,16 @@ router.post('/:id/run', async (req, res) => {
 
   res.json({ message: 'Job triggered', logId });
 
-  const attemptLogs: CheckinAttemptLog[] = [];
+  const detailLogs: JobDetailLog[] = [];
   const signal = registerJob(Number(logId));
-  runJob(job, account, attemptLogs, signal)
+  runJob(job, account, detailLogs, signal)
     .then(() => {
-      const detail = attemptLogs.length ? JSON.stringify(attemptLogs) : null;
+      const detail = detailLogs.length ? JSON.stringify(detailLogs) : null;
       db.prepare("UPDATE job_logs SET status = 'success', message = 'Completed', detail = ? WHERE id = ?").run(detail, logId);
     })
     .catch((err: Error) => {
       const isCancelled = err.message === 'Job cancelled';
-      const detail = attemptLogs.length ? JSON.stringify(attemptLogs) : null;
+      const detail = detailLogs.length ? JSON.stringify(detailLogs) : null;
       db.prepare("UPDATE job_logs SET status = 'failed', message = ?, detail = ? WHERE id = ?")
         .run(isCancelled ? 'Cancelled' : err.message, detail, logId);
     })

@@ -96,7 +96,9 @@ try {
         retry_max             INTEGER NOT NULL DEFAULT 5,
         enabled               INTEGER NOT NULL DEFAULT 1,
         created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
-        config                TEXT
+        config                TEXT,
+        start_command         TEXT    NOT NULL DEFAULT '/start',
+        checkin_button        TEXT    NOT NULL DEFAULT '签到'
       );
       INSERT INTO jobs_v2 SELECT * FROM jobs;
       DROP TABLE jobs;

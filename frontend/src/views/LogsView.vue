@@ -29,14 +29,14 @@
             </tr>
             <template v-for="l in logs" :key="l.id">
               <tr
-                :style="l.jobType === 'checkin' ? 'cursor:pointer;user-select:none' : ''"
+                style="cursor:pointer;user-select:none"
                 :class="expandedId === l.id ? 'row-expanded' : ''"
-                @click="l.jobType === 'checkin' ? toggleDetail(l) : undefined"
+                @click="toggleDetail(l)"
               >
                 <td style="white-space:nowrap">{{ fmtDate(l.ranAt) }}</td>
                 <td>
                   {{ l.jobName ?? l.jobId }}
-                  <span v-if="l.jobType === 'checkin'" style="margin-left:4px;font-size:11px;color:#aaa">▾</span>
+                  <span style="margin-left:4px;font-size:11px;color:#aaa">▾</span>
                 </td>
                 <td>{{ l.accountName ?? '—' }}</td>
                 <td><span :class="statusBadge(l.status)">{{ t(`logs.status.${l.status}`) }}</span></td>
@@ -44,7 +44,7 @@
                   <div style="display:flex;align-items:center;gap:8px">
                     <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">{{ l.message ?? '—' }}</span>
                     <button
-                      v-if="l.status === 'running' && l.jobType === 'checkin'"
+                      v-if="l.status === 'running'"
                       class="btn btn-sm btn-danger"
                       style="flex-shrink:0"
                       :disabled="stopping.has(l.id)"
@@ -54,36 +54,30 @@
                 </td>
               </tr>
 
-              <!-- Detail panel — only for checkin jobs -->
+              <!-- Detail panel — checkin jobs: chat-style attempt log -->
               <tr v-if="l.jobType === 'checkin' && expandedId === l.id">
                 <td colspan="5" style="padding:0;background:#f8f9fa;border-top:none">
                   <div style="padding:16px 20px">
                     <div v-if="detailLoading" style="color:#888;font-size:13px">
                       {{ t('logs.detail.loading') }}
                     </div>
-                    <div v-else-if="!expandedDetail?.length" style="color:#888;font-size:13px">
+                    <div v-else-if="!checkinDetail?.length" style="color:#888;font-size:13px">
                       {{ t('logs.detail.noDetail') }}
                     </div>
                     <div v-else>
                       <div
-                        v-for="a in expandedDetail"
+                        v-for="a in checkinDetail"
                         :key="a.attempt"
-                        :style="expandedDetail.length > 1 ? 'margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #e5e7eb' : ''"
+                        :style="checkinDetail.length > 1 ? 'margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #e5e7eb' : ''"
                       >
-                        <!-- Attempt header — only shown when there were retries -->
-                        <div v-if="expandedDetail.length > 1" style="font-size:11px;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:0.05em;text-align:center;margin-bottom:10px">
+                        <div v-if="checkinDetail.length > 1" style="font-size:11px;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:0.05em;text-align:center;margin-bottom:10px">
                           {{ t('logs.detail.attempt').replace('{n}', String(a.attempt)) }}
                         </div>
-
-                        <!-- Chat-style sent / received layout -->
                         <div class="chat-bg">
                         <div class="chat-log">
-                          <!-- Sent: command (right) -->
                           <div class="chat-row-sent">
                             <div class="bubble-sent">{{ a.commandSent }}</div>
                           </div>
-
-                          <!-- Received: bot response bubble + keyboard (left) -->
                           <div v-if="a.commandResponseHtml || a.hasMedia" class="chat-row-recv">
                             <div>
                               <div class="tg-bubble">
@@ -98,16 +92,12 @@
                               </div>
                             </div>
                           </div>
-
-                          <!-- Sent: which button was clicked (right) -->
                           <div v-if="a.buttonClicked" class="chat-row-sent">
                             <div>
                               <div class="bubble-sent">{{ a.buttonClicked }}</div>
                               <div v-if="a.aiDurationMs != null" class="ai-badge">AI · {{ a.aiDurationMs }}ms</div>
                             </div>
                           </div>
-
-                          <!-- Received: bot's follow-up message after button click -->
                           <div v-if="a.buttonResponseHtml || a.buttonResponseHasMedia" class="chat-row-recv">
                             <div>
                               <div class="tg-bubble">
@@ -122,15 +112,55 @@
                               </div>
                             </div>
                           </div>
-
-                          <!-- Received: callback answer toast as a small bubble -->
                           <div v-if="a.callbackAnswer" class="chat-row-recv">
                             <div class="bubble-callback">{{ a.callbackAnswer }}</div>
                           </div>
-
-                          <!-- Error shown centred between bubbles -->
                           <div v-if="a.error" class="chat-error">{{ a.error }}</div>
                         </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Detail panel — embywatch jobs: playback summary -->
+              <tr v-if="l.jobType === 'embywatch' && expandedId === l.id">
+                <td colspan="5" style="padding:0;background:#f8f9fa;border-top:none">
+                  <div style="padding:16px 20px">
+                    <div v-if="detailLoading" style="color:#888;font-size:13px">{{ t('logs.detail.loading') }}</div>
+                    <div v-else-if="!embywatchDetail" style="color:#888;font-size:13px">{{ t('logs.detail.noDetail') }}</div>
+                    <div v-else class="emby-detail">
+                      <div class="emby-title">
+                        <template v-if="embywatchDetail.seriesName">{{ embywatchDetail.seriesName }} — {{ embywatchDetail.title }}</template>
+                        <template v-else>{{ embywatchDetail.title }}</template>
+                      </div>
+                      <div v-if="embywatchDetail.seasonNumber != null" class="emby-episode-label">
+                        S{{ String(embywatchDetail.seasonNumber).padStart(2, '0') }}E{{ String(embywatchDetail.episodeNumber ?? 0).padStart(2, '0') }}
+                        &nbsp;·&nbsp;{{ embywatchDetail.itemType }}
+                      </div>
+                      <div class="emby-stats">
+                        <div class="emby-stat">
+                          <div class="emby-stat-label">{{ t('logs.embyDetail.runtime') }}</div>
+                          <div class="emby-stat-value">{{ fmtSeconds(embywatchDetail.runtimeSeconds) }}</div>
+                        </div>
+                        <div class="emby-stat">
+                          <div class="emby-stat-label">{{ t('logs.embyDetail.start') }}</div>
+                          <div class="emby-stat-value">{{ fmtSeconds(embywatchDetail.startSeconds) }}</div>
+                        </div>
+                        <div class="emby-stat">
+                          <div class="emby-stat-label">{{ t('logs.embyDetail.end') }}</div>
+                          <div class="emby-stat-value">{{ fmtSeconds(embywatchDetail.endSeconds) }}</div>
+                        </div>
+                        <div class="emby-stat">
+                          <div class="emby-stat-label">{{ t('logs.embyDetail.watched') }}</div>
+                          <div class="emby-stat-value">{{ fmtSeconds(embywatchDetail.watchedSeconds) }}</div>
+                        </div>
+                        <div class="emby-stat">
+                          <div class="emby-stat-label">{{ t('logs.embyDetail.markedWatched') }}</div>
+                          <div class="emby-stat-value" :style="embywatchDetail.markedWatched ? 'color:#065f46' : 'color:#991b1b'">
+                            {{ embywatchDetail.markedWatched ? t('logs.embyDetail.yes') : t('logs.embyDetail.no') }}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -150,8 +180,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
-import { logsApi, jobsApi, type Log, type Job, type CheckinAttemptLog } from '../api/client';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { logsApi, jobsApi, type Log, type Job, type CheckinAttemptLog, type EmbywatchLog } from '../api/client';
 import { t } from '../i18n';
 
 const logs = ref<Log[]>([]);
@@ -160,11 +190,24 @@ const filterJobId = ref<number | ''>('');
 const offset = ref(0);
 
 const expandedId = ref<number | null>(null);
-const expandedDetail = ref<CheckinAttemptLog[] | null>(null);
+const expandedDetail = ref<CheckinAttemptLog[] | EmbywatchLog[] | null>(null);
 const detailLoading = ref(false);
 const stopping = ref(new Set<number>());
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let detailPollTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Typed accessors for the two detail formats
+const checkinDetail = computed(() => {
+  if (!expandedDetail.value?.length) return null;
+  if ('attempt' in expandedDetail.value[0]) return expandedDetail.value as CheckinAttemptLog[];
+  return null;
+});
+
+const embywatchDetail = computed(() => {
+  if (!expandedDetail.value?.length) return null;
+  if ('itemType' in expandedDetail.value[0]) return expandedDetail.value[0] as EmbywatchLog;
+  return null;
+});
 
 onMounted(async () => {
   jobs.value = await jobsApi.list();
@@ -196,7 +239,6 @@ async function stopJob(log: Log) {
   stopping.value = new Set(stopping.value);
   try {
     await logsApi.cancel(log.id);
-    // Poll until the log is no longer running
     const poll = async () => {
       try {
         const updated = await logsApi.getOne(log.id);
@@ -231,9 +273,8 @@ async function fetchDetail(logId: number) {
   detailLoading.value = true;
   try {
     const full = await logsApi.getOne(logId);
-    if (expandedId.value !== logId) return null; // collapsed while fetching
+    if (expandedId.value !== logId) return null;
     expandedDetail.value = full.detail ?? null;
-    // Keep the row status in sync
     const entry = logs.value.find(l => l.id === logId);
     if (entry) { entry.status = full.status; entry.message = full.message; }
     return full;
@@ -285,11 +326,67 @@ function fmtDate(iso: string) {
     month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
 }
+
+function fmtSeconds(s: number): string {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
 </script>
 
 <style scoped>
 .row-expanded td {
   background: #f0f4ff;
+}
+
+/* Emby detail panel */
+.emby-detail {
+  max-width: 480px;
+}
+
+.emby-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1a1a2e;
+  margin-bottom: 2px;
+}
+
+.emby-episode-label {
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 14px;
+}
+
+.emby-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.emby-stat {
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 10px 16px;
+  min-width: 90px;
+}
+
+.emby-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #888;
+  margin-bottom: 4px;
+}
+
+.emby-stat-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a2e;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Chat background container */
@@ -318,7 +415,7 @@ function fmtDate(iso: string) {
   justify-content: flex-start;
 }
 
-/* Outgoing bubble (right) — green like Telegram */
+/* Outgoing bubble (right) */
 .bubble-sent {
   background: #dcf8c6;
   border-radius: 14px 14px 4px 14px;
@@ -330,7 +427,6 @@ function fmtDate(iso: string) {
   word-break: break-all;
 }
 
-/* AI selection indicator shown below the sent button bubble */
 .ai-badge {
   font-size: 11px;
   color: #6366f1;
@@ -340,7 +436,6 @@ function fmtDate(iso: string) {
   font-weight: 500;
 }
 
-/* Callback answer bubble (left) — smaller, italic */
 .bubble-callback {
   background: #e9e9eb;
   border-radius: 14px 14px 14px 4px;
@@ -351,7 +446,6 @@ function fmtDate(iso: string) {
   font-style: italic;
 }
 
-/* Error shown as centred note between bubbles */
 .chat-error {
   font-size: 12px;
   color: #e63946;
@@ -359,7 +453,6 @@ function fmtDate(iso: string) {
   padding: 2px 0;
 }
 
-/* Incoming message bubble (left) */
 .tg-bubble {
   display: inline-block;
   background: #e9e9eb;
@@ -390,7 +483,6 @@ function fmtDate(iso: string) {
 .tg-bubble-text code { background: #d4d4d6; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
 .tg-bubble-text pre { background: #d4d4d6; padding: 8px; border-radius: 4px; overflow-x: auto; }
 
-/* Inline keyboard sits below the incoming bubble */
 .tg-keyboard {
   margin-top: 4px;
   max-width: 300px;
@@ -416,7 +508,7 @@ function fmtDate(iso: string) {
 .tg-btn-active {
   background: #dcf8c6;
   color: #1a7f37;
-  border-color: #9ad97a;
+  border-color: #9ad79a;
   font-weight: 600;
 }
 </style>

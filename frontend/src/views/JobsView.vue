@@ -152,6 +152,14 @@
             </label>
             <textarea v-model.trim="embyCfg.userAgent" class="form-input" rows="3" placeholder="Leave blank for default" style="resize:vertical" />
           </div>
+          <div class="emby-rules-hint">{{ t('jobs.playbackRulesHint') }}</div>
+          <div class="form-group" style="margin-top:4px">
+            <label class="form-check">
+              <input v-model="embyCfg.markWatched" type="checkbox" />
+              <span>{{ t('jobs.labelMarkWatched') }}</span>
+            </label>
+            <div style="font-size:11px;color:#aaa;margin-top:4px;padding-left:24px">{{ t('jobs.markWatchedHint') }}</div>
+          </div>
         </template>
 
         <div class="form-row">
@@ -248,11 +256,12 @@ const form = reactive({
   retryMax: 5,
   enabled: true,
 });
-const embyCfg = reactive<{ username: string; password: string; playDuration: number | string; userAgent: string }>({
+const embyCfg = reactive<{ username: string; password: string; playDuration: number | string; userAgent: string; markWatched: boolean }>({
   username: '',
   password: '',
   playDuration: '',
   userAgent: '',
+  markWatched: true,
 });
 const embyServer = reactive<{ protocol: 'https' | 'http'; host: string; port: number | '' }>({
   protocol: 'https',
@@ -280,7 +289,7 @@ function setBtnState(val: string) {
 }
 
 function onJobTypeChange() {
-  Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '' });
+  Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '', markWatched: true });
   Object.assign(embyServer, { protocol: 'https', host: '', port: 443 });
   form.botUsername = '';
   form.accountId = form.jobType === 'checkin' ? (accounts.value[0]?.id ?? null) : null;
@@ -327,7 +336,7 @@ function openAdd() {
     retryMax: Number(settings.value?.default_max_retry ?? 5),
     enabled: true,
   });
-  Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '' });
+  Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '', markWatched: true });
   Object.assign(embyServer, { protocol: 'https', host: '', port: 443 });
   setCmdState(''); setBtnState('');
   formError.value = '';
@@ -362,13 +371,14 @@ function openEdit(j: Job) {
           password: c.password ?? '',
           playDuration: c.playDuration ?? '',
           userAgent: c.userAgent ?? '',
+          markWatched: c.markWatched !== false,
         });
-      } catch { Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '' }); }
+      } catch { Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '', markWatched: true }); }
     } else {
-      Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '' });
+      Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '', markWatched: true });
     }
   } else {
-    Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '' });
+    Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '', markWatched: true });
     Object.assign(embyServer, { protocol: 'https', host: '', port: 443 });
   }
   formError.value = '';
@@ -395,6 +405,7 @@ function buildConfig(): EmbywatchConfig | null {
   const cfg: EmbywatchConfig = { username: embyCfg.username, password: embyCfg.password };
   if (embyCfg.playDuration !== '') cfg.playDuration = Number(embyCfg.playDuration as string | number);
   if (embyCfg.userAgent) cfg.userAgent = embyCfg.userAgent;
+  cfg.markWatched = embyCfg.markWatched;
   return cfg;
 }
 

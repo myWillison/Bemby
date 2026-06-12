@@ -1,8 +1,7 @@
 import { DateTime } from 'luxon';
 import { db } from './db/database';
-import { runJob } from './jobs/runner';
+import { runJob, type JobDetailLog } from './jobs/runner';
 import type { Job, TgAccount } from './types';
-import type { CheckinAttemptLog } from './jobs/checkin';
 import { registerJob, unregisterJob } from './jobs/cancellation';
 
 type ScheduleEntry = {
@@ -114,7 +113,7 @@ async function executeJob(job: Job, account: TgAccount | null): Promise<void> {
     "INSERT INTO job_logs (job_id, ran_at, status, message) VALUES (?, ?, 'running', 'Scheduled')"
   ).run(job.id, ranAt);
 
-  const attemptLogs: CheckinAttemptLog[] = [];
+  const detailLogs: JobDetailLog[] = [];
   const signal = registerJob(Number(logId));
   try {
     // Re-fetch session for checkin jobs in case it was updated since scheduling
@@ -123,13 +122,13 @@ async function executeJob(job: Job, account: TgAccount | null): Promise<void> {
       if (fresh?.session_string) account = { ...account, sessionString: fresh.session_string };
     }
 
-    await runJob(job, account, attemptLogs, signal);
-    const detail = attemptLogs.length ? JSON.stringify(attemptLogs) : null;
+    await runJob(job, account, detailLogs, signal);
+    const detail = detailLogs.length ? JSON.stringify(detailLogs) : null;
     db.prepare("UPDATE job_logs SET status = 'success', message = 'Completed', detail = ? WHERE id = ?").run(detail, logId);
     console.log(`[scheduler] "${job.name}" completed`);
   } catch (err: any) {
     const isCancelled = err?.message === 'Job cancelled';
-    const detail = attemptLogs.length ? JSON.stringify(attemptLogs) : null;
+    const detail = detailLogs.length ? JSON.stringify(detailLogs) : null;
     db.prepare("UPDATE job_logs SET status = 'failed', message = ?, detail = ? WHERE id = ?")
       .run(isCancelled ? 'Cancelled' : err.message, detail, logId);
     console.error(`[scheduler] "${job.name}" failed:`, err.message);

@@ -398,6 +398,16 @@ tr:hover td { background: #fafafa; }
 .login-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
 .login-subtitle { color: #888; margin-bottom: 24px; font-size: 13px; }
 
+.emby-rules-hint {
+  background: #f0f4ff;
+  border: 1px solid #d0d9ff;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #3451b2;
+  margin-bottom: 12px;
+}
+
 .captcha-row {
   display: flex;
   align-items: center;
