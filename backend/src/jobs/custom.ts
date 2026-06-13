@@ -195,7 +195,18 @@ export async function runCustom(
             } else if (isAiBtn(action.button)) {
               const buttons: string[][] = allBtnRows.map((row: any[]) => row.map((b: any) => b.text as string));
               const hint = parseAiBtnHint(action.button);
-              targetText = await selectButtonWithAI(buttons, buttonsMsg.message ?? '', undefined, hint);
+              // If buttonsMsg was cached (no fresh parse), parse it now so we have HTML + image for AI
+              if (!step.preClickHtml && !step.preClickImage) {
+                const parsed = await parseMessages([buttonsMsg], client, signal);
+                if (parsed.html) step.preClickHtml = parsed.html;
+                if (parsed.image) step.preClickImage = parsed.image;
+                if (parsed.hasMedia) step.preClickHasMedia = parsed.hasMedia;
+                if (parsed.buttons.length) step.preClickButtons = parsed.buttons;
+              }
+              const aiResult = await selectButtonWithAI(buttons, step.preClickHtml ?? buttonsMsg.message ?? '', step.preClickImage, hint);
+              targetText = aiResult.button;
+              step.aiPrompt = aiResult.prompt;
+              step.aiResponse = aiResult.response;
               useExactMatch = true;
             } else {
               targetText = action.button;

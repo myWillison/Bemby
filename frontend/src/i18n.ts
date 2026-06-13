@@ -114,7 +114,7 @@ const zh = {
       "播放从剧集的随机 5–10% 位置开始，时长为设定时间加上 0–10% 的随机延长。",
     labelCheckinButton: "签到按钮文字",
     checkinButtonHint:
-      "特殊选项：{anyBtn} 随机点击，{aiBtn} AI 智能选择（需配置 QWEN_API_KEY）",
+      "特殊选项：{anyBtn} 随机点击，{aiBtn} AI 智能选择（需配置 AI_API_KEY）",
     aiBtnOption: "{aiBtn} — AI 识别",
     anyBtnOption: "{anyBtn} — 随机",
     noApiKey: "未配置密钥",
@@ -165,6 +165,10 @@ const zh = {
     noLogs: "暂无日志",
     status: { success: "成功", failed: "失败", running: "运行中" },
     jobType: { checkin: "签到", embywatch: "观看", custom: "自定义" },
+    showDevLogs: "显示开发者日志",
+    devLogsLabel: "开发者",
+    aiPrompt: "AI 提示词",
+    aiResponse: "AI 响应",
     detail: {
       attempt: "第 {n} 次尝试",
       commandSent: "发送命令",
@@ -362,7 +366,7 @@ const en: typeof zh = {
       "Playback starts at a random 5–10% into the episode. Duration is the set time plus 0–10% random extra.",
     labelCheckinButton: "Check-in Button Text",
     checkinButtonHint:
-      "Special: {anyBtn} picks random, {aiBtn} uses AI (requires QWEN_API_KEY)",
+      "Special: {anyBtn} picks random, {aiBtn} uses AI (requires AI_API_KEY)",
     aiBtnOption: "{aiBtn} — AI picks",
     anyBtnOption: "{anyBtn} — random",
     noApiKey: "no API key",
@@ -413,6 +417,10 @@ const en: typeof zh = {
     noLogs: "No logs yet",
     status: { success: "Success", failed: "Failed", running: "Running" },
     jobType: { checkin: "Check-in", embywatch: "Emby Watch", custom: "Custom" },
+    showDevLogs: "Show developer logs",
+    devLogsLabel: "DEV",
+    aiPrompt: "AI prompt",
+    aiResponse: "AI response",
     detail: {
       attempt: "Attempt {n}",
       commandSent: "Command sent",

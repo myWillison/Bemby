@@ -2,11 +2,15 @@
   <div>
     <div class="page-header">
       <h2 class="page-title">{{ t('logs.title') }}</h2>
-      <div style="display:flex;gap:10px;align-items:center">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <select v-model="filterJobId" class="form-select" style="width:200px" @change="load">
           <option value="">{{ t('logs.allJobs') }}</option>
           <option v-for="j in jobs" :key="j.id" :value="j.id">{{ j.name }}</option>
         </select>
+        <label class="dev-toggle" :title="t('logs.showDevLogs')">
+          <input type="checkbox" v-model="showDevLogs" />
+          <span class="dev-toggle-label">{{ t('logs.devLogsLabel') }}</span>
+        </label>
         <button class="btn btn-ghost" @click="load">{{ t('common.refresh') }}</button>
       </div>
     </div>
@@ -98,6 +102,17 @@
                               <div v-if="a.aiDurationMs != null" class="ai-badge">AI · {{ a.aiDurationMs }}ms</div>
                             </div>
                           </div>
+                          <template v-if="showDevLogs && a.aiPrompt != null">
+                            <div class="dev-block">
+                              <div class="dev-block-label">{{ t('logs.aiPrompt') }}</div>
+                              <img v-if="a.commandResponseImage" :src="a.commandResponseImage" class="dev-block-img" alt="image sent to AI" />
+                              <pre class="dev-block-pre">{{ a.aiPrompt }}</pre>
+                            </div>
+                            <div class="dev-block">
+                              <div class="dev-block-label">{{ t('logs.aiResponse') }}</div>
+                              <pre class="dev-block-pre">{{ a.aiResponse }}</pre>
+                            </div>
+                          </template>
                           <div v-if="a.buttonResponseHtml || a.buttonResponseHasMedia" class="chat-row-recv">
                             <div>
                               <div class="tg-bubble">
@@ -179,6 +194,17 @@
                           </div>
                         </div>
                         <div v-if="s.error" class="chat-error" style="margin-top:4px">{{ s.error }}</div>
+                        <template v-if="showDevLogs && s.aiPrompt != null">
+                          <div class="dev-block" style="margin-top:8px">
+                            <div class="dev-block-label">{{ t('logs.aiPrompt') }}</div>
+                            <img v-if="s.preClickImage" :src="s.preClickImage" class="dev-block-img" alt="image sent to AI" />
+                            <pre class="dev-block-pre">{{ s.aiPrompt }}</pre>
+                          </div>
+                          <div class="dev-block" style="margin-top:4px">
+                            <div class="dev-block-label">{{ t('logs.aiResponse') }}</div>
+                            <pre class="dev-block-pre">{{ s.aiResponse }}</pre>
+                          </div>
+                        </template>
                       </div>
                     </div>
                   </div>
@@ -248,6 +274,7 @@ import { t, locale } from '../i18n';
 const logs = ref<Log[]>([]);
 const jobs = ref<Job[]>([]);
 const filterJobId = ref<number | ''>('');
+const showDevLogs = ref(false);
 const offset = ref(0);
 
 const expandedId = ref<number | null>(null);
@@ -642,5 +669,66 @@ function fmtSeconds(s: number): string {
   background: #f0f4ff;
   border-radius: 4px;
   padding: 4px 8px;
+}
+
+/* Developer logs toggle */
+.dev-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.dev-toggle-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #6366f1;
+  padding: 2px 7px;
+  border: 1.5px solid #6366f1;
+  border-radius: 4px;
+}
+
+.dev-toggle input[type="checkbox"] {
+  accent-color: #6366f1;
+  width: 14px;
+  height: 14px;
+}
+
+/* AI dev detail blocks */
+.dev-block {
+  margin-top: 6px;
+  background: #1e1e2e;
+  border-radius: 8px;
+  padding: 8px 12px;
+  max-width: 420px;
+}
+
+.dev-block-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6366f1;
+  margin-bottom: 4px;
+}
+
+.dev-block-img {
+  display: block;
+  max-width: 100%;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  opacity: 0.9;
+}
+
+.dev-block-pre {
+  margin: 0;
+  font-size: 11px;
+  color: #cdd6f4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: monospace;
+  line-height: 1.5;
 }
 </style>

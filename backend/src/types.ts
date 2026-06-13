@@ -62,6 +62,8 @@ export type CustomStepLog = {
   result?: string;
   error?: string;
   durationMs?: number;
+  aiPrompt?: string;
+  aiResponse?: string;
 };
 
 export type EmbywatchConfig = {

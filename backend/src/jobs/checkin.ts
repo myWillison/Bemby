@@ -19,6 +19,10 @@ export type CheckinAttemptLog = {
   buttonResponseButtons?: string[][];
   /** Set when {aiBtn} was used; records how long the AI took to pick a button */
   aiDurationMs?: number;
+  /** The exact prompt text sent to the AI */
+  aiPrompt?: string;
+  /** The raw response text returned by the AI */
+  aiResponse?: string;
   error?: string;
 };
 
@@ -82,7 +86,7 @@ export type ParsedMessages = {
   buttons: string[][];
 };
 
-// ── AI button selection via Qwen3-VL ─────────────────────────────────────────
+// ── AI button selection ───────────────────────────────────────────────────────
 
 // Strips HTML tags to plain text for the AI prompt
 function htmlToText(html: string): string {
@@ -105,28 +109,30 @@ export function parseAiBtnHint(val: string): string | undefined {
   return m ? m[1].trim() : undefined;
 }
 
+type AiSelectionResult = { button: string; prompt: string; response: string };
+
 export async function selectButtonWithAI(
   buttons: string[][],
   html: string,
   image: string | undefined,
   hint?: string,
-): Promise<string> {
-  const apiKey = getAiSetting('ai_api_key', 'QWEN_API_KEY', '');
+): Promise<AiSelectionResult> {
+  const apiKey = getAiSetting('ai_api_key', 'AI_API_KEY', '');
   if (!apiKey) throw new Error('{aiBtn} requires an AI API key — configure it in Settings');
 
-  const baseUrl = getAiSetting('ai_base_url', 'QWEN_BASE_URL', 'https://openrouter.ai/api/v1').replace(/\/$/, '');
-  const model = getAiSetting('ai_model', 'QWEN_MODEL', 'nvidia/nemotron-nano-12b-v2-vl:free');
+  const baseUrl = getAiSetting('ai_base_url', 'AI_BASE_URL', 'https://openrouter.ai/api/v1').replace(/\/$/, '');
+  const model = getAiSetting('ai_model', 'AI_MODEL', 'nvidia/nemotron-nano-12b-v2-vl:free');
 
   const flat = buttons.flat();
   const text = htmlToText(html);
-  const task = hint ?? 'complete the daily check-in';
-  const prompt = `A Telegram bot sent a message. Task: "${task}".\n\nMessage text:\n${text}\n\nAvailable inline buttons: ${JSON.stringify(flat)}\n\nWhich button should be clicked to ${task}? Reply with ONLY the exact button text from the list, nothing else.`;
+  const task = hint ?? 'pick a button based on the message content.';
+  const prompt = `Task: "${task}".\n\nThe message content:\n${text}\n\nThe available inline buttons are: ${JSON.stringify(flat)}\n\nWhich button should be clicked to ${task}? If you don't know which button, please pick the most likely one. Reply with ONLY the exact button text from the list, nothing else.`;
 
   const content: object[] = [];
   if (image) content.push({ type: 'image_url', image_url: { url: image } });
   content.push({ type: 'text', text: prompt });
 
-  const AI_TIMEOUT_MS = Number(getAiSetting('ai_timeout_ms', 'QWEN_TIMEOUT_MS', '25000'));
+  const AI_TIMEOUT_MS = Number(getAiSetting('ai_timeout_ms', 'AI_TIMEOUT_MS', '25000'));
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -136,18 +142,18 @@ export async function selectButtonWithAI(
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`Qwen API error ${res.status}: ${body}`);
+    throw new Error(`AI API error ${res.status}: ${body}`);
   }
 
   const data = await res.json() as { choices?: { message?: { content?: string } }[] };
   const picked = data.choices?.[0]?.message?.content?.trim() ?? '';
-  if (!picked) throw new Error('Qwen API returned an empty response');
+  if (!picked) throw new Error('AI API returned an empty response');
 
   // Prefer exact match, then partial
   const exact = flat.find(b => b === picked);
-  if (exact) return exact;
+  if (exact) return { button: exact, prompt, response: picked };
   const partial = flat.find(b => b.includes(picked) || picked.includes(b));
-  if (partial) return partial;
+  if (partial) return { button: partial, prompt, response: picked };
   throw new Error(`AI selected "${picked}" but it does not match any available button: ${JSON.stringify(flat)}`);
 }
 
@@ -446,8 +452,11 @@ export async function runCheckin(
     } else if (isAiBtn(checkinButton)) {
       const aiStart = Date.now();
       const hint = parseAiBtnHint(checkinButton);
-      targetText = await selectButtonWithAI(log.availableButtons, log.commandResponseHtml, log.commandResponseImage, hint);
+      const aiResult = await selectButtonWithAI(log.availableButtons, log.commandResponseHtml, log.commandResponseImage, hint);
+      targetText = aiResult.button;
       log.aiDurationMs = Date.now() - aiStart;
+      log.aiPrompt = aiResult.prompt;
+      log.aiResponse = aiResult.response;
       useExactMatch = true;
     } else {
       targetText = checkinButton;

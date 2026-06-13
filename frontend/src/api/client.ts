@@ -73,6 +73,8 @@ export type CustomStepLog = {
   result?: string;
   error?: string;
   durationMs?: number;
+  aiPrompt?: string;
+  aiResponse?: string;
 };
 
 export type Job = {
@@ -122,6 +124,8 @@ export type CheckinAttemptLog = {
   buttonResponseImage?: string;
   buttonResponseButtons?: string[][];
   aiDurationMs?: number;
+  aiPrompt?: string;
+  aiResponse?: string;
   error?: string;
 };
 
