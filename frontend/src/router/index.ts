@@ -19,6 +19,8 @@ const router = createRouter({
   ],
 });
 
+const LAST_PATH_KEY = 'bemby:lastPath';
+
 router.beforeEach((to, _from, next) => {
   const isPublic = to.meta.public === true;
   const hasToken = Boolean(localStorage.getItem('token'));
@@ -26,9 +28,16 @@ router.beforeEach((to, _from, next) => {
   if (!isPublic && !hasToken) {
     next('/login');
   } else if (to.path === '/login' && hasToken) {
-    next('/accounts');
+    next(localStorage.getItem(LAST_PATH_KEY) ?? '/accounts');
   } else {
     next();
+  }
+});
+
+// Persist last visited non-login path so the user lands back where they left off.
+router.afterEach((to) => {
+  if (!to.meta.public) {
+    localStorage.setItem(LAST_PATH_KEY, to.path);
   }
 });
 

@@ -374,6 +374,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { jobsApi, accountsApi, statusApi, settingsApi, logsApi, type Job, type Account, type ScheduleStatus, type Settings, type EmbywatchConfig, type CustomConfig } from '../api/client';
 import { t, locale } from '../i18n';
+import { usePersistedRef } from '../composables/usePersistedRef';
 
 type CustomActionForm = {
   type: 'send_command' | 'wait_reply' | 'delay' | 'click_button';
@@ -395,9 +396,9 @@ const scheduleStatus = ref<ScheduleStatus[]>([]);
 const settings = ref<Settings | null>(null);
 const running = ref(new Set<number>());
 
-const filterType = ref('');
-const filterAccountId = ref<number | ''>('');
-const filterBotUrl = ref('');
+const filterType = usePersistedRef<string>('bemby:jobs:filterType', '');
+const filterAccountId = usePersistedRef<number | ''>('bemby:jobs:filterAccountId', '');
+const filterBotUrl = usePersistedRef<string>('bemby:jobs:filterBotUrl', '');
 const filterOptions = computed(() => [
   { value: '', label: t('common.all') },
   { value: 'checkin', label: t('logs.jobType.checkin') },
@@ -409,8 +410,8 @@ const botUrlOptions = computed(() => {
   return vals.sort();
 });
 
-const sortKey = ref('');
-const sortDir = ref<'asc' | 'desc'>('asc');
+const sortKey = usePersistedRef<string>('bemby:jobs:sortKey', '');
+const sortDir = usePersistedRef<'asc' | 'desc'>('bemby:jobs:sortDir', 'asc');
 const selectedJobId = ref<number | null>(null);
 
 function setSort(key: string) {

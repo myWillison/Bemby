@@ -291,11 +291,12 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { logsApi, jobsApi, type Log, type Job, type CheckinAttemptLog, type EmbywatchLog, type CustomStepLog } from '../api/client';
 import { t, locale } from '../i18n';
+import { usePersistedRef } from '../composables/usePersistedRef';
 
 const logs = ref<Log[]>([]);
 const jobs = ref<Job[]>([]);
-const filterJobId = ref<number | ''>('');
-const showDevLogs = ref(false);
+const filterJobId = usePersistedRef<number | ''>('bemby:logs:filterJobId', '');
+const showDevLogs = usePersistedRef<boolean>('bemby:logs:showDevLogs', false);
 const offset = ref(0);
 
 const expandedId = ref<number | null>(null);
