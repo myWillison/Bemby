@@ -2,7 +2,7 @@
   <div>
     <div class="page-header">
       <h2 class="page-title">{{ t('accounts.title') }}</h2>
-      <button class="btn btn-primary" @click="openAdd">{{ t('accounts.addBtn') }}</button>
+      <button class="btn btn-primary" @click="openAdd"><i class="fa-solid fa-plus"></i> {{ t('accounts.addBtn') }}</button>
     </div>
 
     <div class="card">
@@ -30,11 +30,12 @@
                 <div class="actions">
                   <button
                     v-if="a.authStatus !== 'authenticated'"
-                    class="btn btn-sm btn-primary"
+                    class="btn btn-sm btn-primary btn-icon"
+                    :title="t('accounts.authenticate')"
                     @click="openAuth(a)"
-                  >{{ t('accounts.authenticate') }}</button>
-                  <button class="btn btn-sm btn-ghost" @click="openEdit(a)">{{ t('common.edit') }}</button>
-                  <button class="btn btn-sm btn-danger" @click="remove(a.id)">{{ t('common.delete') }}</button>
+                  ><i class="fa-solid fa-key"></i></button>
+                  <button class="btn btn-sm btn-ghost btn-icon" :title="t('common.edit')" @click="openEdit(a)"><i class="fa-solid fa-pen"></i></button>
+                  <button class="btn btn-sm btn-danger btn-icon" :title="t('common.delete')" @click="remove(a.id)"><i class="fa-solid fa-trash"></i></button>
                 </div>
               </td>
             </tr>
@@ -68,9 +69,9 @@
           {{ t('accounts.apiHint') }} <a href="https://my.telegram.org/apps" target="_blank">my.telegram.org/apps</a>
         </p>
         <div class="modal-footer">
-          <button class="btn btn-ghost" @click="showForm = false">{{ t('common.cancel') }}</button>
+          <button class="btn btn-ghost" @click="showForm = false"><i class="fa-solid fa-xmark"></i> {{ t('common.cancel') }}</button>
           <button class="btn btn-primary" :disabled="saving" @click="saveAccount">
-            {{ saving ? t('common.saving') : t('common.save') }}
+            <i class="fa-solid fa-floppy-disk"></i> {{ saving ? t('common.saving') : t('common.save') }}
           </button>
         </div>
       </div>
@@ -88,7 +89,7 @@
             {{ t('accounts.authHint') }} <strong>{{ authTarget?.phoneNumber }}</strong>.
           </p>
           <button class="btn btn-primary" :disabled="authBusy" @click="sendCode">
-            {{ authBusy ? t('accounts.sending') : t('accounts.sendCode') }}
+            <i class="fa-solid fa-paper-plane"></i> {{ authBusy ? t('accounts.sending') : t('accounts.sendCode') }}
           </button>
         </div>
 
@@ -99,9 +100,9 @@
             <input v-model.trim="authCode" class="form-input" placeholder="12345" autofocus />
           </div>
           <div class="modal-footer">
-            <button class="btn btn-ghost" @click="closeAuth">{{ t('common.cancel') }}</button>
+            <button class="btn btn-ghost" @click="closeAuth"><i class="fa-solid fa-xmark"></i> {{ t('common.cancel') }}</button>
             <button class="btn btn-primary" :disabled="authBusy" @click="verifyCode">
-              {{ authBusy ? t('accounts.verifying') : t('accounts.verify') }}
+              <i class="fa-solid fa-check"></i> {{ authBusy ? t('accounts.verifying') : t('accounts.verify') }}
             </button>
           </div>
         </div>
@@ -113,9 +114,9 @@
             <input v-model="authPassword" class="form-input" type="password" autofocus />
           </div>
           <div class="modal-footer">
-            <button class="btn btn-ghost" @click="closeAuth">{{ t('common.cancel') }}</button>
+            <button class="btn btn-ghost" @click="closeAuth"><i class="fa-solid fa-xmark"></i> {{ t('common.cancel') }}</button>
             <button class="btn btn-primary" :disabled="authBusy" @click="verify2fa">
-              {{ authBusy ? t('accounts.verifying') : t('accounts.submit') }}
+              <i class="fa-solid fa-check"></i> {{ authBusy ? t('accounts.verifying') : t('accounts.submit') }}
             </button>
           </div>
         </div>

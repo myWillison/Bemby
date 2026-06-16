@@ -55,7 +55,7 @@
             :disabled="saving"
             @click="saveSettings"
           >
-            {{ saving ? t("common.saving") : t("settings.saveBtn") }}
+            <i class="fa-solid fa-floppy-disk"></i> {{ saving ? t("common.saving") : t("settings.saveBtn") }}
           </button>
         </div>
       </div>
@@ -108,7 +108,7 @@
             :disabled="embySaving"
             @click="saveEmby"
           >
-            {{ embySaving ? t("common.saving") : t("settings.saveBtn") }}
+            <i class="fa-solid fa-floppy-disk"></i> {{ embySaving ? t("common.saving") : t("settings.saveBtn") }}
           </button>
         </div>
       </div>
@@ -179,7 +179,7 @@
           </div>
 
           <button class="btn btn-primary" :disabled="aiSaving" @click="saveAi">
-            {{ aiSaving ? t("common.saving") : t("settings.saveBtn") }}
+            <i class="fa-solid fa-floppy-disk"></i> {{ aiSaving ? t("common.saving") : t("settings.saveBtn") }}
           </button>
         </div>
       </div>
@@ -234,7 +234,7 @@
             :disabled="notifySaving"
             @click="saveNotify"
           >
-            {{ notifySaving ? t("common.saving") : t("settings.saveBtn") }}
+            <i class="fa-solid fa-floppy-disk"></i> {{ notifySaving ? t("common.saving") : t("settings.saveBtn") }}
           </button>
         </div>
       </div>
@@ -254,7 +254,7 @@
               {{ t("settings.importExport.exportHint") }}
             </p>
             <button class="btn btn-secondary" @click="doExport">
-              {{ t("settings.importExport.exportBtn") }}
+              <i class="fa-solid fa-file-export"></i> {{ t("settings.importExport.exportBtn") }}
             </button>
           </div>
 
@@ -308,6 +308,7 @@
             :disabled="importing"
             @click="doImport"
           >
+            <i class="fa-solid fa-file-import"></i>
             {{
               importing
                 ? t("settings.importExport.importing")
@@ -370,7 +371,7 @@
             :disabled="credSaving"
             @click="saveCredentials"
           >
-            {{ credSaving ? t("common.saving") : t("settings.updateBtn") }}
+            <i class="fa-solid fa-shield-halved"></i> {{ credSaving ? t("common.saving") : t("settings.updateBtn") }}
           </button>
         </div>
       </div>

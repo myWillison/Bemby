@@ -11,7 +11,7 @@
           <input type="checkbox" v-model="showDevLogs" />
           <span class="dev-toggle-label">{{ t('logs.devLogsLabel') }}</span>
         </label>
-        <button class="btn btn-ghost" @click="load">{{ t('common.refresh') }}</button>
+        <button class="btn btn-ghost" @click="load"><i class="fa-solid fa-rotate"></i> {{ t('common.refresh') }}</button>
       </div>
     </div>
 
@@ -53,7 +53,7 @@
                       style="flex-shrink:0"
                       :disabled="stopping.has(l.id)"
                       @click.stop="stopJob(l)"
-                    >{{ stopping.has(l.id) ? t('common.stopping') : t('common.stop') }}</button>
+                    ><i class="fa-solid fa-stop"></i> {{ stopping.has(l.id) ? t('common.stopping') : t('common.stop') }}</button>
                   </div>
                 </td>
               </tr>
@@ -281,7 +281,7 @@
       </div>
 
       <div v-if="logs.length === 50" style="padding:12px 16px;text-align:center">
-        <button class="btn btn-ghost btn-sm" @click="loadMore">{{ t('common.loadMore') }}</button>
+        <button class="btn btn-ghost btn-sm" @click="loadMore"><i class="fa-solid fa-chevron-down"></i> {{ t('common.loadMore') }}</button>
       </div>
     </div>
   </div>

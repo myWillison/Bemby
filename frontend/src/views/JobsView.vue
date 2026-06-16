@@ -2,7 +2,7 @@
   <div>
     <div class="page-header">
       <h2 class="page-title">{{ t('jobs.title') }}</h2>
-      <button class="btn btn-primary" @click="openAdd">{{ t('jobs.addBtn') }}</button>
+      <button class="btn btn-primary" @click="openAdd"><i class="fa-solid fa-plus"></i> {{ t('jobs.addBtn') }}</button>
     </div>
 
     <!-- Scheduler status -->
@@ -39,20 +39,25 @@
         <table>
           <thead>
             <tr>
-              <th>{{ t('common.name') }}</th>
-              <th>{{ t('jobs.colAccount') }}</th>
-              <th>{{ t('jobs.colType') }}</th>
-              <th>{{ t('jobs.colBotUrl') }}</th>
-              <th>{{ t('jobs.colWindow') }}</th>
-              <th>{{ t('jobs.colEnabled') }}</th>
+              <th class="th-sort" :class="sortKey === 'name' ? 'sort-active' : ''" @click="setSort('name')">{{ t('common.name') }} <span class="sort-icon">{{ sortIcon('name') }}</span></th>
+              <th class="th-sort" :class="sortKey === 'account' ? 'sort-active' : ''" @click="setSort('account')">{{ t('jobs.colAccount') }} <span class="sort-icon">{{ sortIcon('account') }}</span></th>
+              <th class="th-sort" :class="sortKey === 'type' ? 'sort-active' : ''" @click="setSort('type')">{{ t('jobs.colType') }} <span class="sort-icon">{{ sortIcon('type') }}</span></th>
+              <th class="th-sort" :class="sortKey === 'botUrl' ? 'sort-active' : ''" @click="setSort('botUrl')">{{ t('jobs.colBotUrl') }} <span class="sort-icon">{{ sortIcon('botUrl') }}</span></th>
+              <th class="th-sort" :class="sortKey === 'window' ? 'sort-active' : ''" @click="setSort('window')">{{ t('jobs.colWindow') }} <span class="sort-icon">{{ sortIcon('window') }}</span></th>
+              <th class="th-sort" :class="sortKey === 'enabled' ? 'sort-active' : ''" @click="setSort('enabled')">{{ t('jobs.colEnabled') }} <span class="sort-icon">{{ sortIcon('enabled') }}</span></th>
               <th>{{ t('common.actions') }}</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="!filteredJobs.length">
+            <tr v-if="!sortedJobs.length">
               <td colspan="7" class="empty">{{ t('jobs.noJobs') }}</td>
             </tr>
-            <tr v-for="j in filteredJobs" :key="j.id">
+            <tr
+              v-for="j in sortedJobs" :key="j.id"
+              style="cursor:pointer"
+              :class="selectedJobId === j.id ? 'row-selected' : ''"
+              @click="selectedJobId = selectedJobId === j.id ? null : j.id"
+            >
               <td>{{ j.name }}</td>
               <td>{{ j.accountName ?? j.accountId }}</td>
               <td><span :class="jobTypeBadge(j.jobType)">{{ t(`logs.jobType.${j.jobType}`) }}</span></td>
@@ -62,19 +67,19 @@
                 <span
                   :class="j.enabled ? 'badge badge-green' : 'badge badge-grey'"
                   style="cursor:pointer;user-select:none"
-                  @click="toggleEnabled(j)"
+                  @click.stop="toggleEnabled(j)"
                 >
                   {{ j.enabled ? t('common.yes') : t('common.no') }}
                 </span>
               </td>
-              <td>
+              <td @click.stop>
                 <div class="actions">
-                  <button class="btn btn-sm btn-success" :disabled="running.has(j.id)" @click="runNow(j.id)">
-                    {{ running.has(j.id) ? t('common.runBusy') : t('common.run') }}
+                  <button class="btn btn-sm btn-success btn-icon" :disabled="running.has(j.id)" :title="t('common.run')" @click="runNow(j.id)">
+                    <i class="fa-solid fa-play"></i>
                   </button>
-                  <button class="btn btn-sm btn-ghost" @click="openEdit(j)">{{ t('common.edit') }}</button>
-                  <button class="btn btn-sm btn-ghost" @click="openDuplicate(j)">{{ t('common.duplicate') }}</button>
-                  <button class="btn btn-sm btn-danger" @click="remove(j.id)">{{ t('common.delete') }}</button>
+                  <button class="btn btn-sm btn-ghost btn-icon" :title="t('common.edit')" @click="openEdit(j)"><i class="fa-solid fa-pen"></i></button>
+                  <button class="btn btn-sm btn-ghost btn-icon" :title="t('common.duplicate')" @click="openDuplicate(j)"><i class="fa-solid fa-copy"></i></button>
+                  <button class="btn btn-sm btn-danger btn-icon" :title="t('common.delete')" @click="remove(j.id)"><i class="fa-solid fa-trash"></i></button>
                 </div>
               </td>
             </tr>
@@ -226,9 +231,9 @@
                   <option value="delay">{{ t('jobs.custom.actionDelay') }}</option>
                   <option value="click_button">{{ t('jobs.custom.actionClickButton') }}</option>
                 </select>
-                <button type="button" class="btn btn-ghost btn-sm" :disabled="i === 0" @click="moveUp(i)">↑</button>
-                <button type="button" class="btn btn-ghost btn-sm" :disabled="i === customActions.length - 1" @click="moveDown(i)">↓</button>
-                <button type="button" class="btn btn-danger btn-sm" @click="removeAction(i)">×</button>
+                <button type="button" class="btn btn-ghost btn-sm btn-icon" :disabled="i === 0" @click="moveUp(i)"><i class="fa-solid fa-arrow-up"></i></button>
+                <button type="button" class="btn btn-ghost btn-sm btn-icon" :disabled="i === customActions.length - 1" @click="moveDown(i)"><i class="fa-solid fa-arrow-down"></i></button>
+                <button type="button" class="btn btn-danger btn-sm btn-icon" @click="removeAction(i)"><i class="fa-solid fa-xmark"></i></button>
               </div>
 
               <!-- send_command -->
@@ -287,7 +292,7 @@
             </div>
 
             <button type="button" class="btn btn-ghost btn-sm" style="margin-top:8px" @click="addAction">
-              {{ t('jobs.custom.addAction') }}
+              <i class="fa-solid fa-plus"></i> {{ t('jobs.custom.addAction') }}
             </button>
           </div>
         </template>
@@ -355,9 +360,9 @@
 
         </div><!-- end modal-body -->
         <div class="modal-footer">
-          <button class="btn btn-ghost" @click="showForm = false">{{ t('common.cancel') }}</button>
+          <button class="btn btn-ghost" @click="showForm = false"><i class="fa-solid fa-xmark"></i> {{ t('common.cancel') }}</button>
           <button class="btn btn-primary" :disabled="saving" @click="saveJob">
-            {{ saving ? t('common.saving') : t('common.save') }}
+            <i class="fa-solid fa-floppy-disk"></i> {{ saving ? t('common.saving') : t('common.save') }}
           </button>
         </div>
       </div>
@@ -403,13 +408,48 @@ const botUrlOptions = computed(() => {
   const vals = [...new Set(jobs.value.map(j => j.botUsername).filter(Boolean))];
   return vals.sort();
 });
-const filteredJobs = computed(() =>
-  jobs.value.filter(j =>
+
+const sortKey = ref('');
+const sortDir = ref<'asc' | 'desc'>('asc');
+const selectedJobId = ref<number | null>(null);
+
+function setSort(key: string) {
+  if (sortKey.value === key) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortKey.value = key;
+    sortDir.value = 'asc';
+  }
+}
+
+function sortIcon(key: string): string {
+  if (sortKey.value !== key) return '↕';
+  return sortDir.value === 'asc' ? '↑' : '↓';
+}
+
+const sortedJobs = computed(() => {
+  const filtered = jobs.value.filter(j =>
     (!filterType.value || j.jobType === filterType.value) &&
     (filterAccountId.value === '' || j.accountId === filterAccountId.value) &&
     (!filterBotUrl.value || j.botUsername === filterBotUrl.value),
-  ),
-);
+  );
+  if (!sortKey.value) return filtered;
+  return [...filtered].sort((a, b) => {
+    let av: string | number, bv: string | number;
+    switch (sortKey.value) {
+      case 'name':    av = a.name.toLowerCase();                    bv = b.name.toLowerCase(); break;
+      case 'account': av = (a.accountName ?? '').toLowerCase();     bv = (b.accountName ?? '').toLowerCase(); break;
+      case 'type':    av = a.jobType;                               bv = b.jobType; break;
+      case 'botUrl':  av = a.botUsername.toLowerCase();             bv = b.botUsername.toLowerCase(); break;
+      case 'window':  av = a.scheduleWindowStart;                   bv = b.scheduleWindowStart; break;
+      case 'enabled': av = a.enabled ? 0 : 1;                      bv = b.enabled ? 0 : 1; break;
+      default:        return 0;
+    }
+    if (av < bv) return sortDir.value === 'asc' ? -1 : 1;
+    if (av > bv) return sortDir.value === 'asc' ? 1 : -1;
+    return 0;
+  });
+});
 
 function jobTypeBadge(type: string) {
   const map: Record<string, string> = {
@@ -817,5 +857,33 @@ onUnmounted(() => {
 
 .custom-action-params {
   padding-left: 26px;
+}
+
+.th-sort {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.th-sort:hover {
+  background: #f0f4ff;
+}
+
+.th-sort.sort-active {
+  color: #3730a3;
+}
+
+.sort-icon {
+  font-size: 10px;
+  color: #ccc;
+  margin-left: 2px;
+}
+
+.th-sort.sort-active .sort-icon {
+  color: #6366f1;
+}
+
+.row-selected td {
+  background: #eff6ff;
 }
 </style>

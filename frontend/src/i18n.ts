@@ -50,7 +50,7 @@ const zh = {
   },
   accounts: {
     title: "Telegram 账户",
-    addBtn: "+ 添加账户",
+    addBtn: "添加账户",
     colPhone: "手机号",
     colStatus: "状态",
     colAdded: "添加时间",
@@ -87,7 +87,7 @@ const zh = {
   },
   jobs: {
     title: "任务",
-    addBtn: "+ 添加任务",
+    addBtn: "添加任务",
     nextRuns: "下次计划运行",
     colAccount: "账户",
     colType: "类型",
@@ -143,7 +143,7 @@ const zh = {
     },
     custom: {
       actions: "动作链",
-      addAction: "+ 添加动作",
+      addAction: "添加动作",
       noActions: "暂无动作，请添加至少一个。",
       labelTarget: "目标账户/机器人",
       actionSendCommand: "发送命令",
@@ -317,7 +317,7 @@ const en: typeof zh = {
   },
   accounts: {
     title: "Telegram Accounts",
-    addBtn: "+ Add Account",
+    addBtn: "Add Account",
     colPhone: "Phone",
     colStatus: "Status",
     colAdded: "Added",
@@ -354,7 +354,7 @@ const en: typeof zh = {
   },
   jobs: {
     title: "Jobs",
-    addBtn: "+ Add Job",
+    addBtn: "Add Job",
     nextRuns: "Next Scheduled Runs",
     colAccount: "Account",
     colType: "Type",
@@ -412,7 +412,7 @@ const en: typeof zh = {
     },
     custom: {
       actions: "Action chain",
-      addAction: "+ Add action",
+      addAction: "Add action",
       noActions: "No actions yet. Add at least one.",
       labelTarget: "Target account / bot",
       actionSendCommand: "Send command",

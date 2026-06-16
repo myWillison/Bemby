@@ -5,7 +5,7 @@
   <div v-else class="layout">
     <header class="mobile-header">
       <button class="hamburger-btn" @click="sidebarOpen = !sidebarOpen" :aria-expanded="sidebarOpen">
-        <span></span><span></span><span></span>
+        <i class="fa-solid fa-bars"></i>
       </button>
       <div class="mobile-header-right">
         <button class="lang-btn" @click="setLocale(locale === 'zh' ? 'en' : 'zh')">
@@ -48,7 +48,7 @@
           </svg>
           GitHub
         </a>
-        <button class="logout-btn" @click="logout">{{ t('nav.logout') }}</button>
+        <button class="logout-btn" @click="logout"><i class="fa-solid fa-right-from-bracket"></i> {{ t('nav.logout') }}</button>
       </div>
     </nav>
 
