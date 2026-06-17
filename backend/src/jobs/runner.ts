@@ -32,7 +32,7 @@ export async function runJob(
           if (!account.sessionString) throw new Error('Account has no session -- authenticate first');
           const log = await runCheckin(
             account.apiId, account.apiHash, account.sessionString,
-            job.botUsername, job.replyTimeoutMs, job.startCommand, job.checkinButton, attempt, signal,
+            job.botUsername, job.replyTimeoutMs, job.startCommand, job.checkinButton, attempt, job.retryMax, signal,
           );
           detailLogs?.push(log);
           break;

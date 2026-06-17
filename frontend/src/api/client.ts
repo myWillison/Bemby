@@ -50,7 +50,8 @@ export type CustomAction =
   | { type: 'send_command'; content: string }
   | { type: 'wait_reply'; maxWaitMs: number }
   | { type: 'delay'; waitMs: number }
-  | { type: 'click_button'; button: string; maxRetries: number; maxWaitMs: number };
+  | { type: 'click_button'; button: string; maxRetries: number; maxWaitMs: number }
+  | { type: 'enter_captcha'; maxWaitMs: number; captchaLength?: number };
 
 export type CustomConfig = {
   actions: CustomAction[];
@@ -76,6 +77,7 @@ export type CustomStepLog = {
   aiPrompt?: string;
   aiResponse?: string;
   aiDurationMs?: number;
+  aiRetries?: string[];
   // Dev fields
   msgCount?: number;
   responseSource?: 'edit' | 'new_message';
@@ -132,6 +134,7 @@ export type CheckinAttemptLog = {
   aiDurationMs?: number;
   aiPrompt?: string;
   aiResponse?: string;
+  aiRetries?: string[];
   error?: string;
   // Dev timing fields
   connectMs?: number;
@@ -319,5 +322,14 @@ export const dataApi = {
   import: (data: ExportPayload, mode: "merge" | "replace") =>
     api
       .post<ImportResult>("/data/import", { data, mode })
+      .then((r) => r.data),
+};
+
+// ── AI Debug ──────────────────────────────────────────────────────────────────
+
+export const debugApi = {
+  runAi: (images: string[], prompt: string, maxTokens?: number) =>
+    api
+      .post<{ response: string; durationMs: number }>("/debug/ai", { images, prompt, maxTokens })
       .then((r) => r.data),
 };

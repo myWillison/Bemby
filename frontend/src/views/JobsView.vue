@@ -244,6 +244,7 @@
                   <option value="wait_reply">{{ t('jobs.custom.actionWaitReply') }}</option>
                   <option value="delay">{{ t('jobs.custom.actionDelay') }}</option>
                   <option value="click_button">{{ t('jobs.custom.actionClickButton') }}</option>
+                  <option value="enter_captcha" :disabled="aiKeyMissing">{{ t('jobs.custom.actionEnterCaptcha') }}{{ aiKeyMissing ? ' (' + t('jobs.noApiKey') + ')' : '' }}</option>
                 </select>
                 <button type="button" class="btn btn-ghost btn-sm btn-icon" :disabled="i === 0" @click="moveUp(i)"><i class="fa-solid fa-arrow-up"></i></button>
                 <button type="button" class="btn btn-ghost btn-sm btn-icon" :disabled="i === customActions.length - 1" @click="moveDown(i)"><i class="fa-solid fa-arrow-down"></i></button>
@@ -256,10 +257,16 @@
                 <select v-model="action.contentDropdown" class="form-select">
                   <option value="/start">/start</option>
                   <option value="/checkin">/checkin</option>
+                  <option value="{aiInput}" :disabled="aiKeyMissing">{{ t('jobs.aiInputOption') }}{{ aiKeyMissing ? ' (' + t('jobs.noApiKey') + ')' : '' }}</option>
                   <option value="custom">{{ t('common.custom') }}...</option>
                 </select>
                 <input v-if="action.contentDropdown === 'custom'" v-model="action.contentCustom" class="form-input" style="margin-top:6px" placeholder="/mycommand" />
-                <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.custom.contentHint') }}</div>
+                <template v-if="action.contentDropdown === '{aiInput}'">
+                  <input v-model.trim="action.contentAiInputLength" class="form-input" style="margin-top:6px" type="number" min="1" max="20" :placeholder="t('jobs.aiInputLengthPlaceholder')" />
+                  <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.aiInputLengthHint') }}</div>
+                  <div v-if="aiKeyMissing" style="font-size:11px;color:#e63946;margin-top:4px">{{ t('jobs.aiKeyWarning') }}</div>
+                </template>
+                <div v-else style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.custom.contentHint') }}</div>
               </div>
 
               <!-- wait_reply -->
@@ -302,6 +309,22 @@
                   <label class="form-label">{{ t('jobs.custom.labelMaxWait') }}</label>
                   <input v-model.number="action.maxWaitMs" class="form-input" type="number" min="1000" step="1000" />
                 </div>
+              </div>
+
+              <!-- enter_captcha -->
+              <div v-if="action.type === 'enter_captcha'" class="custom-action-params">
+                <div class="form-row" style="margin-bottom:0">
+                  <div class="form-group">
+                    <label class="form-label">{{ t('jobs.custom.labelMaxWait') }}</label>
+                    <input v-model.number="action.maxWaitMs" class="form-input" type="number" min="1000" step="1000" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">{{ t('jobs.custom.labelCaptchaLength') }}</label>
+                    <input v-model.trim="action.captchaLength" class="form-input" type="number" min="1" max="20" :placeholder="t('jobs.aiInputLengthPlaceholder')" />
+                  </div>
+                </div>
+                <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.aiInputLengthHint') }}</div>
+                <div v-if="aiKeyMissing" style="font-size:11px;color:#e63946;margin-top:4px">{{ t('jobs.aiKeyWarning') }}</div>
               </div>
             </div>
 
@@ -414,10 +437,11 @@ import { t, locale } from '../i18n';
 import { usePersistedRef } from '../composables/usePersistedRef';
 
 type CustomActionForm = {
-  type: 'send_command' | 'wait_reply' | 'delay' | 'click_button';
+  type: 'send_command' | 'wait_reply' | 'delay' | 'click_button' | 'enter_captcha';
   content: string;
   contentDropdown: string;
   contentCustom: string;
+  contentAiInputLength: string;
   maxWaitMs: number;
   waitMs: number;
   button: string;
@@ -425,6 +449,7 @@ type CustomActionForm = {
   buttonCustom: string;
   buttonAiHint: string;
   maxRetries: number;
+  captchaLength: string;
 };
 
 const jobs = ref<Job[]>([]);
@@ -588,7 +613,7 @@ function onJobTypeChange() {
 }
 
 function defaultAction(): CustomActionForm {
-  return { type: 'send_command', content: '/start', contentDropdown: '/start', contentCustom: '', maxWaitMs: 30000, waitMs: 2000, button: '签到', buttonDropdown: '签到', buttonCustom: '', buttonAiHint: '', maxRetries: 3 };
+  return { type: 'send_command', content: '/start', contentDropdown: '/start', contentCustom: '', contentAiInputLength: '', maxWaitMs: 30000, waitMs: 2000, button: '签到', buttonDropdown: '签到', buttonCustom: '', buttonAiHint: '', maxRetries: 3, captchaLength: '' };
 }
 
 function addAction() {
@@ -709,11 +734,16 @@ function openEdit(j: Job) {
         customActions.value = cfg.actions.map(a => {
           const base = defaultAction();
           if (a.type === 'send_command') {
+            const aiInputMatch = a.content.match(/^\{aiInput(?::(\d+))?\}$/);
+            if (aiInputMatch) {
+              return { ...base, type: 'send_command', content: a.content, contentDropdown: '{aiInput}', contentCustom: '', contentAiInputLength: aiInputMatch[1] ?? '' };
+            }
             const contentDropdown = ACTION_CMD_PRESETS.has(a.content) ? a.content : 'custom';
-            return { ...base, type: 'send_command', content: a.content, contentDropdown, contentCustom: contentDropdown === 'custom' ? a.content : '' };
+            return { ...base, type: 'send_command', content: a.content, contentDropdown, contentCustom: contentDropdown === 'custom' ? a.content : '', contentAiInputLength: '' };
           }
           if (a.type === 'wait_reply') return { ...base, type: 'wait_reply', maxWaitMs: a.maxWaitMs };
           if (a.type === 'delay') return { ...base, type: 'delay', waitMs: a.waitMs };
+          if (a.type === 'enter_captcha') return { ...base, type: 'enter_captcha', maxWaitMs: a.maxWaitMs, captchaLength: String(a.captchaLength ?? '') };
           if (a.type === 'click_button') {
             const aiMatch = a.button.match(/^\{aiBtn(?::(.+))?\}$/);
             let buttonDropdown: string, buttonCustom = '', buttonAiHint = '';
@@ -774,11 +804,20 @@ function buildConfig(): EmbywatchConfig | CustomConfig | null {
     return {
       actions: customActions.value.map(a => {
         if (a.type === 'send_command') {
-          const content = a.contentDropdown === 'custom' ? a.contentCustom : a.contentDropdown;
+          let content: string;
+          if (a.contentDropdown === '{aiInput}') {
+            content = a.contentAiInputLength ? `{aiInput:${a.contentAiInputLength}}` : '{aiInput}';
+          } else {
+            content = a.contentDropdown === 'custom' ? a.contentCustom : a.contentDropdown;
+          }
           return { type: 'send_command' as const, content };
         }
         if (a.type === 'wait_reply') return { type: 'wait_reply' as const, maxWaitMs: a.maxWaitMs };
         if (a.type === 'delay') return { type: 'delay' as const, waitMs: a.waitMs };
+        if (a.type === 'enter_captcha') {
+          const captchaLength = a.captchaLength ? parseInt(a.captchaLength) || undefined : undefined;
+          return { type: 'enter_captcha' as const, maxWaitMs: a.maxWaitMs, captchaLength };
+        }
         let button: string;
         if (a.buttonDropdown === 'custom') button = a.buttonCustom;
         else if (a.buttonDropdown === '{aiBtn}') button = a.buttonAiHint.trim() ? `{aiBtn:${a.buttonAiHint.trim()}}` : '{aiBtn}';

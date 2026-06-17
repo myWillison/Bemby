@@ -37,7 +37,8 @@ export type CustomAction =
   | { type: 'send_command'; content: string }
   | { type: 'wait_reply'; maxWaitMs: number }
   | { type: 'delay'; waitMs: number }
-  | { type: 'click_button'; button: string; maxRetries: number; maxWaitMs: number };
+  | { type: 'click_button'; button: string; maxRetries: number; maxWaitMs: number }
+  | { type: 'enter_captcha'; maxWaitMs: number; captchaLength?: number };
 
 export type CustomConfig = {
   actions: CustomAction[];
@@ -65,6 +66,7 @@ export type CustomStepLog = {
   aiPrompt?: string;
   aiResponse?: string;
   aiDurationMs?: number;
+  aiRetries?: string[];
   // Dev fields
   /** For wait_reply: number of messages received during the wait */
   msgCount?: number;

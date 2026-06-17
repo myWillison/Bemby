@@ -125,9 +125,17 @@
             <div class="card-section-title" style="margin-top:16px;font-size:11px">自定义（Custom）</div>
             <p class="help-para">
               自定义任务通过可配置的多步骤流程操作任意 Telegram 机器人。每个步骤可执行以下动作：
-              发送命令、等待消息回复、点击按钮（支持 <code>{aiBtn}</code> AI 自动识别）。
-              适用于需要多轮交互才能完成的签到或操作场景。
             </p>
+            <table class="help-table">
+              <tbody>
+                <tr><td>发送命令</td><td>向机器人发送命令或消息。支持模板占位符（<code>{word:N}</code> 等），以及 <code>{aiInput}</code> / <code>{aiInput:N}</code>——自动将上一条消息中的图片发给 AI 识别，将识别出的字符填入发送内容。</td></tr>
+                <tr><td>等待回复</td><td>等待机器人回复（可设置超时时长）。</td></tr>
+                <tr><td>点击按钮</td><td>点击内联键盘按钮。支持 <code>{aiBtn}</code>（AI 自动识别）和 <code>{anyBtn}</code>（随机选择）。</td></tr>
+                <tr><td>输入验证码</td><td>等待含图片的机器人消息，通过 AI 识别图中验证码，再将识别结果自动发送给机器人。可指定验证码字符数量以提高识别准确率。</td></tr>
+                <tr><td>延时</td><td>在步骤之间插入固定等待时长。</td></tr>
+              </tbody>
+            </table>
+            <p class="help-note">需要在<strong>设置</strong>页面配置 AI API 密钥，方可使用 <code>{aiBtn}</code>、<code>{aiInput}</code> 和"输入验证码"步骤。</p>
 
             <div class="card-section-title" style="margin-top:16px;font-size:11px">时间窗口</div>
             <p class="help-para">
@@ -210,10 +218,18 @@
 
             <div class="card-section-title" style="margin-top:16px;font-size:11px">Custom (自定义)</div>
             <p class="help-para">
-              Custom jobs run configurable multi-step flows against any Telegram bot. Each step can send a command,
-              wait for a reply, and click a button -- including <code>{aiBtn}</code> for AI-driven selection.
-              Use this type for check-ins or interactions that require multiple rounds of bot communication.
+              Custom jobs run configurable multi-step flows against any Telegram bot. Available step types:
             </p>
+            <table class="help-table">
+              <tbody>
+                <tr><td>Send command</td><td>Sends a command or message to the bot. Supports template placeholders (<code>{word:N}</code>, etc.) and <code>{aiInput}</code> / <code>{aiInput:N}</code> -- the image from the previous bot message is sent to AI, the recognised characters are substituted into the message before sending.</td></tr>
+                <tr><td>Wait for reply</td><td>Waits for the bot to reply, with a configurable timeout.</td></tr>
+                <tr><td>Click button</td><td>Clicks an inline keyboard button. Supports <code>{aiBtn}</code> (AI picks the button) and <code>{anyBtn}</code> (random pick).</td></tr>
+                <tr><td>Enter captcha</td><td>Waits for a bot message containing an image, sends it to AI to recognise the captcha characters, then automatically sends the answer back. An optional character-count hint improves accuracy.</td></tr>
+                <tr><td>Delay</td><td>Pauses for a fixed duration between steps.</td></tr>
+              </tbody>
+            </table>
+            <p class="help-note">An AI API key must be configured in <strong>Settings</strong> before using <code>{aiBtn}</code>, <code>{aiInput}</code>, or Enter captcha steps.</p>
 
             <div class="card-section-title" style="margin-top:16px;font-size:11px">Schedule Window</div>
             <p class="help-para">
@@ -350,9 +366,15 @@
             <ul class="help-steps">
               <li><strong>签到任务</strong>：TG 连接耗时、等待回复耗时（含配置的超时限制）、按钮 API 调用耗时、按钮响应耗时及来源（原地编辑或新消息）、总耗时、错误类型。</li>
               <li><strong>自定义任务</strong>：每步收到的消息数（等待回复步骤）、响应来源、重试次数（点击按钮步骤）及错误类型。</li>
-              <li><strong>AI 步骤</strong>：发送给 AI 的提示词、图片及响应文本，以及响应所用时长。</li>
+              <li><strong>AI 步骤</strong>：发送给 AI 的提示词、图片及响应文本、响应耗时；若发生重试，每次失败的 AI 回答也会单独列出。</li>
             </ul>
             <p class="help-note">默认关闭，调试或调优任务参数时开启。</p>
+            <p class="help-para" style="margin-top:10px"><strong>AI 调试面板</strong></p>
+            <p class="help-para">
+              自定义任务日志中，含有 AI 步骤（<code>{aiBtn}</code>、<code>{aiInput}</code> 或"输入验证码"）的步骤标题旁会显示一个烧杯图标。
+              点击即可打开调试面板，支持：修改提示词、查看发送给 AI 的图片、调整最大 token 数，然后点击<strong>执行</strong>，
+              实时查看 AI 返回的原始响应。可反复调试直到提示词满意，无需重新运行整个任务。
+            </p>
           </template>
           <template v-else>
             <div class="card-section-title">Logs</div>
@@ -396,9 +418,15 @@
             <ul class="help-steps">
               <li><strong>Check-in jobs</strong>: TG connect time, reply latency (with the configured timeout limit for comparison), button click API time, button response time and source (edited message or new message), total attempt duration, and error type on failure.</li>
               <li><strong>Custom jobs</strong>: per-step metadata including message count received (wait-reply steps), response source and retry count (click-button steps), and error type.</li>
-              <li><strong>AI steps</strong>: the full prompt sent, any image(s) included, the model's response, and how long the AI request took.</li>
+              <li><strong>AI steps</strong>: the full prompt sent, any image(s) included, the model's response, and how long the AI request took. If the AI retried (button not matched on first attempt), each failed response is listed separately.</li>
             </ul>
             <p class="help-note">Off by default. Enable when debugging failures or tuning timeout and retry settings.</p>
+            <p class="help-para" style="margin-top:10px"><strong>AI Debug Panel</strong></p>
+            <p class="help-para">
+              Any custom job step that involved AI (<code>{aiBtn}</code>, <code>{aiInput}</code>, or Enter captcha) shows a flask icon next to the step header.
+              Click it to open the debug panel: edit the prompt, inspect the image that was sent, adjust max tokens, then click <strong>Run</strong> to call the AI live and see the raw response.
+              Iterate on the prompt as many times as needed without re-running the whole job.
+            </p>
           </template>
         </div>
       </div>

@@ -130,6 +130,10 @@
                               <div class="dev-block-label">{{ t('logs.aiResponse') }}{{ a.aiDurationMs != null ? ` (${(a.aiDurationMs / 1000).toFixed(1)}s)` : '' }}</div>
                               <pre class="dev-block-pre">{{ a.aiResponse }}</pre>
                             </div>
+                            <div v-if="a.aiRetries?.length" class="dev-block" style="margin-top:4px">
+                              <div class="dev-block-label">{{ t('logs.aiRetries') }} ({{ a.aiRetries.length }})</div>
+                              <pre class="dev-block-pre">{{ a.aiRetries.map((r, i) => `#${i+1}: ${r}`).join('\n') }}</pre>
+                            </div>
                           </template>
                           <div v-if="a.buttonResponseHtml || a.buttonResponseHasMedia" class="chat-row-recv">
                             <div>
@@ -171,6 +175,7 @@
                           <span v-if="s.durationMs != null" class="custom-step-duration">{{ s.durationMs }}ms</span>
                           <span v-if="s.error" class="badge badge-red" style="font-size:10px">failed</span>
                           <span v-else-if="s.result" class="badge badge-green" style="font-size:10px">ok</span>
+                          <button v-if="s.aiPrompt != null" class="btn btn-ghost btn-sm btn-icon debug-open-btn" :class="{ 'debug-open-btn-active': debugKey === `${expandedId}-${s.step}` }" :title="t('logs.debug.open')" @click="openDebug(s)"><i class="fa-solid fa-flask"></i></button>
                         </div>
                         <!-- Pre-click context: bot message received while waiting for buttons -->
                         <div v-if="s.preClickHtml || s.preClickImage || s.preClickHasMedia || s.preClickButtons?.length" class="chat-bg" style="margin-top:6px">
@@ -228,7 +233,28 @@
                             <div class="dev-block-label">{{ t('logs.aiResponse') }}{{ s.aiDurationMs != null ? ` (${(s.aiDurationMs / 1000).toFixed(1)}s)` : '' }}</div>
                             <pre class="dev-block-pre">{{ s.aiResponse }}</pre>
                           </div>
+                          <div v-if="s.aiRetries?.length" class="dev-block" style="margin-top:4px">
+                            <div class="dev-block-label">{{ t('logs.aiRetries') }} ({{ s.aiRetries.length }})</div>
+                            <pre class="dev-block-pre">{{ s.aiRetries.map((r, i) => `#${i+1}: ${r}`).join('\n') }}</pre>
+                          </div>
                         </template>
+                        <!-- AI debug / replay panel -->
+                        <div v-if="s.aiPrompt != null && debugKey === `${expandedId}-${s.step}`" class="debug-panel">
+                          <div class="debug-panel-title">{{ t('logs.debug.title') }}</div>
+                          <img v-if="debugImages[0]" :src="debugImages[0]" class="debug-panel-img" alt="" />
+                          <textarea v-model="debugPrompt" class="debug-panel-textarea" rows="5" :placeholder="t('logs.debug.promptPlaceholder')" />
+                          <div class="debug-panel-controls">
+                            <span class="debug-tokens-label">{{ t('logs.debug.maxTokens') }}</span>
+                            <input v-model.number="debugMaxTokens" class="form-input debug-tokens-input" type="number" min="10" max="2000" step="10" />
+                            <button class="btn btn-primary btn-sm" :disabled="debugRunning" @click="runDebug">{{ debugRunning ? t('logs.debug.running') : t('logs.debug.run') }}</button>
+                            <button class="btn btn-ghost btn-sm" @click="debugKey = null">{{ t('logs.debug.close') }}</button>
+                          </div>
+                          <div v-if="debugResponse != null" class="debug-panel-response">
+                            <div class="dev-block-label">{{ t('logs.debug.response') }}{{ debugDurationMs != null ? ` (${(debugDurationMs / 1000).toFixed(1)}s)` : '' }}</div>
+                            <pre class="dev-block-pre">{{ debugResponse }}</pre>
+                          </div>
+                          <div v-if="debugError" class="chat-error" style="margin-top:6px">{{ debugError }}</div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -292,7 +318,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { logsApi, jobsApi, type Log, type Job, type CheckinAttemptLog, type EmbywatchLog, type CustomStepLog } from '../api/client';
+import { logsApi, jobsApi, debugApi, type Log, type Job, type CheckinAttemptLog, type EmbywatchLog, type CustomStepLog } from '../api/client';
 import { t, locale } from '../i18n';
 import { usePersistedRef } from '../composables/usePersistedRef';
 
@@ -308,6 +334,44 @@ const detailLoading = ref(false);
 const stopping = ref(new Set<number>());
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let detailPollTimer: ReturnType<typeof setTimeout> | null = null;
+
+// ── AI debug panel ────────────────────────────────────────────────────────────
+const debugKey = ref<string | null>(null);
+const debugPrompt = ref('');
+const debugImages = ref<string[]>([]);
+const debugMaxTokens = ref(200);
+const debugRunning = ref(false);
+const debugResponse = ref<string | null>(null);
+const debugError = ref<string | null>(null);
+const debugDurationMs = ref<number | null>(null);
+
+function openDebug(step: CustomStepLog) {
+  const key = `${expandedId.value}-${step.step}`;
+  if (debugKey.value === key) { debugKey.value = null; return; }
+  debugKey.value = key;
+  debugPrompt.value = step.aiPrompt ?? '';
+  debugImages.value = step.preClickImage ? [step.preClickImage] : [];
+  debugMaxTokens.value = 200;
+  debugResponse.value = null;
+  debugError.value = null;
+  debugDurationMs.value = null;
+}
+
+async function runDebug() {
+  debugRunning.value = true;
+  debugResponse.value = null;
+  debugError.value = null;
+  debugDurationMs.value = null;
+  try {
+    const result = await debugApi.runAi(debugImages.value, debugPrompt.value, debugMaxTokens.value);
+    debugResponse.value = result.response;
+    debugDurationMs.value = result.durationMs;
+  } catch (err: any) {
+    debugError.value = err?.response?.data?.error ?? err?.message ?? String(err);
+  } finally {
+    debugRunning.value = false;
+  }
+}
 
 // Typed accessors for the two detail formats
 const checkinDetail = computed(() => {
@@ -861,5 +925,79 @@ function fmtSeconds(s: number): string {
   .tg-keyboard {
     max-width: 100%;
   }
+}
+
+.debug-open-btn {
+  margin-left: auto;
+  opacity: 0.5;
+  font-size: 11px;
+}
+.debug-open-btn:hover, .debug-open-btn-active {
+  opacity: 1;
+  color: #89b4fa;
+}
+
+.debug-panel {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: #12122a;
+  border: 1px solid #2d2d5c;
+  border-radius: 6px;
+}
+
+.debug-panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #89b4fa;
+  margin-bottom: 8px;
+}
+
+.debug-panel-img {
+  display: block;
+  max-height: 90px;
+  max-width: 100%;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  opacity: 0.9;
+}
+
+.debug-panel-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: #1e1e2e;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  color: #cdd6f4;
+  font-size: 12px;
+  font-family: monospace;
+  padding: 8px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.debug-panel-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.debug-tokens-label {
+  font-size: 11px;
+  color: #9399b2;
+  white-space: nowrap;
+}
+
+.debug-tokens-input {
+  width: 80px !important;
+  padding: 4px 8px !important;
+  font-size: 12px !important;
+}
+
+.debug-panel-response {
+  margin-top: 10px;
 }
 </style>

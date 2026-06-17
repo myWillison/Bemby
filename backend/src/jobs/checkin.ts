@@ -23,6 +23,8 @@ export type CheckinAttemptLog = {
   aiPrompt?: string;
   /** The raw response text returned by the AI */
   aiResponse?: string;
+  /** Failed AI responses from earlier attempts, when the first attempt(s) didn't match any button */
+  aiRetries?: string[];
   error?: string;
   // Dev timing fields
   connectMs?: number;
@@ -120,13 +122,100 @@ export function parseAiBtnHint(val: string): string | undefined {
   return m ? m[1].trim() : undefined;
 }
 
-type AiSelectionResult = { button: string; prompt: string; response: string };
+/** Generic AI call: sends images + prompt, returns the raw text response. */
+export async function callAI(
+  images: string[],
+  prompt: string,
+  maxTokens = 200,
+): Promise<{ response: string }> {
+  const apiKey = getAiSetting('ai_api_key', 'AI_API_KEY', '');
+  if (!apiKey) throw new Error('AI API key not configured — set it in Settings');
+
+  const baseUrl = getAiSetting('ai_base_url', 'AI_BASE_URL', 'https://openrouter.ai/api/v1').replace(/\/$/, '');
+  const model = getAiSetting('ai_model', 'AI_MODEL', 'nvidia/nemotron-nano-12b-v2-vl:free');
+
+  const content: object[] = [];
+  for (const img of images) content.push({ type: 'image_url', image_url: { url: img } });
+  content.push({ type: 'text', text: prompt });
+
+  const AI_TIMEOUT_MS = Number(getAiSetting('ai_timeout_ms', 'AI_TIMEOUT_MS', '25000'));
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content }], max_tokens: maxTokens }),
+    signal: AbortSignal.timeout(AI_TIMEOUT_MS),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`AI API error ${res.status}: ${body}`);
+  }
+
+  const data = await res.json() as { choices?: { message?: { content?: string } }[] };
+  const response = data.choices?.[0]?.message?.content?.trim() ?? '';
+  return { response };
+}
+
+/** Returns true if a command template contains an {aiInput} or {aiInput:N} placeholder */
+export function hasAiInput(template: string): boolean {
+  return /\{aiInput(?::\d+)?\}/.test(template);
+}
+
+/** Extracts the expected length from {aiInput:N}, returns undefined for plain {aiInput} */
+export function parseAiInputLength(template: string): number | undefined {
+  const m = template.match(/\{aiInput:(\d+)\}/);
+  return m ? parseInt(m[1], 10) : undefined;
+}
+
+type AiInputResult = { text: string; prompt: string; response: string };
+
+/** Sends captcha image(s) to the AI and returns the recognised text only. */
+export async function recognizeCaptchaWithAI(
+  images: string[],
+  length?: number,
+): Promise<AiInputResult> {
+  const apiKey = getAiSetting('ai_api_key', 'AI_API_KEY', '');
+  if (!apiKey) throw new Error('{aiInput} requires an AI API key — configure it in Settings');
+  if (!images.length) throw new Error('{aiInput} requires an image in the previous message');
+
+  const baseUrl = getAiSetting('ai_base_url', 'AI_BASE_URL', 'https://openrouter.ai/api/v1').replace(/\/$/, '');
+  const model = getAiSetting('ai_model', 'AI_MODEL', 'nvidia/nemotron-nano-12b-v2-vl:free');
+
+  const lengthHint = length ? ` The captcha is exactly ${length} characters.` : '';
+  const prompt = `Read this captcha image.${lengthHint} Reply with ONLY the captcha characters, nothing else.`;
+
+  const content: object[] = [];
+  for (const img of images) content.push({ type: 'image_url', image_url: { url: img } });
+  content.push({ type: 'text', text: prompt });
+
+  const AI_TIMEOUT_MS = Number(getAiSetting('ai_timeout_ms', 'AI_TIMEOUT_MS', '25000'));
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content }], max_tokens: 20 }),
+    signal: AbortSignal.timeout(AI_TIMEOUT_MS),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`AI API error ${res.status}: ${body}`);
+  }
+
+  const data = await res.json() as { choices?: { message?: { content?: string } }[] };
+  const recognized = data.choices?.[0]?.message?.content?.trim() ?? '';
+  if (!recognized) throw new Error('AI returned empty response for captcha recognition');
+
+  return { text: recognized, prompt, response: recognized };
+}
+
+type AiSelectionResult = { button: string; prompt: string; response: string; retries: string[] };
 
 export async function selectButtonWithAI(
   buttons: string[][],
   html: string,
   images: string[],
   hint?: string,
+  maxRetries = 0,
 ): Promise<AiSelectionResult> {
   const apiKey = getAiSetting('ai_api_key', 'AI_API_KEY', '');
   if (!apiKey) throw new Error('{aiBtn} requires an AI API key — configure it in Settings');
@@ -144,28 +233,37 @@ export async function selectButtonWithAI(
   content.push({ type: 'text', text: prompt });
 
   const AI_TIMEOUT_MS = Number(getAiSetting('ai_timeout_ms', 'AI_TIMEOUT_MS', '25000'));
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content }], max_tokens: 50 }),
-    signal: AbortSignal.timeout(AI_TIMEOUT_MS),
-  });
+  const effectiveMax = Math.min(maxRetries, 5); // hard cap to avoid exhausting AI credits
+  const failedResponses: string[] = [];
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`AI API error ${res.status}: ${body}`);
+  for (let attempt = 0; attempt <= effectiveMax; attempt++) {
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages: [{ role: 'user', content }], max_tokens: 50 }),
+      signal: AbortSignal.timeout(AI_TIMEOUT_MS),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`AI API error ${res.status}: ${body}`);
+    }
+
+    const data = await res.json() as { choices?: { message?: { content?: string } }[] };
+    const picked = data.choices?.[0]?.message?.content?.trim() ?? '';
+    if (!picked) throw new Error('AI API returned an empty response');
+
+    const exact = flat.find(b => b === picked);
+    if (exact) return { button: exact, prompt, response: picked, retries: failedResponses };
+    const partial = flat.find(b => b.includes(picked) || picked.includes(b));
+    if (partial) return { button: partial, prompt, response: picked, retries: failedResponses };
+    // No match -- log this attempt and retry
+    failedResponses.push(picked);
   }
 
-  const data = await res.json() as { choices?: { message?: { content?: string } }[] };
-  const picked = data.choices?.[0]?.message?.content?.trim() ?? '';
-  if (!picked) throw new Error('AI API returned an empty response');
-
-  // Prefer exact match, then partial
-  const exact = flat.find(b => b === picked);
-  if (exact) return { button: exact, prompt, response: picked };
-  const partial = flat.find(b => b.includes(picked) || picked.includes(b));
-  if (partial) return { button: partial, prompt, response: picked };
-  throw new Error(`AI selected "${picked}" but it does not match any available button: ${JSON.stringify(flat)}`);
+  const err = new Error(`AI selected "${failedResponses.at(-1)}" but it does not match any available button after ${effectiveMax + 1} attempt(s): ${JSON.stringify(flat)}`);
+  (err as any).aiRetries = failedResponses;
+  throw err;
 }
 
 // ── HTML helpers ──────────────────────────────────────────────────────────────
@@ -407,6 +505,7 @@ export async function runCheckin(
   startCommand = '/start',
   checkinButton = '签到',
   attempt = 1,
+  maxAiRetries = 0,
   signal?: AbortSignal,
 ): Promise<CheckinAttemptLog> {
   const attemptStart = Date.now();
@@ -476,11 +575,12 @@ export async function runCheckin(
     } else if (isAiBtn(checkinButton)) {
       const aiStart = Date.now();
       const hint = parseAiBtnHint(checkinButton);
-      const aiResult = await selectButtonWithAI(log.availableButtons, log.commandResponseHtml, parsed.images, hint);
+      const aiResult = await selectButtonWithAI(log.availableButtons, log.commandResponseHtml, parsed.images, hint, maxAiRetries);
       targetText = aiResult.button;
       log.aiDurationMs = Date.now() - aiStart;
       log.aiPrompt = aiResult.prompt;
       log.aiResponse = aiResult.response;
+      if (aiResult.retries.length) log.aiRetries = aiResult.retries;
       useExactMatch = true;
     } else {
       targetText = checkinButton;
@@ -543,6 +643,7 @@ export async function runCheckin(
     log.error = err?.message ?? String(err);
     log.errorName = err?.name ?? err?.constructor?.name;
     log.totalMs = Date.now() - attemptStart;
+    if (Array.isArray(err?.aiRetries) && err.aiRetries.length) log.aiRetries = err.aiRetries;
     throw new CheckinError(log.error!, log);
   } finally {
     // GramJS throws TIMEOUT when the update loop stops on disconnect; always swallow here

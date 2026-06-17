@@ -10,6 +10,9 @@ import {
   waitForNewBotMessage,
   isAiBtn,
   parseAiBtnHint,
+  hasAiInput,
+  parseAiInputLength,
+  recognizeCaptchaWithAI,
 } from './checkin';
 import type { CustomConfig, CustomStepLog } from '../types';
 
@@ -125,8 +128,42 @@ export async function runCustom(
       try {
         switch (action.type) {
 
+          case 'enter_captcha': {
+            const lengthHint = action.captchaLength ? ` (${action.captchaLength} chars)` : '';
+            step.label = `Enter captcha${lengthHint}`;
+            const msgs = await waitForReply(client, botUsername, action.maxWaitMs, signal);
+            lastMessages = msgs;
+            const parsed = await parseMessages(msgs, client, signal);
+            if (parsed.html) step.preClickHtml = parsed.html;
+            if (parsed.images[0]) step.preClickImage = parsed.images[0];
+            if (parsed.hasMedia) step.preClickHasMedia = parsed.hasMedia;
+            const aiStart = Date.now();
+            const aiResult = await recognizeCaptchaWithAI(parsed.images, action.captchaLength);
+            step.aiDurationMs = Date.now() - aiStart;
+            step.aiPrompt = aiResult.prompt;
+            step.aiResponse = aiResult.response;
+            await client.sendMessage(botUsername, { message: aiResult.text });
+            lastMessages = [];
+            lastButtonsMsg = null;
+            step.result = `Sent: "${aiResult.text}"`;
+            break;
+          }
+
           case 'send_command': {
-            const expanded = expandCommand(action.content);
+            let content = action.content;
+            if (hasAiInput(content)) {
+              const length = parseAiInputLength(content);
+              const parsed = await parseMessages(lastMessages, client, signal);
+              // Store image so the debug tool can replay this step from logs
+              if (parsed.images[0]) step.preClickImage = parsed.images[0];
+              const aiStart = Date.now();
+              const aiResult = await recognizeCaptchaWithAI(parsed.images, length);
+              step.aiDurationMs = Date.now() - aiStart;
+              step.aiPrompt = aiResult.prompt;
+              step.aiResponse = aiResult.response;
+              content = content.replace(/\{aiInput(?::\d+)?\}/, aiResult.text);
+            }
+            const expanded = expandCommand(content);
             step.label = `Send: "${expanded}"`;
             await client.sendMessage(botUsername, { message: expanded });
             // Clear previous reply state -- new command starts a fresh exchange
@@ -206,11 +243,12 @@ export async function runCustom(
                 if (parsed.buttons.length) step.preClickButtons = parsed.buttons;
               }
               const aiStart = Date.now();
-              const aiResult = await selectButtonWithAI(buttons, step.preClickHtml ?? buttonsMsg.message ?? '', preClickImages, hint);
+              const aiResult = await selectButtonWithAI(buttons, step.preClickHtml ?? buttonsMsg.message ?? '', preClickImages, hint, action.maxRetries);
               targetText = aiResult.button;
               step.aiDurationMs = Date.now() - aiStart;
               step.aiPrompt = aiResult.prompt;
               step.aiResponse = aiResult.response;
+              if (aiResult.retries.length) step.aiRetries = aiResult.retries;
               useExactMatch = true;
             } else {
               targetText = action.button;
@@ -283,6 +321,7 @@ export async function runCustom(
       } catch (err: any) {
         step.error = err?.message ?? String(err);
         step.errorName = err?.name ?? err?.constructor?.name;
+        if (Array.isArray(err?.aiRetries) && err.aiRetries.length) step.aiRetries = err.aiRetries;
         throw err;
       } finally {
         step.durationMs = Date.now() - t0;
