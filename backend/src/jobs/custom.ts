@@ -13,12 +13,20 @@ import {
   hasAiInput,
   parseAiInputLength,
   recognizeCaptchaWithAI,
+  buildCaptchaPrompt,
 } from './checkin';
 import type { CustomConfig, CustomStepLog } from '../types';
 
 export type CustomJobLog = {
   steps: CustomStepLog[];
 };
+
+export class CustomJobError extends Error {
+  constructor(message: string, public readonly log: CustomJobLog) {
+    super(message);
+    this.name = 'CustomJobError';
+  }
+}
 
 // Collects messages from the target until one has buttons or timeout fires.
 // Resolves with whatever was collected (may be empty on timeout).
@@ -110,13 +118,13 @@ export async function runCustom(
     baseLogger: new Logger(LogLevel.NONE),
   });
 
-  await client.connect();
-
   // State shared across actions in this session
   let lastMessages: Api.Message[] = [];
   let lastButtonsMsg: Api.Message | null = null;
 
   try {
+    await client.connect();
+
     for (let i = 0; i < config.actions.length; i++) {
       if (signal?.aborted) throw new Error('Job cancelled');
 
@@ -131,16 +139,24 @@ export async function runCustom(
           case 'enter_captcha': {
             const lengthHint = action.captchaLength ? ` (${action.captchaLength} chars)` : '';
             step.label = `Enter captcha${lengthHint}`;
-            const msgs = await waitForReply(client, botUsername, action.maxWaitMs, signal);
-            lastMessages = msgs;
+            // Reuse messages already captured by the preceding click_button step if available,
+            // otherwise wait for a fresh bot reply
+            let msgs: Api.Message[];
+            if (lastMessages.length > 0) {
+              msgs = lastMessages;
+            } else {
+              msgs = await waitForReply(client, botUsername, action.maxWaitMs, signal);
+              lastMessages = msgs;
+            }
             const parsed = await parseMessages(msgs, client, signal);
             if (parsed.html) step.preClickHtml = parsed.html;
             if (parsed.images[0]) step.preClickImage = parsed.images[0];
             if (parsed.hasMedia) step.preClickHasMedia = parsed.hasMedia;
+            // Set prompt before the fetch so it appears in logs even if AI times out
+            step.aiPrompt = buildCaptchaPrompt(action.captchaLength);
             const aiStart = Date.now();
             const aiResult = await recognizeCaptchaWithAI(parsed.images, action.captchaLength);
             step.aiDurationMs = Date.now() - aiStart;
-            step.aiPrompt = aiResult.prompt;
             step.aiResponse = aiResult.response;
             await client.sendMessage(botUsername, { message: aiResult.text });
             lastMessages = [];
@@ -156,10 +172,11 @@ export async function runCustom(
               const parsed = await parseMessages(lastMessages, client, signal);
               // Store image so the debug tool can replay this step from logs
               if (parsed.images[0]) step.preClickImage = parsed.images[0];
+              // Set prompt before the fetch so it appears in logs even if AI times out
+              step.aiPrompt = buildCaptchaPrompt(length);
               const aiStart = Date.now();
               const aiResult = await recognizeCaptchaWithAI(parsed.images, length);
               step.aiDurationMs = Date.now() - aiStart;
-              step.aiPrompt = aiResult.prompt;
               step.aiResponse = aiResult.response;
               content = content.replace(/\{aiInput(?::\d+)?\}/, aiResult.text);
             }
@@ -327,6 +344,8 @@ export async function runCustom(
         step.durationMs = Date.now() - t0;
       }
     }
+  } catch (err: any) {
+    throw new CustomJobError(err?.message ?? String(err), log);
   } finally {
     try { await client.disconnect(); } catch { /* ignore */ }
   }

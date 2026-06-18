@@ -244,8 +244,10 @@
                           <img v-if="debugImages[0]" :src="debugImages[0]" class="debug-panel-img" alt="" />
                           <textarea v-model="debugPrompt" class="debug-panel-textarea" rows="5" :placeholder="t('logs.debug.promptPlaceholder')" />
                           <div class="debug-panel-controls">
+                            <span class="debug-tokens-label">{{ t('logs.debug.model') }}</span>
+                            <input v-model="debugModel" class="form-input debug-model-input" type="text" :placeholder="t('logs.debug.model')" />
                             <span class="debug-tokens-label">{{ t('logs.debug.maxTokens') }}</span>
-                            <input v-model.number="debugMaxTokens" class="form-input debug-tokens-input" type="number" min="10" max="2000" step="10" />
+                            <input v-model.number="debugMaxTokens" class="form-input debug-tokens-input" type="number" min="10" max="100000" step="100" />
                             <button class="btn btn-primary btn-sm" :disabled="debugRunning" @click="runDebug">{{ debugRunning ? t('logs.debug.running') : t('logs.debug.run') }}</button>
                             <button class="btn btn-ghost btn-sm" @click="debugKey = null">{{ t('logs.debug.close') }}</button>
                           </div>
@@ -318,7 +320,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { logsApi, jobsApi, debugApi, type Log, type Job, type CheckinAttemptLog, type EmbywatchLog, type CustomStepLog } from '../api/client';
+import { logsApi, jobsApi, debugApi, settingsApi, type Log, type Job, type CheckinAttemptLog, type EmbywatchLog, type CustomStepLog } from '../api/client';
 import { t, locale } from '../i18n';
 import { usePersistedRef } from '../composables/usePersistedRef';
 
@@ -339,7 +341,8 @@ let detailPollTimer: ReturnType<typeof setTimeout> | null = null;
 const debugKey = ref<string | null>(null);
 const debugPrompt = ref('');
 const debugImages = ref<string[]>([]);
-const debugMaxTokens = ref(200);
+const debugModel = ref('');
+const debugMaxTokens = ref(5000);
 const debugRunning = ref(false);
 const debugResponse = ref<string | null>(null);
 const debugError = ref<string | null>(null);
@@ -351,7 +354,7 @@ function openDebug(step: CustomStepLog) {
   debugKey.value = key;
   debugPrompt.value = step.aiPrompt ?? '';
   debugImages.value = step.preClickImage ? [step.preClickImage] : [];
-  debugMaxTokens.value = 200;
+  debugMaxTokens.value = 5000;
   debugResponse.value = null;
   debugError.value = null;
   debugDurationMs.value = null;
@@ -363,7 +366,7 @@ async function runDebug() {
   debugError.value = null;
   debugDurationMs.value = null;
   try {
-    const result = await debugApi.runAi(debugImages.value, debugPrompt.value, debugMaxTokens.value);
+    const result = await debugApi.runAi(debugImages.value, debugPrompt.value, debugMaxTokens.value, debugModel.value || undefined);
     debugResponse.value = result.response;
     debugDurationMs.value = result.durationMs;
   } catch (err: any) {
@@ -398,6 +401,7 @@ const customDetail = computed(() => {
 onMounted(async () => {
   jobs.value = await jobsApi.list();
   await load();
+  settingsApi.get().then(s => { if (s.ai_model) debugModel.value = s.ai_model; }).catch(() => {});
 });
 
 async function load() {
@@ -993,6 +997,13 @@ function fmtSeconds(s: number): string {
 
 .debug-tokens-input {
   width: 80px !important;
+  padding: 4px 8px !important;
+  font-size: 12px !important;
+}
+
+.debug-model-input {
+  flex: 1;
+  min-width: 160px;
   padding: 4px 8px !important;
   font-size: 12px !important;
 }

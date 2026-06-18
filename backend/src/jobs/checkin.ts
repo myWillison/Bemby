@@ -127,12 +127,13 @@ export async function callAI(
   images: string[],
   prompt: string,
   maxTokens = 200,
+  modelOverride?: string,
 ): Promise<{ response: string }> {
   const apiKey = getAiSetting('ai_api_key', 'AI_API_KEY', '');
   if (!apiKey) throw new Error('AI API key not configured — set it in Settings');
 
   const baseUrl = getAiSetting('ai_base_url', 'AI_BASE_URL', 'https://openrouter.ai/api/v1').replace(/\/$/, '');
-  const model = getAiSetting('ai_model', 'AI_MODEL', 'nvidia/nemotron-nano-12b-v2-vl:free');
+  const model = modelOverride?.trim() || getAiSetting('ai_model', 'AI_MODEL', 'nvidia/nemotron-nano-12b-v2-vl:free');
 
   const content: object[] = [];
   for (const img of images) content.push({ type: 'image_url', image_url: { url: img } });
@@ -169,6 +170,12 @@ export function parseAiInputLength(template: string): number | undefined {
 
 type AiInputResult = { text: string; prompt: string; response: string };
 
+/** Builds the captcha recognition prompt so callers can log it before the fetch. */
+export function buildCaptchaPrompt(length?: number): string {
+  const lengthHint = length ? ` The captcha is exactly ${length} characters.` : '';
+  return `Read this captcha image.${lengthHint} Reply with ONLY the captcha characters, nothing else.`;
+}
+
 /** Sends captcha image(s) to the AI and returns the recognised text only. */
 export async function recognizeCaptchaWithAI(
   images: string[],
@@ -181,8 +188,7 @@ export async function recognizeCaptchaWithAI(
   const baseUrl = getAiSetting('ai_base_url', 'AI_BASE_URL', 'https://openrouter.ai/api/v1').replace(/\/$/, '');
   const model = getAiSetting('ai_model', 'AI_MODEL', 'nvidia/nemotron-nano-12b-v2-vl:free');
 
-  const lengthHint = length ? ` The captcha is exactly ${length} characters.` : '';
-  const prompt = `Read this captcha image.${lengthHint} Reply with ONLY the captcha characters, nothing else.`;
+  const prompt = buildCaptchaPrompt(length);
 
   const content: object[] = [];
   for (const img of images) content.push({ type: 'image_url', image_url: { url: img } });

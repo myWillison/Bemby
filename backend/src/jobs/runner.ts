@@ -1,7 +1,7 @@
 import type { Job, TgAccount, EmbywatchConfig, EmbywatchLog } from '../types';
 import { runCheckin, CheckinError, type CheckinAttemptLog } from './checkin';
 import { runEmbywatch } from './embywatch';
-import { runCustom, type CustomJobLog } from './custom';
+import { runCustom, CustomJobError, type CustomJobLog } from './custom';
 
 export type JobDetailLog = CheckinAttemptLog | EmbywatchLog | CustomJobLog;
 
@@ -63,6 +63,7 @@ export async function runJob(
       return;
     } catch (err) {
       if (err instanceof CheckinError) detailLogs?.push(err.log);
+      if (err instanceof CustomJobError) detailLogs?.push(err.log);
       lastError = err;
       console.error(`[runner] Job "${job.name}" attempt ${attempt}/${job.retryMax} failed:`, err);
       if (attempt < job.retryMax && signal) {

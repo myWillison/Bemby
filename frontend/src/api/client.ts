@@ -328,8 +328,8 @@ export const dataApi = {
 // ── AI Debug ──────────────────────────────────────────────────────────────────
 
 export const debugApi = {
-  runAi: (images: string[], prompt: string, maxTokens?: number) =>
+  runAi: (images: string[], prompt: string, maxTokens?: number, model?: string) =>
     api
-      .post<{ response: string; durationMs: number }>("/debug/ai", { images, prompt, maxTokens })
+      .post<{ response: string; durationMs: number }>("/debug/ai", { images, prompt, maxTokens, model })
       .then((r) => r.data),
 };
