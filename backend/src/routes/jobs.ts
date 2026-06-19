@@ -189,8 +189,8 @@ router.put("/:id", (req, res) => {
         ? JSON.stringify(config)
         : null
       : existing.config,
-    (startCommand as string | undefined)?.trim() || "/start",
-    (checkinButton as string | undefined)?.trim() || "签到",
+    startCommand !== undefined ? ((startCommand as string).trim() || "/start") : existing.start_command,
+    checkinButton !== undefined ? ((checkinButton as string).trim() || "签到") : existing.checkin_button,
     req.params.id,
   );
 
