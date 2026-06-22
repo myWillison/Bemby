@@ -384,7 +384,7 @@
             <div class="card-section-title">日志</div>
             <p class="help-para">
               每次任务执行均记录时间戳、状态和消息。
-              使用顶部的任务筛选器缩小显示范围。
+              使用顶部的任务下拉筛选器按任务缩小范围，或在文本搜索框中输入关键词，对任务名称、账号名称或消息内容进行模糊筛选。
             </p>
             <div class="help-badges-row">
               <span class="badge badge-green">成功</span>
@@ -443,7 +443,7 @@
             <div class="card-section-title">Logs</div>
             <p class="help-para">
               Every job execution is recorded with a timestamp, status, and message.
-              Use the job filter at the top to narrow results to a specific job.
+              Use the job dropdown to filter by a specific job, or type in the search box to fuzzy-match across job name, account name, and message.
             </p>
             <div class="help-badges-row">
               <span class="badge badge-green">Success</span>
