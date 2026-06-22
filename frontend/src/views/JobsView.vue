@@ -1031,8 +1031,6 @@ function openDuplicate(j: Job) {
   openEdit(j);
   editTarget.value = null;
   form.name = `${j.name} (copy)`;
-  // Duplicated jobs are unlinked from the template
-  form.templateId = null;
 }
 
 function handleEmbyHostPaste(event: ClipboardEvent) {
