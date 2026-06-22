@@ -92,6 +92,24 @@ try {
 try { db.exec("ALTER TABLE jobs ADD COLUMN start_command TEXT NOT NULL DEFAULT '/start'"); } catch {}
 try { db.exec("ALTER TABLE jobs ADD COLUMN checkin_button TEXT NOT NULL DEFAULT '签到'"); } catch {}
 try { db.exec('ALTER TABLE job_logs ADD COLUMN detail TEXT'); } catch {}
+try { db.exec('ALTER TABLE jobs ADD COLUMN template_id INTEGER REFERENCES job_templates(id) ON DELETE SET NULL'); } catch {}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS job_templates (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             TEXT    NOT NULL,
+    job_type         TEXT    NOT NULL DEFAULT 'checkin',
+    bot_username     TEXT    NOT NULL DEFAULT '',
+    timezone         TEXT    NOT NULL DEFAULT 'Australia/Sydney',
+    reply_timeout_ms INTEGER NOT NULL DEFAULT 40000,
+    retry_max        INTEGER NOT NULL DEFAULT 5,
+    enabled          INTEGER NOT NULL DEFAULT 1,
+    config           TEXT,
+    start_command    TEXT    NOT NULL DEFAULT '/start',
+    checkin_button   TEXT    NOT NULL DEFAULT '签到',
+    created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
 
 // AI supplier + model tables
 db.exec(`

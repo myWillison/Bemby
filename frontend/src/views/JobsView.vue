@@ -30,9 +30,9 @@
           <option value="">{{ t('jobs.allAccounts') }}</option>
           <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
         </select>
-        <select v-if="botUrlOptions.length > 1" v-model="filterBotUrl" class="form-select" style="width:180px;height:30px;font-size:13px;padding:0 8px">
-          <option value="">{{ t('jobs.allBotUrls') }}</option>
-          <option v-for="b in botUrlOptions" :key="b" :value="b">{{ b }}</option>
+        <select v-if="botUrlTplOptions.length > 1" v-model="filterBotUrlTpl" class="form-select" style="width:180px;height:30px;font-size:13px;padding:0 8px">
+          <option value="">{{ t('jobs.allBotUrlTpl') }}</option>
+          <option v-for="opt in botUrlTplOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
         </select>
       </div>
       <div class="table-wrap">
@@ -42,7 +42,7 @@
               <th class="th-sort" :class="sortKey === 'name' ? 'sort-active' : ''" @click="setSort('name')">{{ t('common.name') }} <span class="sort-icon">{{ sortIcon('name') }}</span></th>
               <th class="th-sort" :class="sortKey === 'account' ? 'sort-active' : ''" @click="setSort('account')">{{ t('jobs.colAccount') }} <span class="sort-icon">{{ sortIcon('account') }}</span></th>
               <th class="th-sort" :class="sortKey === 'type' ? 'sort-active' : ''" @click="setSort('type')">{{ t('jobs.colType') }} <span class="sort-icon">{{ sortIcon('type') }}</span></th>
-              <th class="th-sort col-hide-mobile" :class="sortKey === 'botUrl' ? 'sort-active' : ''" @click="setSort('botUrl')">{{ t('jobs.colBotUrl') }} <span class="sort-icon">{{ sortIcon('botUrl') }}</span></th>
+              <th class="th-sort col-hide-mobile" :class="sortKey === 'botUrl' ? 'sort-active' : ''" @click="setSort('botUrl')">{{ t('jobs.colBotUrlTpl') }} <span class="sort-icon">{{ sortIcon('botUrl') }}</span></th>
               <th class="th-sort col-hide-mobile" :class="sortKey === 'window' ? 'sort-active' : ''" @click="setSort('window')">{{ t('jobs.colWindow') }} <span class="sort-icon">{{ sortIcon('window') }}</span></th>
               <th class="th-sort" :class="sortKey === 'enabled' ? 'sort-active' : ''" @click="setSort('enabled')">{{ t('jobs.colEnabled') }} <span class="sort-icon">{{ sortIcon('enabled') }}</span></th>
               <th>{{ t('common.actions') }}</th>
@@ -61,7 +61,12 @@
               <td>{{ j.name }}</td>
               <td>{{ j.accountName ?? j.accountId }}</td>
               <td><span :class="jobTypeBadge(j.jobType)">{{ t(`logs.jobType.${j.jobType}`) }}</span></td>
-              <td class="col-hide-mobile">{{ j.jobType === 'embywatch' ? j.botUsername : '@' + j.botUsername }}</td>
+              <td class="col-hide-mobile">
+                <template v-if="j.templateId">
+                  <span class="badge badge-tpl" style="margin-left:0;margin-right:4px">T</span>{{ templates.find(t => t.id === j.templateId)?.name ?? '' }}
+                </template>
+                <template v-else>{{ j.jobType === 'embywatch' ? j.botUsername : '@' + j.botUsername }}</template>
+              </td>
               <td class="col-hide-mobile">{{ fmtWindow(j.scheduleWindowStart, j.scheduleWindowEnd) }}</td>
               <td>
                 <span
@@ -73,7 +78,7 @@
                 </span>
               </td>
               <td @click.stop>
-                <!-- desktop: four icon buttons -->
+                <!-- desktop: icon buttons -->
                 <div class="actions hide-mobile">
                   <button class="btn btn-sm btn-success btn-icon" :disabled="running.has(j.id)" :title="t('common.run')" @click="runNow(j.id)">
                     <i class="fa-solid fa-play"></i>
@@ -100,6 +105,23 @@
         <div class="modal-body">
         <div v-if="formError" class="error-msg">{{ formError }}</div>
 
+        <!-- Template selector -->
+        <div v-if="templates.length" class="form-group">
+          <label class="form-label">{{ t('templates.labelTemplate') }}</label>
+          <select v-model="form.templateId" class="form-select" @change="onTemplateChange">
+            <option :value="null">{{ t('templates.noTemplate') }}</option>
+            <option v-for="tpl in templates" :key="tpl.id" :value="tpl.id">{{ tpl.name }}</option>
+          </select>
+        </div>
+
+        <!-- Template summary (shown instead of config fields when linked) -->
+        <div v-if="form.templateId && linkedTemplate" class="template-summary-card">
+          <div class="template-summary-row">
+            <span :class="jobTypeBadge(linkedTemplate.jobType)">{{ t(`logs.jobType.${linkedTemplate.jobType}`) }}</span>
+            <span class="template-summary-detail">{{ linkedTemplate.jobType === 'embywatch' ? linkedTemplate.botUsername : '@' + linkedTemplate.botUsername }}</span>
+          </div>
+        </div>
+
         <!-- Enabled -->
         <div style="margin-bottom:14px">
           <label class="form-check">
@@ -108,13 +130,13 @@
           </label>
         </div>
 
-        <!-- Job Name + Job Type -->
+        <!-- Job Name (always) + Job Type (only when no template) -->
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">{{ t('jobs.labelName') }} <span style="color:#e63946">*</span></label>
             <input v-model.trim="form.name" class="form-input" placeholder="Xxemby" />
           </div>
-          <div class="form-group">
+          <div v-if="!form.templateId" class="form-group">
             <label class="form-label">{{ t('jobs.labelType') }}</label>
             <select v-model="form.jobType" class="form-select" @change="onJobTypeChange">
               <option value="checkin">Check-in (签到)</option>
@@ -124,7 +146,7 @@
           </div>
         </div>
 
-        <!-- Check-in: Account + Bot Username -->
+        <!-- Check-in: Account (always) + Bot Username (no template only) -->
         <div v-if="form.jobType === 'checkin'" class="form-row">
           <div class="form-group">
             <label class="form-label">{{ t('jobs.labelAccount') }} <span style="color:#e63946">*</span></label>
@@ -133,14 +155,14 @@
               <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
             </select>
           </div>
-          <div class="form-group">
+          <div v-if="!form.templateId" class="form-group">
             <label class="form-label">{{ t('jobs.labelBot') }} <span style="color:#e63946">*</span></label>
             <input v-model.trim="form.botUsername" class="form-input" placeholder="SomeBotUsername" />
           </div>
         </div>
 
-        <!-- Emby Watch: Server URL (protocol + host + port) -->
-        <div v-if="form.jobType === 'embywatch'" class="form-group">
+        <!-- Emby Watch: Server URL (hidden when template controls it) -->
+        <div v-if="form.jobType === 'embywatch' && !form.templateId" class="form-group">
           <label class="form-label">{{ t('jobs.labelServerUrl') }} <span style="color:#e63946">*</span></label>
           <div style="display:flex;align-items:center;gap:6px">
             <select v-model="embyServer.protocol" class="form-select" style="width:88px;flex-shrink:0">
@@ -154,8 +176,8 @@
           </div>
         </div>
 
-        <!-- embywatch-specific fields -->
-        <template v-if="form.jobType === 'embywatch'">
+        <!-- embywatch-specific fields (hidden when template controls them) -->
+        <template v-if="form.jobType === 'embywatch' && !form.templateId">
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">{{ t('jobs.labelEmbyUser') }} <span style="color:#e63946">*</span></label>
@@ -199,19 +221,20 @@
             </label>
             <div style="font-size:11px;color:#aaa;margin-top:4px;padding-left:24px">{{ t('jobs.markWatchedHint') }}</div>
           </div>
-          <div v-if="accounts.length > 0" class="form-group" style="margin-top:8px">
-            <label class="form-label">
-              {{ t('jobs.labelAccount') }}
-              <span style="color:#aaa;font-weight:400"> — {{ t('jobs.accountOptionalHint') }}</span>
-            </label>
-            <select v-model="form.accountId" class="form-select">
-              <option :value="null">{{ t('jobs.noAccount') }}</option>
-              <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
-            </select>
-          </div>
         </template>
+        <!-- embywatch optional account (always shown, job-specific) -->
+        <div v-if="form.jobType === 'embywatch' && accounts.length > 0" class="form-group" style="margin-top:8px">
+          <label class="form-label">
+            {{ t('jobs.labelAccount') }}
+            <span style="color:#aaa;font-weight:400"> — {{ t('jobs.accountOptionalHint') }}</span>
+          </label>
+          <select v-model="form.accountId" class="form-select">
+            <option :value="null">{{ t('jobs.noAccount') }}</option>
+            <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
+          </select>
+        </div>
 
-        <!-- Custom: account + target bot -->
+        <!-- Custom: account (always) + target bot and config (hidden when template controls them) -->
         <template v-if="form.jobType === 'custom'">
           <div class="form-row">
             <div class="form-group">
@@ -221,20 +244,20 @@
                 <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
               </select>
             </div>
-            <div class="form-group">
+            <div v-if="!form.templateId" class="form-group">
               <label class="form-label">{{ t('jobs.custom.labelTarget') }} <span style="color:#e63946">*</span></label>
               <input v-model.trim="form.botUsername" class="form-input" placeholder="BotUsername" />
             </div>
           </div>
 
-          <div class="form-group">
+          <div v-if="!form.templateId" class="form-group">
             <label class="form-label">{{ t('jobs.custom.labelJobMaxRetries') }}</label>
             <input v-model.number="customJobMaxRetries" class="form-input" type="number" min="1" max="20" style="max-width:120px" />
             <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.custom.jobMaxRetriesHint') }}</div>
           </div>
 
-          <!-- Action chain builder -->
-          <div class="form-group">
+          <!-- Action chain builder (hidden when template controls it) -->
+          <div v-if="!form.templateId" class="form-group">
             <label class="form-label">{{ t('jobs.custom.actions') }}</label>
 
             <div v-if="customActions.length === 0" style="font-size:13px;color:#aaa;padding:10px 0">
@@ -381,8 +404,8 @@
           </div>
         </div>
 
-        <!-- checkin-specific fields -->
-        <template v-if="form.jobType === 'checkin'">
+        <!-- checkin-specific fields (hidden when template controls them) -->
+        <template v-if="form.jobType === 'checkin' && !form.templateId">
           <div class="form-row" style="align-items:start">
             <div class="form-group">
               <label class="form-label">{{ t('jobs.labelStartCommand') }}</label>
@@ -419,12 +442,12 @@
             </div>
             <div class="form-group">
               <label class="form-label">{{ t('jobs.labelMaxRetries') }}</label>
-              <input v-model.number="form.retryMax" class="form-input" type="number" min="1" max="10" />
+              <input v-model.number="form.retryMax" class="form-input" type="number" min="1" max="10" :disabled="!!form.templateId" />
             </div>
           </div>
         </template>
 
-        <div v-if="form.jobType === 'embywatch'" class="form-row">
+        <div v-if="form.jobType === 'embywatch' && !form.templateId" class="form-row">
           <div class="form-group">
             <label class="form-label">{{ t('jobs.labelMaxRetries') }}</label>
             <input v-model.number="form.retryMax" class="form-input" type="number" min="1" max="10" />
@@ -434,8 +457,31 @@
         </div><!-- end modal-body -->
         <div class="modal-footer">
           <button class="btn btn-ghost" @click="showForm = false"><i class="fa-solid fa-xmark"></i> {{ t('common.cancel') }}</button>
+          <button v-if="editTarget && !editTarget.templateId" class="btn btn-ghost" @click="openExtract(editTarget)">
+            <i class="fa-solid fa-file-export"></i> {{ t('jobs.extractToTemplate') }}
+          </button>
           <button class="btn btn-primary" :disabled="saving" @click="saveJob">
             <i class="fa-solid fa-floppy-disk"></i> {{ saving ? t('common.saving') : t('common.save') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Extract to Template modal -->
+    <div v-if="extractSource" class="modal-backdrop">
+      <div class="modal" style="width:400px">
+        <h3 class="modal-title">{{ t('jobs.extractModalTitle') }}</h3>
+        <div class="modal-body">
+          <div v-if="extractError" class="error-msg">{{ extractError }}</div>
+          <div class="form-group">
+            <label class="form-label">{{ t('jobs.extractTemplateName') }} <span style="color:#e63946">*</span></label>
+            <input v-model.trim="extractName" class="form-input" :placeholder="extractSource.name" @keyup.enter="confirmExtract" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" @click="extractSource = null"><i class="fa-solid fa-xmark"></i> {{ t('common.cancel') }}</button>
+          <button class="btn btn-primary" :disabled="extractSaving" @click="confirmExtract">
+            <i class="fa-solid fa-file-export"></i> {{ extractSaving ? t('common.saving') : t('jobs.extractConfirm') }}
           </button>
         </div>
       </div>
@@ -468,7 +514,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
-import { jobsApi, accountsApi, statusApi, settingsApi, logsApi, type Job, type Account, type ScheduleStatus, type Settings, type UAPreset, type EmbywatchConfig, type CustomConfig } from '../api/client';
+import { jobsApi, accountsApi, statusApi, settingsApi, logsApi, templatesApi, type Job, type JobTemplate, type Account, type ScheduleStatus, type Settings, type UAPreset, type EmbywatchConfig, type CustomConfig } from '../api/client';
 import { t, locale } from '../i18n';
 import { usePersistedRef } from '../composables/usePersistedRef';
 
@@ -492,6 +538,7 @@ type CustomActionForm = {
 
 const jobs = ref<Job[]>([]);
 const accounts = ref<Account[]>([]);
+const templates = ref<JobTemplate[]>([]);
 const scheduleStatus = ref<ScheduleStatus[]>([]);
 const settings = ref<Settings | null>(null);
 const uaPresets = computed<UAPreset[]>(() => {
@@ -501,16 +548,17 @@ const running = ref(new Set<number>());
 
 const filterType = usePersistedRef<string>('bemby:jobs:filterType', '');
 const filterAccountId = usePersistedRef<number | ''>('bemby:jobs:filterAccountId', '');
-const filterBotUrl = usePersistedRef<string>('bemby:jobs:filterBotUrl', '');
+const filterBotUrlTpl = usePersistedRef<string>('bemby:jobs:filterBotUrlTpl', '');
 const filterOptions = computed(() => [
   { value: '', label: t('common.all') },
   { value: 'checkin', label: t('logs.jobType.checkin') },
   { value: 'embywatch', label: t('logs.jobType.embywatch') },
   { value: 'custom', label: t('logs.jobType.custom') },
 ]);
-const botUrlOptions = computed(() => {
-  const vals = [...new Set(jobs.value.map(j => j.botUsername).filter(Boolean))];
-  return vals.sort();
+const botUrlTplOptions = computed(() => {
+  const botVals = [...new Set(jobs.value.map(j => j.botUsername).filter(Boolean))].sort().map(v => ({ value: `bot:${v}`, label: v }));
+  const tplVals = templates.value.filter(t => jobs.value.some(j => j.templateId === t.id)).map(t => ({ value: `tpl:${t.id}`, label: `[T] ${t.name}` }));
+  return [...botVals, ...tplVals];
 });
 
 const sortKey = usePersistedRef<string>('bemby:jobs:sortKey', '');
@@ -533,11 +581,18 @@ function sortIcon(key: string): string {
 }
 
 const sortedJobs = computed(() => {
-  const filtered = jobs.value.filter(j =>
-    (!filterType.value || j.jobType === filterType.value) &&
-    (filterAccountId.value === '' || j.accountId === filterAccountId.value) &&
-    (!filterBotUrl.value || j.botUsername === filterBotUrl.value),
-  );
+  const filtered = jobs.value.filter(j => {
+    if (filterType.value && j.jobType !== filterType.value) return false;
+    if (filterAccountId.value !== '' && j.accountId !== filterAccountId.value) return false;
+    if (filterBotUrlTpl.value) {
+      if (filterBotUrlTpl.value.startsWith('bot:')) {
+        if (j.botUsername !== filterBotUrlTpl.value.slice(4)) return false;
+      } else if (filterBotUrlTpl.value.startsWith('tpl:')) {
+        if (j.templateId !== Number(filterBotUrlTpl.value.slice(4))) return false;
+      }
+    }
+    return true;
+  });
   if (!sortKey.value) return filtered;
   return [...filtered].sort((a, b) => {
     let av: string | number, bv: string | number;
@@ -582,7 +637,15 @@ const form = reactive({
   replyTimeoutMs: 40000,
   retryMax: 5,
   enabled: true,
+  templateId: null as number | null,
 });
+
+const linkedTemplate = computed(() => templates.value.find(t => t.id === form.templateId) ?? null);
+
+const extractSource = ref<Job | null>(null);
+const extractName = ref('');
+const extractError = ref('');
+const extractSaving = ref(false);
 const embyCfg = reactive<{ username: string; password: string; playDuration: number | string; userAgent: string; markWatched: boolean }>({
   username: '',
   password: '',
@@ -676,11 +739,78 @@ function moveDown(i: number) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadJobs(), loadAccounts(), loadStatus(), loadSettings()]);
+  await Promise.all([loadJobs(), loadAccounts(), loadStatus(), loadSettings(), loadTemplates()]);
 });
 
 async function loadSettings() {
   try { settings.value = await settingsApi.get(); } catch { /* ignore */ }
+}
+
+async function loadTemplates() {
+  try { templates.value = await templatesApi.list(); } catch { /* ignore */ }
+}
+
+function applyTemplate(tpl: JobTemplate) {
+  form.jobType = tpl.jobType;
+  form.botUsername = tpl.botUsername;
+  form.timezone = tpl.timezone;
+  form.replyTimeoutMs = tpl.replyTimeoutMs;
+  form.retryMax = tpl.retryMax;
+  setCmdState(tpl.startCommand === '/start' ? '' : (tpl.startCommand ?? ''));
+  setBtnState(tpl.checkinButton === '签到' ? '' : (tpl.checkinButton ?? ''));
+  if (tpl.jobType === 'embywatch') {
+    const m = tpl.botUsername.match(/^(https?):\/\/([^:/]+)(?::(\d+))?/);
+    Object.assign(embyServer, { protocol: (m?.[1] ?? 'https') as 'https' | 'http', host: m?.[2] ?? '', port: m?.[3] ? Number(m[3]) : 443 });
+    if (tpl.config) {
+      try {
+        let c = JSON.parse(tpl.config) as EmbywatchConfig | string;
+        if (typeof c === 'string') c = JSON.parse(c) as EmbywatchConfig;
+        Object.assign(embyCfg, { username: c.username ?? '', password: c.password ?? '', playDuration: c.playDuration ?? '', userAgent: c.userAgent ?? '', markWatched: c.markWatched !== false });
+        setUaState(c.userAgent ?? '');
+      } catch { /* ignore */ }
+    }
+  } else if (tpl.jobType === 'custom') {
+    Object.assign(embyServer, { protocol: 'https', host: '', port: 443 });
+    if (tpl.config) {
+      try {
+        const cfg = JSON.parse(tpl.config) as CustomConfig;
+        customJobMaxRetries.value = cfg.maxRetries ?? 1;
+        customActions.value = cfg.actions.map(a => {
+          const base = defaultAction();
+          if (a.type === 'send_command') {
+            const aiInputMatch = a.content.match(/^\{aiInput(?::(\d+))?\}$/);
+            if (aiInputMatch) return { ...base, type: 'send_command' as const, content: a.content, contentDropdown: '{aiInput}', contentCustom: '', contentAiInputLength: aiInputMatch[1] ?? '', maxRetries: a.maxRetries ?? 0 };
+            const contentDropdown = ACTION_CMD_PRESETS.has(a.content) ? a.content : 'custom';
+            return { ...base, type: 'send_command' as const, content: a.content, contentDropdown, contentCustom: contentDropdown === 'custom' ? a.content : '', contentAiInputLength: '', maxRetries: a.maxRetries ?? 0 };
+          }
+          if (a.type === 'wait_reply') return { ...base, type: 'wait_reply' as const, maxWaitMs: a.maxWaitMs, successContains: a.successContains ?? '', failContains: a.failContains ?? '', maxRetries: a.maxRetries ?? 0 };
+          if (a.type === 'delay') return { ...base, type: 'delay' as const, waitMs: a.waitMs };
+          if (a.type === 'enter_captcha') return { ...base, type: 'enter_captcha' as const, maxWaitMs: a.maxWaitMs, captchaLength: String(a.captchaLength ?? ''), maxRetries: a.maxRetries ?? 0 };
+          if (a.type === 'click_button') {
+            const aiMatch = a.button.match(/^\{aiBtn(?::(.+))?\}$/);
+            let buttonDropdown: string, buttonCustom = '', buttonAiHint = '';
+            if (aiMatch) { buttonDropdown = '{aiBtn}'; buttonAiHint = aiMatch[1]?.trim() ?? ''; }
+            else if (ACTION_BTN_PRESETS.has(a.button)) { buttonDropdown = a.button; }
+            else { buttonDropdown = 'custom'; buttonCustom = a.button; }
+            return { ...base, type: 'click_button' as const, button: a.button, buttonDropdown, buttonCustom, buttonAiHint, maxRetries: a.maxRetries, maxWaitMs: a.maxWaitMs };
+          }
+          return base;
+        });
+      } catch { customActions.value = []; customJobMaxRetries.value = 1; }
+    }
+  } else {
+    Object.assign(embyServer, { protocol: 'https', host: '', port: 443 });
+    Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '', markWatched: true });
+    customActions.value = [];
+  }
+}
+
+function onTemplateChange() {
+  const tpl = linkedTemplate.value;
+  if (!tpl) return;
+  applyTemplate(tpl);
+  // Reset account when job type changes via template
+  form.accountId = (form.jobType === 'checkin' || form.jobType === 'custom') ? (accounts.value[0]?.id ?? null) : null;
 }
 
 async function loadJobs() {
@@ -715,6 +845,7 @@ function openAdd() {
     replyTimeoutMs: 40000,
     retryMax: Number(settings.value?.default_max_retry ?? 5),
     enabled: true,
+    templateId: null,
   });
   Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '', markWatched: true });
   Object.assign(embyServer, { protocol: 'https', host: '', port: 443 });
@@ -732,6 +863,7 @@ function openEdit(j: Job) {
     botUsername: j.botUsername, scheduleWindowStart: j.scheduleWindowStart,
     scheduleWindowEnd: j.scheduleWindowEnd, timezone: j.timezone,
     replyTimeoutMs: j.replyTimeoutMs, retryMax: j.retryMax, enabled: j.enabled,
+    templateId: j.templateId ?? null,
   });
   setCmdState(j.startCommand === '/start' ? '' : (j.startCommand ?? ''));
   setBtnState(j.checkinButton === '签到' ? '' : (j.checkinButton ?? ''));
@@ -816,6 +948,8 @@ function openDuplicate(j: Job) {
   openEdit(j);
   editTarget.value = null;
   form.name = `${j.name} (copy)`;
+  // Duplicated jobs are unlinked from the template
+  form.templateId = null;
 }
 
 function handleEmbyHostPaste(event: ClipboardEvent) {
@@ -910,9 +1044,11 @@ async function saveJob() {
       : (btnDropdown.value === 'custom' ? btnCustom.value : btnDropdown.value) || undefined;
     const payload = {
       ...form,
-      config: rawCfg ?? null,
+      // config is serialised by the backend; pass as-is
+      config: rawCfg as unknown as string | null,
       startCommand,
       checkinButton,
+      templateId: form.templateId ?? null,
     };
     if (editTarget.value) {
       await jobsApi.update(editTarget.value.id, payload);
@@ -925,6 +1061,41 @@ async function saveJob() {
     formError.value = err.response?.data?.error ?? t('common.saveFailed');
   } finally {
     saving.value = false;
+  }
+}
+
+function openExtract(j: Job) {
+  extractSource.value = j;
+  extractName.value = j.name;
+  extractError.value = '';
+}
+
+async function confirmExtract() {
+  const job = extractSource.value;
+  if (!job) return;
+  if (!extractName.value) { extractError.value = t('jobs.errors.nameRequired'); return; }
+  extractSaving.value = true;
+  extractError.value = '';
+  try {
+    const tpl = await templatesApi.create({
+      name: extractName.value,
+      jobType: job.jobType,
+      botUsername: job.botUsername,
+      timezone: job.timezone,
+      replyTimeoutMs: job.replyTimeoutMs,
+      retryMax: job.retryMax,
+      config: job.config ? JSON.parse(job.config) as unknown as string | null : null,
+      startCommand: job.startCommand,
+      checkinButton: job.checkinButton,
+    });
+    await jobsApi.update(job.id, { templateId: tpl.id });
+    extractSource.value = null;
+    showForm.value = false;
+    await Promise.all([loadJobs(), loadTemplates()]);
+  } catch (err: any) {
+    extractError.value = err.response?.data?.error ?? t('common.saveFailed');
+  } finally {
+    extractSaving.value = false;
   }
 }
 
@@ -1038,6 +1209,39 @@ onUnmounted(() => {
 
 .row-selected td {
   background: #eff6ff;
+}
+
+.badge-tpl {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #e0e7ff;
+  color: #4338ca;
+  margin-left: 5px;
+  vertical-align: middle;
+  letter-spacing: 0.03em;
+}
+
+.template-summary-card {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f0f4ff;
+  border: 1px solid #c7d2fe;
+}
+
+.template-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.template-summary-detail {
+  font-size: 13px;
+  color: #4b5563;
 }
 
 /* ── Mobile action sheet ──────────────────────────────────────────────────────── */

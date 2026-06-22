@@ -792,6 +792,7 @@ async function doImport() {
     const result = await dataApi.import(parsed, importMode.value);
     importMsg.value = t("settings.importExport.importSuccess")
       .replace("{a}", String(result.accountsImported))
+      .replace("{t}", String(result.templatesImported))
       .replace("{j}", String(result.jobsImported))
       .replace("{s}", String(result.settingsUpdated));
     if (fileInput.value) fileInput.value.value = "";

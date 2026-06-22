@@ -31,6 +31,22 @@ export type Job = {
   config: string | null;
   startCommand: string;
   checkinButton: string;
+  templateId?: number | null;
+};
+
+export type JobTemplate = {
+  id: number;
+  name: string;
+  jobType: JobType;
+  botUsername: string;
+  timezone: string;
+  replyTimeoutMs: number;
+  retryMax: number;
+  config: string | null;
+  startCommand: string;
+  checkinButton: string;
+  createdAt: string;
+  linkedJobCount?: number;
 };
 
 export type CustomAction =

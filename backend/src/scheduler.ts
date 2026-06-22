@@ -114,6 +114,7 @@ export async function executeJob(job: Job, account: TgAccount | null): Promise<v
       config: freshJob.config ?? null,
       startCommand: freshJob.start_command || "/start",
       checkinButton: freshJob.checkin_button || "签到",
+      templateId: freshJob.template_id ?? null,
     };
   }
 

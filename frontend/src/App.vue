@@ -33,6 +33,7 @@
       </div>
       <a class="nav-link" href="#" :class="{ active: currentView === 'accounts' }" @click.prevent="setView('accounts')">{{ t('nav.accounts') }}</a>
       <a class="nav-link" href="#" :class="{ active: currentView === 'jobs' }" @click.prevent="setView('jobs')">{{ t('nav.jobs') }}</a>
+      <a class="nav-link" href="#" :class="{ active: currentView === 'templates' }" @click.prevent="setView('templates')">{{ t('nav.templates') }}</a>
       <a class="nav-link" href="#" :class="{ active: currentView === 'settings' }" @click.prevent="setView('settings')">{{ t('nav.settings') }}</a>
       <a class="nav-link" href="#" :class="{ active: currentView === 'logs' }" @click.prevent="setView('logs')">{{ t('nav.logs') }}</a>
       <a class="nav-link" href="#" :class="{ active: currentView === 'help' }" @click.prevent="setView('help')">{{ t('nav.help') }}</a>
@@ -65,18 +66,20 @@ import { version as APP_VERSION } from '../package.json';
 import { t, locale, setLocale } from './i18n';
 import AccountsView from './views/AccountsView.vue';
 import JobsView from './views/JobsView.vue';
+import TemplatesView from './views/TemplatesView.vue';
 import LogsView from './views/LogsView.vue';
 import SettingsView from './views/SettingsView.vue';
 import HelpView from './views/HelpView.vue';
 
-type ViewName = 'accounts' | 'jobs' | 'settings' | 'logs' | 'help';
+type ViewName = 'accounts' | 'jobs' | 'templates' | 'settings' | 'logs' | 'help';
 
 const LAST_VIEW_KEY = 'bemby:lastView';
-const VALID_VIEWS: ViewName[] = ['accounts', 'jobs', 'settings', 'logs', 'help'];
+const VALID_VIEWS: ViewName[] = ['accounts', 'jobs', 'templates', 'settings', 'logs', 'help'];
 
 const viewComponents: Record<ViewName, Component> = {
   accounts: AccountsView,
   jobs: JobsView,
+  templates: TemplatesView,
   settings: SettingsView,
   logs: LogsView,
   help: HelpView,

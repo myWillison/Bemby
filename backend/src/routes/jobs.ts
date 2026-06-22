@@ -29,6 +29,7 @@ type JobRow = {
   config: string | null;
   start_command: string;
   checkin_button: string;
+  template_id: number | null;
   account_name?: string;
 };
 
@@ -61,6 +62,7 @@ function rowToJob(row: JobRow): Job & { accountName?: string } {
     config: row.config ?? null,
     startCommand: row.start_command || "/start",
     checkinButton: row.checkin_button || "签到",
+    templateId: row.template_id ?? null,
   };
 }
 
@@ -93,6 +95,7 @@ router.post("/", (req, res) => {
     config,
     startCommand,
     checkinButton,
+    templateId,
   } = req.body as Record<string, any>;
 
   const resolvedType = jobType ?? "checkin";
@@ -109,8 +112,8 @@ router.post("/", (req, res) => {
       `
     INSERT INTO jobs
       (name, account_id, job_type, bot_username, schedule_window_start, schedule_window_end,
-       timezone, reply_timeout_ms, retry_max, enabled, config, start_command, checkin_button)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       timezone, reply_timeout_ms, retry_max, enabled, config, start_command, checkin_button, template_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
     )
     .run(
@@ -127,6 +130,7 @@ router.post("/", (req, res) => {
       config != null ? JSON.stringify(config) : null,
       (startCommand as string | undefined)?.trim() || "/start",
       (checkinButton as string | undefined)?.trim() || "签到",
+      templateId ? Number(templateId) : null,
     );
 
   const row = db
@@ -161,36 +165,44 @@ router.put("/:id", (req, res) => {
     config,
     startCommand,
     checkinButton,
+    templateId,
   } = req.body as Record<string, any>;
 
-  const updatedType = jobType ?? existing.job_type;
+  // When linked to a template, template-controlled fields are read-only
+  const isLinked = existing.template_id != null && templateId === undefined;
+  const resolvedTemplateId = templateId !== undefined
+    ? (templateId ? Number(templateId) : null)
+    : existing.template_id;
+
+  const updatedType = isLinked ? existing.job_type : (jobType ?? existing.job_type);
   db.prepare(
     `
     UPDATE jobs SET
       name = ?, account_id = ?, job_type = ?, bot_username = ?,
       schedule_window_start = ?, schedule_window_end = ?, timezone = ?,
       reply_timeout_ms = ?, retry_max = ?, enabled = ?, config = ?,
-      start_command = ?, checkin_button = ?
+      start_command = ?, checkin_button = ?, template_id = ?
     WHERE id = ?
   `,
   ).run(
     name ?? existing.name,
     accountId !== undefined ? (accountId ? Number(accountId) : null) : (existing.account_id ?? null),
     updatedType,
-    (botUsername as string | undefined)?.replace(/^@+/, "") ?? existing.bot_username,
+    isLinked ? existing.bot_username : ((botUsername as string | undefined)?.replace(/^@+/, "") ?? existing.bot_username),
     Number(scheduleWindowStart ?? existing.schedule_window_start),
     Number(scheduleWindowEnd ?? existing.schedule_window_end),
-    timezone ?? existing.timezone,
-    Number(replyTimeoutMs ?? existing.reply_timeout_ms),
-    Number(retryMax ?? existing.retry_max),
-    enabled !== undefined ? (enabled ? 1 : 0) : existing.enabled,
-    config !== undefined
+    isLinked ? existing.timezone : (timezone ?? existing.timezone),
+    isLinked ? existing.reply_timeout_ms : Number(replyTimeoutMs ?? existing.reply_timeout_ms),
+    isLinked ? existing.retry_max : Number(retryMax ?? existing.retry_max),
+    isLinked ? existing.enabled : (enabled !== undefined ? (enabled ? 1 : 0) : existing.enabled),
+    isLinked ? existing.config : (config !== undefined
       ? config != null
         ? JSON.stringify(config)
         : null
-      : existing.config,
-    startCommand !== undefined ? ((startCommand as string).trim() || "/start") : existing.start_command,
-    checkinButton !== undefined ? ((checkinButton as string).trim() || "签到") : existing.checkin_button,
+      : existing.config),
+    isLinked ? existing.start_command : (startCommand !== undefined ? ((startCommand as string).trim() || "/start") : existing.start_command),
+    isLinked ? existing.checkin_button : (checkinButton !== undefined ? ((checkinButton as string).trim() || "签到") : existing.checkin_button),
+    resolvedTemplateId,
     req.params.id,
   );
 

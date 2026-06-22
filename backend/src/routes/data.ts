@@ -17,6 +17,7 @@ type AccountRow = {
 type JobRow = {
   id: number;
   account_id: number | null;
+  template_id: number | null;
   name: string;
   job_type: string;
   bot_username: string;
@@ -26,6 +27,19 @@ type JobRow = {
   reply_timeout_ms: number;
   retry_max: number;
   enabled: number;
+  config: string | null;
+  start_command: string;
+  checkin_button: string;
+};
+
+type TemplateRow = {
+  id: number;
+  name: string;
+  job_type: string;
+  bot_username: string;
+  timezone: string;
+  reply_timeout_ms: number;
+  retry_max: number;
   config: string | null;
   start_command: string;
   checkin_button: string;
@@ -44,9 +58,22 @@ export type ExportPayload = {
     sessionString: string | null;
     authStatus: string;
   }>;
+  templates?: Array<{
+    name: string;
+    jobType: string;
+    botUsername: string;
+    timezone: string;
+    replyTimeoutMs: number;
+    retryMax: number;
+    config: string | null;
+    startCommand: string;
+    checkinButton: string;
+  }>;
   jobs: Array<{
     /** Index into the accounts array; null for jobs that don't require an account */
     accountIndex: number | null;
+    /** Index into the templates array; null if not linked to a template */
+    templateIndex?: number | null;
     name: string;
     jobType: string;
     botUsername: string;
@@ -65,11 +92,12 @@ export type ExportPayload = {
 
 router.get('/export', (_req, res) => {
   const accounts = db.prepare('SELECT * FROM tg_accounts ORDER BY id').all() as AccountRow[];
+  const templates = db.prepare('SELECT * FROM job_templates ORDER BY id').all() as TemplateRow[];
   const jobs = db.prepare('SELECT * FROM jobs ORDER BY id').all() as JobRow[];
   const settings = db.prepare('SELECT key, value FROM settings').all() as SettingRow[];
 
-  // Build accountId -> index lookup for jobs
-  const idToIndex = new Map(accounts.map((a, i) => [a.id, i]));
+  const accountIdToIndex = new Map(accounts.map((a, i) => [a.id, i]));
+  const templateIdToIndex = new Map(templates.map((t, i) => [t.id, i]));
 
   const payload: ExportPayload = {
     version: '1',
@@ -82,8 +110,20 @@ router.get('/export', (_req, res) => {
       sessionString: a.session_string,
       authStatus: a.auth_status,
     })),
+    templates: templates.map(t => ({
+      name: t.name,
+      jobType: t.job_type,
+      botUsername: t.bot_username,
+      timezone: t.timezone,
+      replyTimeoutMs: t.reply_timeout_ms,
+      retryMax: t.retry_max,
+      config: t.config,
+      startCommand: t.start_command,
+      checkinButton: t.checkin_button,
+    })),
     jobs: jobs.map(j => ({
-      accountIndex: j.account_id != null ? (idToIndex.get(j.account_id) ?? null) : null,
+      accountIndex: j.account_id != null ? (accountIdToIndex.get(j.account_id) ?? null) : null,
+      templateIndex: j.template_id != null ? (templateIdToIndex.get(j.template_id) ?? null) : null,
       name: j.name,
       jobType: j.job_type,
       botUsername: j.bot_username,
@@ -116,25 +156,26 @@ router.post('/import', (req, res) => {
     return;
   }
 
-  const results = { accountsImported: 0, accountsSkipped: 0, jobsImported: 0, settingsUpdated: 0 };
+  const results = { accountsImported: 0, accountsSkipped: 0, templatesImported: 0, jobsImported: 0, settingsUpdated: 0 };
 
   db.transaction(() => {
     if (mode === 'replace') {
+      // Jobs must be deleted first due to FK references
       db.prepare('DELETE FROM jobs').run();
+      db.prepare('DELETE FROM job_templates').run();
       db.prepare('DELETE FROM tg_accounts').run();
     }
 
-    // Import accounts and build new accountIndex -> new db id mapping
-    const indexToNewId = new Map<number, number>();
+    // Import accounts and build accountIndex -> new db id mapping
+    const accountIndexToId = new Map<number, number>();
 
     for (let i = 0; i < data.accounts.length; i++) {
       const a = data.accounts[i];
 
       if (mode === 'merge') {
-        // Skip if phone number already exists
         const existing = db.prepare('SELECT id FROM tg_accounts WHERE phone_number = ?').get(a.phoneNumber) as { id: number } | undefined;
         if (existing) {
-          indexToNewId.set(i, existing.id);
+          accountIndexToId.set(i, existing.id);
           results.accountsSkipped++;
           continue;
         }
@@ -145,21 +186,59 @@ router.post('/import', (req, res) => {
          VALUES (?, ?, ?, ?, ?, ?)`,
       ).run(a.name, a.phoneNumber, a.apiId, a.apiHash, a.sessionString ?? null, a.authStatus ?? 'unauthenticated');
 
-      indexToNewId.set(i, result.lastInsertRowid as number);
+      accountIndexToId.set(i, result.lastInsertRowid as number);
       results.accountsImported++;
+    }
+
+    // Import templates and build templateIndex -> new db id mapping
+    const templateIndexToId = new Map<number, number>();
+
+    if (Array.isArray(data.templates)) {
+      for (let i = 0; i < data.templates.length; i++) {
+        const t = data.templates[i];
+
+        if (mode === 'merge') {
+          const existing = db.prepare('SELECT id FROM job_templates WHERE name = ?').get(t.name) as { id: number } | undefined;
+          if (existing) {
+            templateIndexToId.set(i, existing.id);
+            continue;
+          }
+        }
+
+        const result = db.prepare(
+          `INSERT INTO job_templates
+             (name, job_type, bot_username, timezone, reply_timeout_ms, retry_max, config, start_command, checkin_button)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          t.name,
+          t.jobType ?? 'checkin',
+          t.botUsername ?? '',
+          t.timezone ?? 'Australia/Sydney',
+          t.replyTimeoutMs ?? 40000,
+          t.retryMax ?? 5,
+          t.config ?? null,
+          t.startCommand ?? '/start',
+          t.checkinButton ?? '签到',
+        );
+
+        templateIndexToId.set(i, result.lastInsertRowid as number);
+        results.templatesImported++;
+      }
     }
 
     // Import jobs
     for (const j of data.jobs) {
-      const resolvedAccountId = j.accountIndex != null ? (indexToNewId.get(j.accountIndex) ?? null) : null;
+      const resolvedAccountId = j.accountIndex != null ? (accountIndexToId.get(j.accountIndex) ?? null) : null;
+      const resolvedTemplateId = j.templateIndex != null ? (templateIndexToId.get(j.templateIndex) ?? null) : null;
 
       db.prepare(
         `INSERT INTO jobs
-           (account_id, name, job_type, bot_username, schedule_window_start, schedule_window_end,
+           (account_id, template_id, name, job_type, bot_username, schedule_window_start, schedule_window_end,
             timezone, reply_timeout_ms, retry_max, enabled, config, start_command, checkin_button)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         resolvedAccountId,
+        resolvedTemplateId,
         j.name,
         j.jobType ?? 'checkin',
         j.botUsername,

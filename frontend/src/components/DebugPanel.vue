@@ -162,4 +162,23 @@ const maxTokens = defineModel<number>("maxTokens", { required: true });
 .debug-panel-response {
   margin-top: 10px;
 }
+
+.debug-panel-response .dev-block-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6366f1;
+  margin-bottom: 4px;
+}
+
+.debug-panel-response .dev-block-pre {
+  margin: 0;
+  font-size: 11px;
+  color: #cdd6f4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: monospace;
+  line-height: 1.5;
+}
 </style>

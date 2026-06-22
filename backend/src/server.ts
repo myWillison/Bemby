@@ -18,6 +18,7 @@ import settingsRouter from './routes/settings';
 import dataRouter from './routes/data';
 import debugRouter from './routes/debug';
 import aiSuppliersRouter from './routes/ai-suppliers';
+import templatesRouter from './routes/templates';
 import { requireAuth } from './middleware/auth';
 import { startScheduler } from './scheduler';
 
@@ -44,6 +45,7 @@ app.use('/api/settings', requireAuth, settingsRouter);
 app.use('/api/data', requireAuth, dataRouter);
 app.use('/api/debug', requireAuth, debugRouter);
 app.use('/api/ai-suppliers', requireAuth, aiSuppliersRouter);
+app.use('/api/templates', requireAuth, templatesRouter);
 
 // Serve Vue SPA
 const publicDir = path.join(__dirname, '..', 'public');

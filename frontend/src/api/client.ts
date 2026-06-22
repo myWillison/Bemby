@@ -108,6 +108,22 @@ export type Job = {
   config: string | null;
   startCommand: string;
   checkinButton: string;
+  templateId?: number | null;
+};
+
+export type JobTemplate = {
+  id: number;
+  name: string;
+  jobType: "checkin" | "embywatch" | "custom";
+  botUsername: string;
+  timezone: string;
+  replyTimeoutMs: number;
+  retryMax: number;
+  config: string | null;
+  startCommand: string;
+  checkinButton: string;
+  createdAt: string;
+  linkedJobCount?: number;
 };
 
 export type EmbywatchLog = {
@@ -238,6 +254,15 @@ export const jobsApi = {
       .then((r) => r.data),
 };
 
+// ── Templates ────────────────────────────────────────────────────────────────
+
+export const templatesApi = {
+  list: () => api.get<JobTemplate[]>('/templates').then((r) => r.data),
+  create: (data: Partial<JobTemplate>) => api.post<JobTemplate>('/templates', data).then((r) => r.data),
+  update: (id: number, data: Partial<JobTemplate>) => api.put<JobTemplate>(`/templates/${id}`, data).then((r) => r.data),
+  delete: (id: number) => api.delete(`/templates/${id}`),
+};
+
 // ── Logs ─────────────────────────────────────────────────────────────────────
 
 export const logsApi = {
@@ -268,6 +293,7 @@ export type Settings = {
   default_ua: string;
   default_play_duration: string;
   default_device_name: string;
+  ai_api_key: string;
   ai_model: string;
   notify_tg_username: string;
   notify_tg_events: string;
@@ -325,8 +351,20 @@ export type ExportPayload = {
     sessionString: string | null;
     authStatus: string;
   }>;
+  templates?: Array<{
+    name: string;
+    jobType: string;
+    botUsername: string;
+    timezone: string;
+    replyTimeoutMs: number;
+    retryMax: number;
+    config: string | null;
+    startCommand: string;
+    checkinButton: string;
+  }>;
   jobs: Array<{
     accountIndex: number | null;
+    templateIndex?: number | null;
     name: string;
     jobType: string;
     botUsername: string;
@@ -347,6 +385,7 @@ export type ImportResult = {
   message: string;
   accountsImported: number;
   accountsSkipped: number;
+  templatesImported: number;
   jobsImported: number;
   settingsUpdated: number;
 };
