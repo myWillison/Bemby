@@ -68,6 +68,13 @@
         <p style="font-size:12px;color:#888;margin-top:-8px;margin-bottom:14px">
           {{ t('accounts.apiHint') }} <a href="https://my.telegram.org/apps" target="_blank">my.telegram.org/apps</a>
         </p>
+        <div v-if="proxiesList.length" class="form-group">
+          <label class="form-label">{{ t('accounts.labelProxy') }}</label>
+          <select v-model="form.proxyId" class="form-select">
+            <option value="">{{ t('accounts.proxyNone') }}</option>
+            <option v-for="p in proxiesList" :key="p.id" :value="p.id">{{ p.name }}</option>
+          </select>
+        </div>
         <div class="modal-footer">
           <button class="btn btn-ghost" @click="showForm = false"><i class="fa-solid fa-xmark"></i> {{ t('common.cancel') }}</button>
           <button class="btn btn-primary" :disabled="saving" @click="saveAccount">
@@ -126,16 +133,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue';
-import { accountsApi, type Account } from '../api/client';
+import { ref, reactive, computed, onMounted } from 'vue';
+import { accountsApi, settingsApi, type Account, type Proxy } from '../api/client';
 import { t, locale } from '../i18n';
 
 const accounts = ref<Account[]>([]);
+const settings = ref<{ proxies?: string } | null>(null);
+
+const proxiesList = computed<Proxy[]>(() => {
+  try { return JSON.parse(settings.value?.proxies ?? '[]'); } catch { return []; }
+});
 
 // ── Form state ────────────────────────────────────────────────────────────────
 const showForm = ref(false);
 const editTarget = ref<Account | null>(null);
-const form = reactive({ name: '', phoneNumber: '', apiId: '', apiHash: '' });
+const form = reactive({ name: '', phoneNumber: '', apiId: '', apiHash: '', proxyId: '' });
 const formError = ref('');
 const saving = ref(false);
 
@@ -152,7 +164,10 @@ const authBusy = ref(false);
 onMounted(load);
 
 async function load() {
-  accounts.value = await accountsApi.list();
+  [accounts.value, settings.value] = await Promise.all([
+    accountsApi.list(),
+    settingsApi.get(),
+  ]);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -174,14 +189,14 @@ function fmtDate(iso: string) {
 // ── Add / Edit ─────────────────────────────────────────────────────────────────
 function openAdd() {
   editTarget.value = null;
-  Object.assign(form, { name: '', phoneNumber: '', apiId: '', apiHash: '' });
+  Object.assign(form, { name: '', phoneNumber: '', apiId: '', apiHash: '', proxyId: '' });
   formError.value = '';
   showForm.value = true;
 }
 
 function openEdit(a: Account) {
   editTarget.value = a;
-  Object.assign(form, { name: a.name, phoneNumber: a.phoneNumber, apiId: String(a.apiId), apiHash: '' });
+  Object.assign(form, { name: a.name, phoneNumber: a.phoneNumber, apiId: String(a.apiId), apiHash: '', proxyId: a.proxyId ?? '' });
   formError.value = '';
   showForm.value = true;
 }
@@ -196,6 +211,7 @@ async function saveAccount() {
         phoneNumber: form.phoneNumber,
         apiId: Number(form.apiId),
         ...(form.apiHash ? { apiHash: form.apiHash } : {}),
+        proxyId: form.proxyId || null,
       });
     } else {
       await accountsApi.create({
@@ -203,6 +219,7 @@ async function saveAccount() {
         phoneNumber: form.phoneNumber,
         apiId: Number(form.apiId),
         apiHash: form.apiHash,
+        proxyId: form.proxyId || null,
       });
     }
     showForm.value = false;

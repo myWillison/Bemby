@@ -35,6 +35,7 @@ export type Account = {
   phoneNumber: string;
   apiId: number;
   authStatus: AuthStatus;
+  proxyId: string | null;
   createdAt: string;
 };
 
@@ -236,7 +237,7 @@ export const accountsApi = {
       apiHash: string;
     },
   ) => api.post<Account>("/accounts", data).then((r) => r.data),
-  update: (id: number, data: Partial<Account> & { apiHash?: string }) =>
+  update: (id: number, data: Partial<Account> & { apiHash?: string; proxyId?: string | null }) =>
     api.put<Account>(`/accounts/${id}`, data).then((r) => r.data),
   delete: (id: number) => api.delete(`/accounts/${id}`),
   requestCode: (id: number) =>
@@ -317,6 +318,8 @@ export const settingsApi = {
   get: () => api.get<Settings>("/settings").then((r) => r.data),
   update: (data: Partial<Settings>) =>
     api.put<Settings>("/settings", data).then((r) => r.data),
+  testProxy: (url: string) =>
+    api.post<{ ok: boolean; error?: string }>("/settings/test-proxy", { url }).then((r) => r.data),
 };
 
 // ── AI Suppliers ──────────────────────────────────────────────────────────────

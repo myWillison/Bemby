@@ -12,6 +12,7 @@ type AccountRow = {
   api_hash: string;
   session_string: string | null;
   auth_status: string;
+  proxy_id: string | null;
 };
 
 type JobRow = {
@@ -57,6 +58,7 @@ export type ExportPayload = {
     apiHash: string;
     sessionString: string | null;
     authStatus: string;
+    proxyId?: string | null;
   }>;
   templates?: Array<{
     name: string;
@@ -109,6 +111,7 @@ router.get('/export', (_req, res) => {
       apiHash: a.api_hash,
       sessionString: a.session_string,
       authStatus: a.auth_status,
+      proxyId: a.proxy_id ?? null,
     })),
     templates: templates.map(t => ({
       name: t.name,
@@ -182,9 +185,9 @@ router.post('/import', (req, res) => {
       }
 
       const result = db.prepare(
-        `INSERT INTO tg_accounts (name, phone_number, api_id, api_hash, session_string, auth_status)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      ).run(a.name, a.phoneNumber, a.apiId, a.apiHash, a.sessionString ?? null, a.authStatus ?? 'unauthenticated');
+        `INSERT INTO tg_accounts (name, phone_number, api_id, api_hash, session_string, auth_status, proxy_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(a.name, a.phoneNumber, a.apiId, a.apiHash, a.sessionString ?? null, a.authStatus ?? 'unauthenticated', a.proxyId ?? null);
 
       accountIndexToId.set(i, result.lastInsertRowid as number);
       results.accountsImported++;

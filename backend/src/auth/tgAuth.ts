@@ -1,5 +1,6 @@
 import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions';
+import type { TgProxy } from '../types';
 
 type PendingAuth = {
   client: TelegramClient;
@@ -11,14 +12,19 @@ type PendingAuth = {
 // In-memory pending auth sessions keyed by account ID
 const pending = new Map<number, PendingAuth>();
 
-export async function requestCode(accountId: number, apiId: number, apiHash: string, phoneNumber: string): Promise<void> {
+export async function requestCode(accountId: number, apiId: number, apiHash: string, phoneNumber: string, proxy?: TgProxy): Promise<void> {
   const existing = pending.get(accountId);
   if (existing) {
     await existing.client.disconnect().catch(() => undefined);
     pending.delete(accountId);
   }
 
-  const client = new TelegramClient(new StringSession(''), apiId, apiHash, { connectionRetries: 3 });
+  const client = new TelegramClient(
+    new StringSession(''),
+    apiId,
+    apiHash,
+    { connectionRetries: 3, ...(proxy ? { proxy } : {}) },
+  );
   await client.connect();
 
   const { phoneCodeHash } = await client.sendCode({ apiId, apiHash }, phoneNumber);

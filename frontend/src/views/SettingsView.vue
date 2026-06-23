@@ -248,20 +248,68 @@
           <div v-if="proxiesMsg" class="success-msg">{{ proxiesMsg }}</div>
           <div v-if="proxiesError" class="error-msg">{{ proxiesError }}</div>
 
-          <div v-for="(p, i) in proxies" :key="p.id" class="ua-preset-row">
-            <span class="ua-preset-name">{{ p.name }}</span>
-            <span class="ua-preset-value">{{ p.url }}</span>
-            <button class="btn btn-sm btn-ghost ua-preset-del" :title="t('settings.proxyDeleteTip')" @click="removeProxy(i)">
-              <i class="fa-solid fa-xmark"></i>
-            </button>
+          <div v-for="(p, i) in proxies" :key="p.id">
+            <div v-if="editingProxyId === p.id" class="proxy-edit-panel">
+              <div class="proxy-row">
+                <select v-model="editProxyForm.protocol" class="form-select" style="flex:0 0 110px">
+                  <option value="socks5">SOCKS5</option>
+                  <option value="socks4">SOCKS4</option>
+                </select>
+                <input v-model.trim="editProxyForm.host" class="form-input" style="flex:1"
+                       :placeholder="t('settings.proxyHost')" @input="onProxyHostInput(editProxyForm)" />
+                <input v-model.trim="editProxyForm.port" class="form-input" style="flex:0 0 80px"
+                       type="number" min="1" max="65535" :placeholder="t('settings.proxyPort')" />
+              </div>
+              <div class="proxy-row">
+                <input v-model.trim="editProxyForm.username" class="form-input" style="flex:1"
+                       :placeholder="t('settings.proxyUsername')" autocomplete="off" />
+                <input v-model.trim="editProxyForm.password" class="form-input" style="flex:1"
+                       :placeholder="t('settings.proxyPassword')" autocomplete="off" />
+              </div>
+              <div class="proxy-row">
+                <input v-model.trim="editProxyForm.name" class="form-input" style="flex:0 0 160px" :placeholder="t('settings.proxyName')" />
+                <button class="btn btn-sm btn-primary" :disabled="proxyEditTesting || !editProxyForm.name || !editProxyForm.host" @click="saveProxyEdit(i)">
+                  {{ proxyEditTesting ? t('settings.proxyTesting') : t('common.save') }}
+                </button>
+                <button class="btn btn-sm btn-ghost" @click="editingProxyId = null">{{ t('common.cancel') }}</button>
+              </div>
+            </div>
+            <div v-else class="ua-preset-row">
+              <span class="ua-preset-name">{{ p.name }}</span>
+              <span class="ua-preset-value">{{ p.url }}</span>
+              <button class="btn btn-sm btn-ghost btn-icon" :title="t('common.edit')" @click="startEditProxy(p)"><i class="fa-solid fa-pen"></i></button>
+              <button class="btn btn-sm btn-ghost ua-preset-del" :title="t('settings.proxyDeleteTip')" @click="removeProxy(i)">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
           </div>
-          <div class="ua-preset-add">
-            <input v-model.trim="newProxyName" class="form-input" style="flex:0 0 140px" :placeholder="t('settings.proxyName')" @keyup.enter="addProxy" />
-            <input v-model.trim="newProxyUrl" class="form-input" style="flex:1;min-width:0" :placeholder="t('settings.proxyUrl')" @keyup.enter="addProxy" />
-            <button class="btn btn-ghost btn-sm" :disabled="!newProxyName || !newProxyUrl" @click="addProxy">
-              <i class="fa-solid fa-plus"></i> {{ t("settings.addProxy") }}
-            </button>
+
+          <div class="proxy-edit-panel" style="margin-top:8px">
+            <div class="proxy-row">
+              <select v-model="newProxy.protocol" class="form-select" style="flex:0 0 110px">
+                <option value="socks5">SOCKS5</option>
+                <option value="socks4">SOCKS4</option>
+              </select>
+              <input v-model.trim="newProxy.host" class="form-input" style="flex:1"
+                     :placeholder="t('settings.proxyHost')" @input="onProxyHostInput(newProxy)" />
+              <input v-model.trim="newProxy.port" class="form-input" style="flex:0 0 80px"
+                     type="number" min="1" max="65535" :placeholder="t('settings.proxyPort')" />
+            </div>
+            <div class="proxy-row">
+              <input v-model.trim="newProxy.username" class="form-input" style="flex:1"
+                     :placeholder="t('settings.proxyUsername')" autocomplete="off" />
+              <input v-model.trim="newProxy.password" class="form-input" style="flex:1"
+                     :placeholder="t('settings.proxyPassword')" autocomplete="off" />
+            </div>
+            <div class="proxy-row">
+              <input v-model.trim="newProxy.name" class="form-input" style="flex:0 0 160px"
+                     :placeholder="t('settings.proxyName')" @keyup.enter="addProxy" />
+              <button class="btn btn-ghost btn-sm" :disabled="!newProxy.name || !newProxy.host || proxyTesting" @click="addProxy">
+                <i class="fa-solid fa-plus"></i> {{ proxyTesting ? t("settings.proxyTesting") : t("settings.addProxy") }}
+              </button>
+            </div>
           </div>
+          <p style="font-size:11px;color:#888;margin:4px 0 0">{{ t('settings.proxyUrlHint') }}</p>
 
           <button class="btn btn-primary" style="margin-top:14px" :disabled="proxiesSaving" @click="saveProxies">
             <i class="fa-solid fa-floppy-disk"></i> {{ proxiesSaving ? t("common.saving") : t("settings.saveBtn") }}
@@ -555,11 +603,44 @@ const newPresetName = ref("");
 const newPresetValue = ref("");
 
 const proxies = ref<Proxy[]>([]);
-const newProxyName = ref("");
-const newProxyUrl = ref("");
 const proxiesSaving = ref(false);
+const proxyTesting = ref(false);
+const editingProxyId = ref<string | null>(null);
+const proxyEditTesting = ref(false);
 const proxiesMsg = ref("");
 const proxiesError = ref("");
+
+type ProxyForm = { protocol: 'socks5' | 'socks4'; host: string; port: string; username: string; password: string; name: string };
+const newProxy = reactive<ProxyForm>({ protocol: 'socks5', host: '', port: '1080', username: '', password: '', name: '' });
+const editProxyForm = reactive<ProxyForm>({ protocol: 'socks5', host: '', port: '1080', username: '', password: '', name: '' });
+
+function buildProxyUrl(f: ProxyForm): string {
+  const auth = f.username ? `${encodeURIComponent(f.username)}:${encodeURIComponent(f.password)}@` : '';
+  return `${f.protocol}://${auth}${f.host}:${f.port || '1080'}`;
+}
+
+function parseProxyInput(raw: string): Omit<ProxyForm, 'name'> | null {
+  try {
+    const normalized = /^socks[45]?:\/\//i.test(raw) ? raw : `socks5://${raw}`;
+    const u = new URL(normalized);
+    const proto = u.protocol.replace(':', '').toLowerCase();
+    return {
+      protocol: proto === 'socks4' ? 'socks4' : 'socks5',
+      host: u.hostname,
+      port: u.port || '1080',
+      username: decodeURIComponent(u.username || ''),
+      password: decodeURIComponent(u.password || ''),
+    };
+  } catch { return null; }
+}
+
+function onProxyHostInput(form: ProxyForm) {
+  const val = form.host;
+  if (val.includes('://') || val.includes('@')) {
+    const parsed = parseProxyInput(val);
+    if (parsed) Object.assign(form, parsed);
+  }
+}
 
 const notifyEventOptions = computed(() => [
   { value: "failed", label: t("settings.notifyEventFailed") },
@@ -642,17 +723,71 @@ function removeUaPreset(index: number) {
   uaPresets.value.splice(index, 1);
 }
 
-function addProxy() {
-  const name = newProxyName.value.trim();
-  const url = newProxyUrl.value.trim();
-  if (!name || !url) return;
-  proxies.value.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), name, url });
-  newProxyName.value = "";
-  newProxyUrl.value = "";
+async function addProxy() {
+  if (!newProxy.name.trim() || !newProxy.host.trim()) return;
+  const url = buildProxyUrl(newProxy);
+
+  proxiesMsg.value = "";
+  proxiesError.value = "";
+  proxyTesting.value = true;
+  try {
+    const result = await settingsApi.testProxy(url);
+    if (!result.ok) {
+      proxiesError.value = `${t('settings.proxyTestFailed')}: ${result.error ?? ''}`.trimEnd().replace(/:$/, '');
+      return;
+    }
+  } catch {
+    proxiesError.value = t('settings.proxyTestFailed');
+    return;
+  } finally {
+    proxyTesting.value = false;
+  }
+
+  proxies.value.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), name: newProxy.name.trim(), url });
+  Object.assign(newProxy, { protocol: 'socks5', host: '', port: '1080', username: '', password: '', name: '' });
 }
 
 function removeProxy(index: number) {
   proxies.value.splice(index, 1);
+}
+
+function startEditProxy(p: Proxy) {
+  editingProxyId.value = p.id;
+  const parsed = parseProxyInput(p.url);
+  Object.assign(editProxyForm, {
+    protocol: parsed?.protocol ?? 'socks5',
+    host: parsed?.host ?? '',
+    port: parsed?.port ?? '1080',
+    username: parsed?.username ?? '',
+    password: parsed?.password ?? '',
+    name: p.name,
+  });
+  proxiesMsg.value = "";
+  proxiesError.value = "";
+}
+
+async function saveProxyEdit(index: number) {
+  if (!editProxyForm.name.trim() || !editProxyForm.host.trim()) return;
+  const url = buildProxyUrl(editProxyForm);
+
+  proxiesMsg.value = "";
+  proxiesError.value = "";
+  proxyEditTesting.value = true;
+  try {
+    const result = await settingsApi.testProxy(url);
+    if (!result.ok) {
+      proxiesError.value = `${t('settings.proxyTestFailed')}: ${result.error ?? ''}`.trimEnd().replace(/:$/, '');
+      return;
+    }
+  } catch {
+    proxiesError.value = t('settings.proxyTestFailed');
+    return;
+  } finally {
+    proxyEditTesting.value = false;
+  }
+
+  proxies.value[index] = { ...proxies.value[index], name: editProxyForm.name.trim(), url };
+  editingProxyId.value = null;
 }
 
 async function saveProxies() {
@@ -1131,5 +1266,22 @@ async function saveCredentials() {
 }
 @media (max-width: 640px) {
   .s-col-4, .s-col-6 { grid-column: span 12; }
+}
+
+.proxy-edit-panel {
+  padding: 10px;
+  border: 1px solid #e8e8f0;
+  border-radius: 6px;
+  background: #fafafa;
+  margin-bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.proxy-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 </style>

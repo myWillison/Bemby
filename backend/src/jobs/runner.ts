@@ -4,9 +4,11 @@ import { runEmbywatch } from './embywatch';
 import { runCustom, CustomJobError, type CustomJobLog } from './custom';
 import { db } from '../db/database';
 
-function resolveProxyUrl(jobConfig: string | null, templateId: number | null | undefined): string | undefined {
-  let proxyId: string | undefined;
-  if (templateId) {
+function resolveProxyUrl(jobConfig: string | null, templateId: number | null | undefined, accountProxyId?: string | null): string | undefined {
+  // Account proxy takes priority over job/template proxy
+  let proxyId: string | undefined = accountProxyId ?? undefined;
+
+  if (!proxyId && templateId) {
     try {
       const row = db.prepare('SELECT config FROM job_templates WHERE id = ?').get(templateId) as { config: string | null } | undefined;
       if (row?.config) {
@@ -75,7 +77,7 @@ export async function runJob(
         case 'checkin': {
           if (!account) throw new Error('No account linked to this job');
           if (!account.sessionString) throw new Error('Account has no session -- authenticate first');
-          const checkinProxyUrl = resolveProxyUrl(job.config, job.templateId);
+          const checkinProxyUrl = resolveProxyUrl(job.config, job.templateId, account.proxyId);
           const checkinProxy = parseTgProxy(checkinProxyUrl);
           const log = await runCheckin(
             account.apiId, account.apiHash, account.sessionString,
@@ -107,7 +109,7 @@ export async function runJob(
           if (!account) throw new Error('No account linked to this job');
           if (!account.sessionString) throw new Error('Account has no session -- authenticate first');
           const rawCfg = JSON.parse(job.config ?? '{"actions":[]}');
-          const customProxyUrl = resolveProxyUrl(job.config, job.templateId);
+          const customProxyUrl = resolveProxyUrl(job.config, job.templateId, account.proxyId);
           const customProxy = parseTgProxy(customProxyUrl);
           const customLog = await runCustom(
             account.apiId, account.apiHash, account.sessionString,

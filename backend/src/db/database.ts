@@ -94,6 +94,7 @@ try { db.exec("ALTER TABLE jobs ADD COLUMN checkin_button TEXT NOT NULL DEFAULT 
 try { db.exec('ALTER TABLE job_logs ADD COLUMN detail TEXT'); } catch {}
 try { db.exec('ALTER TABLE job_logs ADD COLUMN retired INTEGER NOT NULL DEFAULT 0'); } catch {}
 try { db.exec('ALTER TABLE jobs ADD COLUMN template_id INTEGER REFERENCES job_templates(id) ON DELETE SET NULL'); } catch {}
+try { db.exec('ALTER TABLE tg_accounts ADD COLUMN proxy_id TEXT'); } catch {}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS job_templates (

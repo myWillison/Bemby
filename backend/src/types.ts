@@ -10,6 +10,7 @@ export type TgAccount = {
   apiHash: string;
   sessionString: string | null;
   authStatus: AuthStatus;
+  proxyId: string | null;
   createdAt: string;
 };
 

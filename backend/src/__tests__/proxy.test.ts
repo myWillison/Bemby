@@ -77,7 +77,7 @@ function makeCheckinJob(overrides: Partial<Job> = {}): Job {
 }
 
 function makeAccount(): TgAccount {
-  return { id: 1, name: 'A', phoneNumber: '+1', apiId: 1, apiHash: 'h', sessionString: 'sess', authStatus: 'authenticated', createdAt: '' };
+  return { id: 1, name: 'A', phoneNumber: '+1', apiId: 1, apiHash: 'h', sessionString: 'sess', authStatus: 'authenticated', proxyId: null, createdAt: '' };
 }
 
 const stubLog = { attempt: 1, commandSent: '/start', hasMedia: false, commandResponseHtml: '', availableButtons: [] };
@@ -162,6 +162,85 @@ describe('runJob proxy resolution — custom', () => {
 
     const tgProxy = vi.mocked(runCustom).mock.calls[0][6];
     expect(tgProxy).toMatchObject({ ip: 'custom.proxy', port: 1080, socksType: 5 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Account-level proxy priority
+// ---------------------------------------------------------------------------
+
+const ALL_PROXIES = JSON.stringify([
+  { id: 'acct-px', name: 'Account proxy', url: 'socks5://acct.proxy:1080' },
+  { id: 'job-px',  name: 'Job proxy',     url: 'socks5://job.proxy:1080' },
+  { id: 'tpl-px',  name: 'Template proxy', url: 'socks5://tpl.proxy:1080' },
+]);
+
+describe('runJob proxy resolution — account proxy priority (checkin)', () => {
+  it('uses account proxy over job config proxy', async () => {
+    vi.mocked(runCheckin).mockResolvedValue(stubLog as any);
+    vi.mocked(db.prepare).mockReturnValue({ get: vi.fn().mockReturnValue({ value: ALL_PROXIES }) } as any);
+
+    const account = { ...makeAccount(), proxyId: 'acct-px' };
+    const job = makeCheckinJob({ config: JSON.stringify({ proxyId: 'job-px' }) });
+    await runJob(job, account);
+
+    const tgProxy = vi.mocked(runCheckin).mock.calls[0][10];
+    expect(tgProxy).toMatchObject({ ip: 'acct.proxy' });
+  });
+
+  it('uses account proxy over template proxy', async () => {
+    vi.mocked(runCheckin).mockResolvedValue(stubLog as any);
+    vi.mocked(db.prepare).mockImplementation((sql: string) => ({
+      get: vi.fn().mockImplementation(() => {
+        if (sql.includes('job_templates')) return { config: JSON.stringify({ proxyId: 'tpl-px' }) };
+        return { value: ALL_PROXIES };
+      }),
+    } as any));
+
+    const account = { ...makeAccount(), proxyId: 'acct-px' };
+    const job = makeCheckinJob({ templateId: 99, config: null });
+    await runJob(job, account);
+
+    const tgProxy = vi.mocked(runCheckin).mock.calls[0][10];
+    expect(tgProxy).toMatchObject({ ip: 'acct.proxy' });
+  });
+
+  it('falls back to job config proxy when account proxyId is null', async () => {
+    vi.mocked(runCheckin).mockResolvedValue(stubLog as any);
+    vi.mocked(db.prepare).mockReturnValue({ get: vi.fn().mockReturnValue({ value: ALL_PROXIES }) } as any);
+
+    const job = makeCheckinJob({ config: JSON.stringify({ proxyId: 'job-px' }) });
+    await runJob(job, makeAccount()); // proxyId: null
+
+    const tgProxy = vi.mocked(runCheckin).mock.calls[0][10];
+    expect(tgProxy).toMatchObject({ ip: 'job.proxy' });
+  });
+
+  it('passes no proxy when account proxyId is null and job has no proxy', async () => {
+    vi.mocked(runCheckin).mockResolvedValue(stubLog as any);
+    vi.mocked(db.prepare).mockReturnValue({ get: vi.fn().mockReturnValue(undefined) } as any);
+
+    await runJob(makeCheckinJob(), makeAccount()); // both null
+
+    const tgProxy = vi.mocked(runCheckin).mock.calls[0][10];
+    expect(tgProxy).toBeUndefined();
+  });
+});
+
+describe('runJob proxy resolution — account proxy priority (custom)', () => {
+  it('uses account proxy over job config proxy', async () => {
+    vi.mocked(runCustom).mockResolvedValue({ steps: [] } as any);
+    vi.mocked(db.prepare).mockReturnValue({ get: vi.fn().mockReturnValue({ value: ALL_PROXIES }) } as any);
+
+    const account = { ...makeAccount(), proxyId: 'acct-px' };
+    const job = makeCheckinJob({
+      jobType: 'custom',
+      config: JSON.stringify({ actions: [], proxyId: 'job-px' }),
+    });
+    await runJob(job, account);
+
+    const tgProxy = vi.mocked(runCustom).mock.calls[0][6];
+    expect(tgProxy).toMatchObject({ ip: 'acct.proxy' });
   });
 });
 
