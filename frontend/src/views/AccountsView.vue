@@ -1,18 +1,25 @@
 <template>
   <div>
     <div class="page-header">
-      <h2 class="page-title">{{ t('accounts.title') }}</h2>
+      <h2 class="page-title">{{ t("accounts.title") }}</h2>
       <div class="page-header-actions">
-        <button v-if="selectedIds.size > 0" class="btn btn-secondary" @click="openExportWarn">
-          <i class="fa-solid fa-file-export"></i> {{ t('accounts.exportSelectedBtn') }} ({{ selectedIds.size }})
+        <button
+          v-if="selectedIds.size > 0"
+          class="btn btn-secondary"
+          @click="openExportWarn"
+        >
+          <i class="fa-solid fa-file-export"></i>
+          {{ t("accounts.exportSelectedBtn") }} ({{ selectedIds.size }})
         </button>
         <button v-else class="btn btn-secondary" @click="openExportWarn">
-          <i class="fa-solid fa-file-export"></i> {{ t('accounts.exportBtn') }}
+          <i class="fa-solid fa-file-export"></i> {{ t("accounts.exportBtn") }}
         </button>
         <button class="btn btn-secondary" @click="openImport">
-          <i class="fa-solid fa-file-import"></i> {{ t('accounts.importBtn') }}
+          <i class="fa-solid fa-file-import"></i> {{ t("accounts.importBtn") }}
         </button>
-        <button class="btn btn-primary" @click="openAdd"><i class="fa-solid fa-plus"></i> {{ t('accounts.addBtn') }}</button>
+        <button class="btn btn-primary" @click="openAdd">
+          <i class="fa-solid fa-plus"></i> {{ t("accounts.addBtn") }}
+        </button>
       </div>
     </div>
 
@@ -21,29 +28,74 @@
         <table>
           <thead>
             <tr>
-              <th style="width:36px">
-                <input type="checkbox" :checked="allSelected" :indeterminate="someSelected" @change="toggleSelectAll" />
+              <th style="width: 20px"></th>
+              <th style="width: 36px">
+                <input
+                  type="checkbox"
+                  :checked="allSelected"
+                  :indeterminate="someSelected"
+                  @change="toggleSelectAll"
+                />
               </th>
-              <th>{{ t('common.name') }}</th>
-              <th>{{ t('accounts.colPhone') }}</th>
-              <th>{{ t('accounts.colStatus') }}</th>
-              <th class="col-hide-mobile">{{ t('accounts.colAdded') }}</th>
-              <th>{{ t('common.actions') }}</th>
+              <th>{{ t("common.name") }}</th>
+              <th>{{ t("accounts.colPhone") }}</th>
+              <th>{{ t("accounts.colStatus") }}</th>
+              <th class="col-hide-mobile">{{ t("accounts.colAdded") }}</th>
+              <th>{{ t("common.actions") }}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="!accounts.length">
-              <td colspan="6" class="empty">{{ t('accounts.noAccounts') }}</td>
+              <td colspan="7" class="empty">{{ t("accounts.noAccounts") }}</td>
             </tr>
-            <tr v-for="a in accounts" :key="a.id" :class="a.disabled ? 'row-disabled' : ''">
-              <td><input type="checkbox" :checked="selectedIds.has(a.id)" @change="toggleSelect(a.id)" /></td>
+            <tr
+              v-for="(a, idx) in accounts"
+              :key="a.id"
+              :class="[
+                a.disabled ? 'row-disabled' : '',
+                dragOverIdx === idx ? 'drag-over' : '',
+              ]"
+              draggable="true"
+              @dragstart="onDragStart(idx, $event)"
+              @dragover.prevent="dragOverIdx = idx"
+              @dragleave="dragOverIdx = null"
+              @drop.prevent="onDrop(idx)"
+              @dragend="dragOverIdx = null"
+            >
+              <td class="drag-handle" title="Drag to reorder">
+                <i class="fa-solid fa-grip-vertical"></i>
+              </td>
+              <td>
+                <input
+                  type="checkbox"
+                  :checked="selectedIds.has(a.id)"
+                  @change="toggleSelect(a.id)"
+                />
+              </td>
               <td>
                 {{ a.name }}
-                <span v-if="a.disabled" class="badge badge-grey" style="margin-left:6px;font-size:10px">{{ t('accounts.disabled') }}</span>
-                <span v-if="a.appClientId" class="badge badge-blue" style="margin-left:4px;font-size:10px">{{ appClientsList.find(c => c.id === a.appClientId)?.name ?? a.appClientId }}</span>
+                <span
+                  v-if="a.disabled"
+                  class="badge badge-grey"
+                  style="margin-left: 6px; font-size: 10px"
+                  >{{ t("accounts.disabled") }}</span
+                >
+                <span
+                  v-if="a.appClientId"
+                  class="badge badge-blue"
+                  style="margin-left: 4px; font-size: 10px"
+                  >{{
+                    appClientsList.find((c) => c.id === a.appClientId)?.name ??
+                    a.appClientId
+                  }}</span
+                >
               </td>
               <td>{{ a.phoneNumber }}</td>
-              <td><span :class="statusBadge(a.authStatus)">{{ t(`accounts.status.${a.authStatus}`) }}</span></td>
+              <td>
+                <span :class="statusBadge(a.authStatus)">{{
+                  t(`accounts.status.${a.authStatus}`)
+                }}</span>
+              </td>
               <td class="col-hide-mobile">{{ fmtDate(a.createdAt) }}</td>
               <td>
                 <div class="actions">
@@ -52,20 +104,48 @@
                     class="btn btn-sm btn-primary btn-icon"
                     :title="t('accounts.authenticate')"
                     @click="openAuth(a)"
-                  ><i class="fa-solid fa-key"></i></button>
+                  >
+                    <i class="fa-solid fa-key"></i>
+                  </button>
                   <button
                     v-if="a.authStatus === 'authenticated'"
                     class="btn btn-sm btn-ghost btn-icon"
                     :title="t('accounts.checkStatus')"
                     @click="openCheckStatus(a)"
-                  ><i class="fa-solid fa-circle-info"></i></button>
+                  >
+                    <i class="fa-solid fa-circle-info"></i>
+                  </button>
                   <button
                     class="btn btn-sm btn-ghost btn-icon"
-                    :title="a.disabled ? t('accounts.enableAccount') : t('accounts.disableAccount')"
+                    :title="
+                      a.disabled
+                        ? t('accounts.enableAccount')
+                        : t('accounts.disableAccount')
+                    "
                     @click="toggleDisabled(a)"
-                  ><i :class="a.disabled ? 'fa-solid fa-circle-play' : 'fa-solid fa-ban'"></i></button>
-                  <button class="btn btn-sm btn-ghost btn-icon" :title="t('common.edit')" @click="openEdit(a)"><i class="fa-solid fa-pen"></i></button>
-                  <button class="btn btn-sm btn-danger btn-icon" :title="t('common.delete')" @click="remove(a.id)"><i class="fa-solid fa-trash"></i></button>
+                  >
+                    <i
+                      :class="
+                        a.disabled
+                          ? 'fa-solid fa-circle-play'
+                          : 'fa-solid fa-ban'
+                      "
+                    ></i>
+                  </button>
+                  <button
+                    class="btn btn-sm btn-ghost btn-icon"
+                    :title="t('common.edit')"
+                    @click="openEdit(a)"
+                  >
+                    <i class="fa-solid fa-pen"></i>
+                  </button>
+                  <button
+                    class="btn btn-sm btn-danger btn-icon"
+                    :title="t('common.delete')"
+                    @click="remove(a.id)"
+                  >
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
                 </div>
               </td>
             </tr>
@@ -76,37 +156,67 @@
 
     <!-- Export warning modal -->
     <div v-if="showExportWarn" class="modal-backdrop">
-      <div class="modal" style="max-width:460px">
-        <h3 class="modal-title"><i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b;margin-right:8px"></i>{{ t('accounts.exportWarnTitle') }}</h3>
-        <div class="warn-box">{{ t('accounts.exportWarnBody') }}</div>
-        <p style="font-size:13px;color:#555;margin-top:12px">
-          {{ selectedIds.size > 0
-            ? (locale === 'zh' ? `将导出 ${selectedIds.size} 个账户` : `Exporting ${selectedIds.size} account(s)`)
-            : (locale === 'zh' ? `将导出全部 ${accounts.length} 个账户` : `Exporting all ${accounts.length} account(s)`) }}
+      <div class="modal" style="max-width: 460px">
+        <h3 class="modal-title">
+          <i
+            class="fa-solid fa-triangle-exclamation"
+            style="color: #f59e0b; margin-right: 8px"
+          ></i
+          >{{ t("accounts.exportWarnTitle") }}
+        </h3>
+        <div class="warn-box">{{ t("accounts.exportWarnBody") }}</div>
+        <p style="font-size: 13px; color: #555; margin-top: 12px">
+          {{
+            selectedIds.size > 0
+              ? locale === "zh"
+                ? `将导出 ${selectedIds.size} 个账户`
+                : `Exporting ${selectedIds.size} account(s)`
+              : locale === "zh"
+                ? `将导出全部 ${accounts.length} 个账户`
+                : `Exporting all ${accounts.length} account(s)`
+          }}
         </p>
         <div class="modal-footer">
-          <button class="btn btn-ghost" @click="showExportWarn = false"><i class="fa-solid fa-xmark"></i> {{ t('common.cancel') }}</button>
-          <button class="btn btn-primary" @click="confirmExport"><i class="fa-solid fa-download"></i> {{ t('common.download') }}</button>
+          <button class="btn btn-ghost" @click="showExportWarn = false">
+            <i class="fa-solid fa-xmark"></i> {{ t("common.cancel") }}
+          </button>
+          <button class="btn btn-primary" @click="confirmExport">
+            <i class="fa-solid fa-download"></i> {{ t("common.download") }}
+          </button>
         </div>
       </div>
     </div>
 
     <!-- Import modal -->
     <div v-if="showImport" class="modal-backdrop">
-      <div class="modal" style="max-width:480px">
-        <h3 class="modal-title">{{ t('accounts.importTitle') }}</h3>
-        <div class="warn-box">{{ t('accounts.importWarnBody') }}</div>
-        <div class="form-group" style="margin-top:16px">
-          <label class="form-label">{{ t('accounts.importFileLabel') }}</label>
-          <input ref="importFileEl" type="file" accept=".json,application/json" class="form-input" @change="onImportFile" />
+      <div class="modal" style="max-width: 480px">
+        <h3 class="modal-title">{{ t("accounts.importTitle") }}</h3>
+        <div class="warn-box">{{ t("accounts.importWarnBody") }}</div>
+        <div class="form-group" style="margin-top: 16px">
+          <label class="form-label">{{ t("accounts.importFileLabel") }}</label>
+          <input
+            ref="importFileEl"
+            type="file"
+            accept=".json,application/json"
+            class="form-input"
+            @change="onImportFile"
+          />
         </div>
         <div v-if="importError" class="error-msg">{{ importError }}</div>
         <div v-if="importResult" class="success-msg">{{ importResult }}</div>
         <div class="modal-footer">
-          <button class="btn btn-ghost" @click="showImport = false"><i class="fa-solid fa-xmark"></i> {{ t('common.cancel') }}</button>
-          <button class="btn btn-primary" :disabled="!importReady || importBusy" @click="doImport">
+          <button class="btn btn-ghost" @click="showImport = false">
+            <i class="fa-solid fa-xmark"></i> {{ t("common.cancel") }}
+          </button>
+          <button
+            class="btn btn-primary"
+            :disabled="!importReady || importBusy"
+            @click="doImport"
+          >
             <i class="fa-solid fa-file-import"></i>
-            {{ importBusy ? t('accounts.importDoing') : t('accounts.importBtn') }}
+            {{
+              importBusy ? t("accounts.importDoing") : t("accounts.importBtn")
+            }}
           </button>
         </div>
       </div>
@@ -115,45 +225,96 @@
     <!-- Add / Edit modal -->
     <div v-if="showForm" class="modal-backdrop">
       <div class="modal">
-        <h3 class="modal-title">{{ t(editTarget ? 'accounts.editTitle' : 'accounts.addTitle') }}</h3>
+        <h3 class="modal-title">
+          {{ t(editTarget ? "accounts.editTitle" : "accounts.addTitle") }}
+        </h3>
         <div v-if="formError" class="error-msg">{{ formError }}</div>
         <div class="form-group">
-          <label class="form-label">{{ t('accounts.labelName') }}</label>
-          <input v-model.trim="form.name" class="form-input" placeholder="e.g. My Account" />
+          <label class="form-label">{{ t("accounts.labelName") }}</label>
+          <input
+            v-model.trim="form.name"
+            class="form-input"
+            placeholder="e.g. My Account"
+          />
         </div>
         <div class="form-group">
-          <label class="form-label">{{ t('accounts.labelPhone') }}</label>
-          <input v-model.trim="form.phoneNumber" class="form-input" placeholder="+61412345678" />
+          <label class="form-label">{{ t("accounts.labelPhone") }}</label>
+          <input
+            v-model.trim="form.phoneNumber"
+            class="form-input"
+            placeholder="+61412345678"
+          />
         </div>
-        <div class="form-group" style="max-width:140px">
-          <label class="form-label">{{ t('accounts.labelApiId') }}</label>
+        <div class="form-group" style="max-width: 140px">
+          <label class="form-label">{{ t("accounts.labelApiId") }}</label>
           <input v-model.trim="form.apiId" class="form-input" type="number" />
         </div>
         <div class="form-group">
-          <label class="form-label">{{ t('accounts.labelApiHash') }}</label>
-          <input v-model.trim="form.apiHash" class="form-input" placeholder="32-char hex" style="font-family:monospace" />
+          <label class="form-label">{{ t("accounts.labelApiHash") }}</label>
+          <input
+            v-model.trim="form.apiHash"
+            class="form-input"
+            placeholder="32-char hex"
+            style="font-family: monospace"
+          />
         </div>
-        <p style="font-size:12px;color:#888;margin-top:-8px;margin-bottom:14px">
-          {{ t('accounts.apiHint') }} <a href="https://my.telegram.org/apps" target="_blank">my.telegram.org/apps</a>
+        <p
+          style="
+            font-size: 12px;
+            color: #888;
+            margin-top: -8px;
+            margin-bottom: 14px;
+          "
+        >
+          {{ t("accounts.apiHint") }}
+          <a href="https://my.telegram.org/apps" target="_blank"
+            >my.telegram.org/apps</a
+          >
         </p>
         <div v-if="proxiesList.length" class="form-group">
-          <label class="form-label">{{ t('accounts.labelProxy') }}</label>
+          <label class="form-label">{{ t("accounts.labelProxy") }}</label>
           <select v-model="form.proxyId" class="form-select">
-            <option value="">{{ t('accounts.proxyNone') }}</option>
-            <option v-for="p in proxiesList" :key="p.id" :value="p.id">{{ p.name }}</option>
+            <option value="">{{ t("accounts.proxyNone") }}</option>
+            <option v-for="p in proxiesList" :key="p.id" :value="p.id">
+              {{ p.name }}
+            </option>
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">{{ t('accounts.labelAppClient') }}</label>
+          <label class="form-label">{{ t("accounts.labelAppClient") }}</label>
           <select v-model="form.appClientId" class="form-select">
-            <option value="">{{ t('accounts.appClientDefault') }}{{ defaultClientName ? ` (${defaultClientName})` : '' }}</option>
-            <option v-for="c in appClientsList" :key="c.id" :value="c.id">{{ c.name }}</option>
+            <option value="">
+              {{ t("accounts.appClientDefault")
+              }}{{ defaultClientName ? ` (${defaultClientName})` : "" }}
+            </option>
+            <option v-for="c in appClientsList" :key="c.id" :value="c.id">
+              {{ c.name }}
+            </option>
           </select>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-ghost" @click="showForm = false"><i class="fa-solid fa-xmark"></i> {{ t('common.cancel') }}</button>
-          <button class="btn btn-primary" :disabled="saving" @click="saveAccount">
-            <i class="fa-solid fa-floppy-disk"></i> {{ saving ? t('common.saving') : t('common.save') }}
+          <button class="btn btn-ghost" @click="showForm = false">
+            <i class="fa-solid fa-xmark"></i> {{ t("common.cancel") }}
+          </button>
+          <button
+            v-if="editTarget && editTarget.authStatus !== 'unauthenticated'"
+            class="btn btn-danger"
+            :disabled="forceReauthBusy"
+            @click="doForceReauth"
+            style="margin-right: auto"
+          >
+            <i class="fa-solid fa-rotate-right"></i>
+            {{
+              forceReauthBusy ? t("common.saving") : t("accounts.forceReauth")
+            }}
+          </button>
+          <button
+            class="btn btn-primary"
+            :disabled="saving"
+            @click="saveAccount"
+          >
+            <i class="fa-solid fa-floppy-disk"></i>
+            {{ saving ? t("common.saving") : t("common.save") }}
           </button>
         </div>
       </div>
@@ -161,43 +322,83 @@
 
     <!-- Account status modal -->
     <div v-if="showStatus" class="modal-backdrop">
-      <div class="modal" style="width:420px">
-        <h3 class="modal-title">{{ t('accounts.checkStatusTitle') }} — {{ statusTarget?.name }}</h3>
+      <div class="modal" style="width: 420px">
+        <h3 class="modal-title">
+          {{ t("accounts.checkStatusTitle") }} — {{ statusTarget?.name }}
+        </h3>
         <div class="modal-body">
-          <div v-if="statusChecking" style="text-align:center;padding:24px 0;color:#888">
-            <i class="fa-solid fa-spinner fa-spin"></i> {{ t('accounts.checking') }}
+          <div
+            v-if="statusChecking"
+            style="text-align: center; padding: 24px 0; color: #888"
+          >
+            <i class="fa-solid fa-spinner fa-spin"></i>
+            {{ t("accounts.checking") }}
           </div>
           <div v-else-if="statusError" class="error-msg">{{ statusError }}</div>
           <template v-else-if="statusResult">
             <div class="status-row">
-              <span class="status-label">{{ t('accounts.colStatus') }}</span>
-              <span v-if="statusResult.isDeleted" class="badge badge-red">{{ t('accounts.statusDeleted') }}</span>
-              <span v-else-if="statusResult.isRestricted" class="badge badge-orange">{{ t('accounts.statusRestricted') }}</span>
-              <span v-else class="badge badge-green">{{ t('accounts.statusActive') }}</span>
+              <span class="status-label">{{ t("accounts.colStatus") }}</span>
+              <span v-if="statusResult.isDeleted" class="badge badge-red">{{
+                t("accounts.statusDeleted")
+              }}</span>
+              <span
+                v-else-if="statusResult.isRestricted"
+                class="badge badge-orange"
+                >{{ t("accounts.statusRestricted") }}</span
+              >
+              <span v-else class="badge badge-green">{{
+                t("accounts.statusActive")
+              }}</span>
             </div>
-            <div v-if="statusResult.firstName || statusResult.lastName" class="status-row">
-              <span class="status-label">{{ t('accounts.statusDisplayName') }}</span>
-              <span>{{ [statusResult.firstName, statusResult.lastName].filter(Boolean).join(' ') }}</span>
+            <div
+              v-if="statusResult.firstName || statusResult.lastName"
+              class="status-row"
+            >
+              <span class="status-label">{{
+                t("accounts.statusDisplayName")
+              }}</span>
+              <span>{{
+                [statusResult.firstName, statusResult.lastName]
+                  .filter(Boolean)
+                  .join(" ")
+              }}</span>
             </div>
             <div v-if="statusResult.username" class="status-row">
-              <span class="status-label">{{ t('accounts.statusUsername') }}</span>
+              <span class="status-label">{{
+                t("accounts.statusUsername")
+              }}</span>
               <span>@{{ statusResult.username }}</span>
             </div>
             <div v-if="statusResult.phone" class="status-row">
-              <span class="status-label">{{ t('accounts.statusPhone') }}</span>
+              <span class="status-label">{{ t("accounts.statusPhone") }}</span>
               <span>+{{ statusResult.phone }}</span>
             </div>
-            <div v-if="statusResult.restrictions.length" style="margin-top:12px">
-              <div class="status-label" style="margin-bottom:6px">{{ t('accounts.statusRestrictions') }}</div>
-              <div v-for="r in statusResult.restrictions" :key="r.platform + r.reason" class="restriction-item">
-                <span class="badge badge-orange" style="margin-right:6px">{{ r.platform }}</span>
-                <span style="font-size:12px;color:#555">{{ r.text || r.reason }}</span>
+            <div
+              v-if="statusResult.restrictions.length"
+              style="margin-top: 12px"
+            >
+              <div class="status-label" style="margin-bottom: 6px">
+                {{ t("accounts.statusRestrictions") }}
+              </div>
+              <div
+                v-for="r in statusResult.restrictions"
+                :key="r.platform + r.reason"
+                class="restriction-item"
+              >
+                <span class="badge badge-orange" style="margin-right: 6px">{{
+                  r.platform
+                }}</span>
+                <span style="font-size: 12px; color: #555">{{
+                  r.text || r.reason
+                }}</span>
               </div>
             </div>
           </template>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-ghost" @click="showStatus = false"><i class="fa-solid fa-xmark"></i> {{ t('common.cancel') }}</button>
+          <button class="btn btn-ghost" @click="showStatus = false">
+            <i class="fa-solid fa-xmark"></i> {{ t("common.cancel") }}
+          </button>
         </div>
       </div>
     </div>
@@ -205,29 +406,63 @@
     <!-- Auth modal -->
     <div v-if="showAuth" class="modal-backdrop">
       <div class="modal">
-        <h3 class="modal-title">{{ t('accounts.authTitle') }} — {{ authTarget?.name }}</h3>
+        <h3 class="modal-title">
+          {{ t("accounts.authTitle") }} — {{ authTarget?.name }}
+        </h3>
         <div v-if="authError" class="error-msg">{{ authError }}</div>
 
         <!-- Step: request code -->
         <div v-if="authStep === 'idle'">
-          <p style="color:#666;margin-bottom:16px;font-size:13px">
-            {{ t('accounts.authHint') }} <strong>{{ authTarget?.phoneNumber }}</strong>.
+          <p style="color: #666; margin-bottom: 16px; font-size: 13px">
+            {{ t("accounts.authHint") }}
+            <strong>{{ authTarget?.phoneNumber }}</strong
+            >.
           </p>
-          <button class="btn btn-primary" :disabled="authBusy" @click="sendCode">
-            <i class="fa-solid fa-paper-plane"></i> {{ authBusy ? t('accounts.sending') : t('accounts.sendCode') }}
+          <button
+            class="btn btn-primary"
+            :disabled="authBusy"
+            @click="sendCode"
+          >
+            <i class="fa-solid fa-paper-plane"></i>
+            {{ authBusy ? t("accounts.sending") : t("accounts.sendCode") }}
           </button>
         </div>
 
         <!-- Step: enter OTP -->
         <div v-else-if="authStep === 'code'">
-          <div class="form-group">
-            <label class="form-label">{{ t('accounts.labelCode') }}</label>
-            <input v-model.trim="authCode" class="form-input" placeholder="12345" autofocus />
+          <div v-if="isCodeViaApp" class="info-box" style="margin-bottom: 14px">
+            <i class="fa-brands fa-telegram" style="margin-right: 6px"></i>
+            {{ t("accounts.codeViaApp") }}
+            <button
+              class="btn btn-sm btn-ghost"
+              style="margin-left: 8px"
+              :disabled="resendBusy"
+              @click="resendAsSms"
+            >
+              {{ resendBusy ? "..." : t("accounts.resendSms") }}
+            </button>
           </div>
+          <div class="form-group">
+            <label class="form-label">{{ t("accounts.labelCode") }}</label>
+            <input
+              v-model.trim="authCode"
+              class="form-input"
+              placeholder="12345"
+              autofocus
+            />
+          </div>
+          <p class="code-hint-note">{{ t("accounts.codeNoReceiveHint") }}</p>
           <div class="modal-footer">
-            <button class="btn btn-ghost" @click="closeAuth"><i class="fa-solid fa-xmark"></i> {{ t('common.cancel') }}</button>
-            <button class="btn btn-primary" :disabled="authBusy" @click="verifyCode">
-              <i class="fa-solid fa-check"></i> {{ authBusy ? t('accounts.verifying') : t('accounts.verify') }}
+            <button class="btn btn-ghost" @click="closeAuth">
+              <i class="fa-solid fa-xmark"></i> {{ t("common.cancel") }}
+            </button>
+            <button
+              class="btn btn-primary"
+              :disabled="authBusy"
+              @click="verifyCode"
+            >
+              <i class="fa-solid fa-check"></i>
+              {{ authBusy ? t("accounts.verifying") : t("accounts.verify") }}
             </button>
           </div>
         </div>
@@ -235,13 +470,25 @@
         <!-- Step: 2FA password -->
         <div v-else-if="authStep === '2fa'">
           <div class="form-group">
-            <label class="form-label">{{ t('accounts.labelTwoFa') }}</label>
-            <input v-model="authPassword" class="form-input" type="password" autofocus />
+            <label class="form-label">{{ t("accounts.labelTwoFa") }}</label>
+            <input
+              v-model="authPassword"
+              class="form-input"
+              type="password"
+              autofocus
+            />
           </div>
           <div class="modal-footer">
-            <button class="btn btn-ghost" @click="closeAuth"><i class="fa-solid fa-xmark"></i> {{ t('common.cancel') }}</button>
-            <button class="btn btn-primary" :disabled="authBusy" @click="verify2fa">
-              <i class="fa-solid fa-check"></i> {{ authBusy ? t('accounts.verifying') : t('accounts.submit') }}
+            <button class="btn btn-ghost" @click="closeAuth">
+              <i class="fa-solid fa-xmark"></i> {{ t("common.cancel") }}
+            </button>
+            <button
+              class="btn btn-primary"
+              :disabled="authBusy"
+              @click="verify2fa"
+            >
+              <i class="fa-solid fa-check"></i>
+              {{ authBusy ? t("accounts.verifying") : t("accounts.submit") }}
             </button>
           </div>
         </div>
@@ -251,53 +498,110 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue';
-import { accountsApi, settingsApi, type Account, type Proxy, type TgAppClient, type TgAccountStatus, type AccountExportItem } from '../api/client';
-import { t, locale } from '../i18n';
+import { ref, reactive, computed, onMounted } from "vue";
+import {
+  accountsApi,
+  settingsApi,
+  type Account,
+  type Proxy,
+  type TgAppClient,
+  type TgAccountStatus,
+  type AccountExportItem,
+} from "../api/client";
+import { t, locale } from "../i18n";
 
 const accounts = ref<Account[]>([]);
-const settings = ref<{ proxies?: string; tg_app_clients?: string } | null>(null);
+
+// ── Drag-and-drop reorder state ───────────────────────────────────────────────
+const dragSrcIdx = ref<number | null>(null);
+const dragOverIdx = ref<number | null>(null);
+
+function onDragStart(idx: number, e: DragEvent) {
+  dragSrcIdx.value = idx;
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+}
+
+async function onDrop(targetIdx: number) {
+  const src = dragSrcIdx.value;
+  dragSrcIdx.value = null;
+  dragOverIdx.value = null;
+  if (src === null || src === targetIdx) return;
+  const arr = [...accounts.value];
+  const [moved] = arr.splice(src, 1);
+  arr.splice(targetIdx, 0, moved);
+  accounts.value = arr;
+  await accountsApi.reorder(arr.map((a, i) => ({ id: a.id, sortOrder: i })));
+}
+const settings = ref<{ proxies?: string; tg_app_clients?: string } | null>(
+  null,
+);
 
 const proxiesList = computed<Proxy[]>(() => {
-  try { return JSON.parse(settings.value?.proxies ?? '[]'); } catch { return []; }
+  try {
+    return JSON.parse(settings.value?.proxies ?? "[]");
+  } catch {
+    return [];
+  }
 });
 
 const appClientsList = computed<TgAppClient[]>(() => {
-  try { return JSON.parse(settings.value?.tg_app_clients ?? '[]'); } catch { return []; }
+  try {
+    return JSON.parse(settings.value?.tg_app_clients ?? "[]");
+  } catch {
+    return [];
+  }
 });
 
-const defaultClientName = computed(() => appClientsList.value.find(c => c.isDefault)?.name ?? '');
+const defaultClientName = computed(
+  () => appClientsList.value.find((c) => c.isDefault)?.name ?? "",
+);
 
 // ── Form state ────────────────────────────────────────────────────────────────
 const showForm = ref(false);
 const editTarget = ref<Account | null>(null);
-const form = reactive({ name: '', phoneNumber: '', apiId: '', apiHash: '', proxyId: '', appClientId: '' });
-const formError = ref('');
+const form = reactive({
+  name: "",
+  phoneNumber: "",
+  apiId: "",
+  apiHash: "",
+  proxyId: "",
+  appClientId: "",
+});
+const formError = ref("");
 const saving = ref(false);
 
 // ── Status check state ────────────────────────────────────────────────────────
 const showStatus = ref(false);
 const statusTarget = ref<Account | null>(null);
 const statusResult = ref<TgAccountStatus | null>(null);
-const statusError = ref('');
+const statusError = ref("");
 const statusChecking = ref(false);
 
 // ── Selection state ───────────────────────────────────────────────────────────
 const selectedIds = ref(new Set<number>());
-const allSelected = computed(() => accounts.value.length > 0 && accounts.value.every(a => selectedIds.value.has(a.id)));
-const someSelected = computed(() => accounts.value.some(a => selectedIds.value.has(a.id)) && !allSelected.value);
+const allSelected = computed(
+  () =>
+    accounts.value.length > 0 &&
+    accounts.value.every((a) => selectedIds.value.has(a.id)),
+);
+const someSelected = computed(
+  () =>
+    accounts.value.some((a) => selectedIds.value.has(a.id)) &&
+    !allSelected.value,
+);
 
 function toggleSelectAll() {
   if (allSelected.value) {
     selectedIds.value = new Set();
   } else {
-    selectedIds.value = new Set(accounts.value.map(a => a.id));
+    selectedIds.value = new Set(accounts.value.map((a) => a.id));
   }
 }
 
 function toggleSelect(id: number) {
   const next = new Set(selectedIds.value);
-  if (next.has(id)) next.delete(id); else next.add(id);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
   selectedIds.value = next;
 }
 
@@ -312,9 +616,11 @@ async function confirmExport() {
   showExportWarn.value = false;
   const ids = selectedIds.value.size > 0 ? [...selectedIds.value] : undefined;
   const payload = await accountsApi.export(ids);
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  const a = document.createElement("a");
   a.href = url;
   a.download = `bemby-accounts-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
@@ -327,20 +633,20 @@ const importFileEl = ref<HTMLInputElement | null>(null);
 const importParsed = ref<AccountExportItem[] | null>(null);
 const importReady = computed(() => importParsed.value !== null);
 const importBusy = ref(false);
-const importError = ref('');
-const importResult = ref('');
+const importError = ref("");
+const importResult = ref("");
 
 function openImport() {
   importParsed.value = null;
-  importError.value = '';
-  importResult.value = '';
+  importError.value = "";
+  importResult.value = "";
   importBusy.value = false;
   showImport.value = true;
 }
 
 function onImportFile(e: Event) {
-  importError.value = '';
-  importResult.value = '';
+  importError.value = "";
+  importResult.value = "";
   importParsed.value = null;
   const file = (e.target as HTMLInputElement).files?.[0];
   if (!file) return;
@@ -350,10 +656,10 @@ function onImportFile(e: Event) {
       const raw = JSON.parse(reader.result as string);
       // Accept both a full export payload and a bare array
       const items: unknown = Array.isArray(raw) ? raw : raw?.accounts;
-      if (!Array.isArray(items)) throw new Error('No accounts array found');
+      if (!Array.isArray(items)) throw new Error("No accounts array found");
       importParsed.value = items as AccountExportItem[];
     } catch {
-      importError.value = t('accounts.importFailed') + ': invalid JSON format';
+      importError.value = t("accounts.importFailed") + ": invalid JSON format";
     }
   };
   reader.readAsText(file);
@@ -362,18 +668,22 @@ function onImportFile(e: Event) {
 async function doImport() {
   if (!importParsed.value) return;
   importBusy.value = true;
-  importError.value = '';
-  importResult.value = '';
+  importError.value = "";
+  importResult.value = "";
   try {
     const { imported, skipped } = await accountsApi.import(importParsed.value);
-    importResult.value = locale.value === 'zh'
-      ? `导入完成：${imported} 个成功，${skipped} 个跳过（手机号已存在）`
-      : `Done: ${imported} imported, ${skipped} skipped (phone already exists)`;
+    importResult.value =
+      locale.value === "zh"
+        ? `导入完成：${imported} 个成功，${skipped} 个跳过（手机号已存在）`
+        : `Done: ${imported} imported, ${skipped} skipped (phone already exists)`;
     importParsed.value = null;
-    if (importFileEl.value) importFileEl.value.value = '';
+    if (importFileEl.value) importFileEl.value.value = "";
     await load();
   } catch (err: any) {
-    importError.value = t('accounts.importFailed') + ': ' + (err.response?.data?.error ?? err.message);
+    importError.value =
+      t("accounts.importFailed") +
+      ": " +
+      (err.response?.data?.error ?? err.message);
   } finally {
     importBusy.value = false;
   }
@@ -382,14 +692,25 @@ async function doImport() {
 // ── Auth state ────────────────────────────────────────────────────────────────
 const showAuth = ref(false);
 const authTarget = ref<Account | null>(null);
-const authStep = ref<'idle' | 'code' | '2fa'>('idle');
-const authCode = ref('');
-const authPassword = ref('');
-const authError = ref('');
+const authStep = ref<"idle" | "code" | "2fa">("idle");
+const authCode = ref("");
+const authPassword = ref("");
+const authError = ref("");
 const authBusy = ref(false);
+const isCodeViaApp = ref(false);
+const resendBusy = ref(false);
 
 // ── Lifecycle ──────────────────────────────────────────────────────────────────
-onMounted(load);
+onMounted(async () => {
+  await load();
+  // Check enabled+authenticated accounts in the background; reload if any are now expired.
+  try {
+    const { expired } = await accountsApi.checkEnabledSessions();
+    if (expired.length > 0) await load();
+  } catch {
+    // Background check failure is non-critical
+  }
+});
 
 async function load() {
   [accounts.value, settings.value] = await Promise.all([
@@ -399,38 +720,57 @@ async function load() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function statusBadge(s: Account['authStatus']) {
+function statusBadge(s: Account["authStatus"]) {
   const map: Record<string, string> = {
-    authenticated: 'badge badge-green',
-    pending_code: 'badge badge-orange',
-    pending_2fa: 'badge badge-orange',
-    unauthenticated: 'badge badge-grey',
+    authenticated: "badge badge-green",
+    pending_code: "badge badge-orange",
+    pending_2fa: "badge badge-orange",
+    unauthenticated: "badge badge-grey",
+    session_expired: "badge badge-red",
   };
-  return map[s] ?? 'badge badge-grey';
+  return map[s] ?? "badge badge-grey";
 }
 
 function fmtDate(iso: string) {
-  const localeMap: Record<string, string> = { en: 'en-AU', zh: 'zh-CN' };
-  return new Date(iso).toLocaleDateString(localeMap[locale.value] ?? 'en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
+  const localeMap: Record<string, string> = { en: "en-AU", zh: "zh-CN" };
+  return new Date(iso).toLocaleDateString(localeMap[locale.value] ?? "en-AU", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 // ── Add / Edit ─────────────────────────────────────────────────────────────────
 function openAdd() {
   editTarget.value = null;
-  Object.assign(form, { name: '', phoneNumber: '', apiId: '', apiHash: '', proxyId: '', appClientId: '' });
-  formError.value = '';
+  Object.assign(form, {
+    name: "",
+    phoneNumber: "",
+    apiId: "",
+    apiHash: "",
+    proxyId: "",
+    appClientId: "",
+  });
+  formError.value = "";
   showForm.value = true;
 }
 
 function openEdit(a: Account) {
   editTarget.value = a;
-  Object.assign(form, { name: a.name, phoneNumber: a.phoneNumber, apiId: String(a.apiId), apiHash: '', proxyId: a.proxyId ?? '', appClientId: a.appClientId ?? '' });
-  formError.value = '';
+  Object.assign(form, {
+    name: a.name,
+    phoneNumber: a.phoneNumber,
+    apiId: String(a.apiId),
+    apiHash: "",
+    proxyId: a.proxyId ?? "",
+    appClientId: a.appClientId ?? "",
+  });
+  formError.value = "";
   showForm.value = true;
 }
 
 async function saveAccount() {
-  formError.value = '';
+  formError.value = "";
   saving.value = true;
   try {
     if (editTarget.value) {
@@ -455,14 +795,36 @@ async function saveAccount() {
     showForm.value = false;
     await load();
   } catch (err: any) {
-    formError.value = err.response?.data?.error ?? t('common.saveFailed');
+    formError.value = err.response?.data?.error ?? t("common.saveFailed");
   } finally {
     saving.value = false;
   }
 }
 
+// ── Force Re-auth ─────────────────────────────────────────────────────────────
+const forceReauthBusy = ref(false);
+
+async function doForceReauth() {
+  if (!editTarget.value) return;
+  const msg =
+    locale.value === "zh"
+      ? "这将清除该账户的会话，您需要重新进行身份验证。确定吗？"
+      : "This will clear the session for this account and require re-authentication. Continue?";
+  if (!confirm(msg)) return;
+  forceReauthBusy.value = true;
+  try {
+    await accountsApi.forceReauth(editTarget.value.id);
+    showForm.value = false;
+    await load();
+  } catch (err: any) {
+    formError.value = err.response?.data?.error ?? t("common.saveFailed");
+  } finally {
+    forceReauthBusy.value = false;
+  }
+}
+
 async function remove(id: number) {
-  if (!confirm(t('accounts.confirmDelete'))) return;
+  if (!confirm(t("accounts.confirmDelete"))) return;
   await accountsApi.delete(id);
   await load();
 }
@@ -475,13 +837,13 @@ async function toggleDisabled(a: Account) {
 async function openCheckStatus(a: Account) {
   statusTarget.value = a;
   statusResult.value = null;
-  statusError.value = '';
+  statusError.value = "";
   statusChecking.value = true;
   showStatus.value = true;
   try {
     statusResult.value = await accountsApi.checkStatus(a.id);
   } catch (err: any) {
-    statusError.value = err.response?.data?.error ?? 'Failed to check status';
+    statusError.value = err.response?.data?.error ?? "Failed to check status";
   } finally {
     statusChecking.value = false;
   }
@@ -490,10 +852,10 @@ async function openCheckStatus(a: Account) {
 // ── Auth flow ─────────────────────────────────────────────────────────────────
 function openAuth(a: Account) {
   authTarget.value = a;
-  authStep.value = 'idle';
-  authCode.value = '';
-  authPassword.value = '';
-  authError.value = '';
+  authStep.value = "idle";
+  authCode.value = "";
+  authPassword.value = "";
+  authError.value = "";
   showAuth.value = true;
 }
 
@@ -503,32 +865,51 @@ function closeAuth() {
 
 async function sendCode() {
   if (!authTarget.value) return;
-  authError.value = '';
+  authError.value = "";
   authBusy.value = true;
   try {
-    await accountsApi.requestCode(authTarget.value.id);
-    authStep.value = 'code';
+    const res = await accountsApi.requestCode(authTarget.value.id);
+    isCodeViaApp.value = res.isCodeViaApp;
+    authStep.value = "code";
   } catch (err: any) {
-    authError.value = err.response?.data?.error ?? t('accounts.errors.sendFailed');
+    authError.value =
+      err.response?.data?.error ?? t("accounts.errors.sendFailed");
   } finally {
     authBusy.value = false;
   }
 }
 
+async function resendAsSms() {
+  if (!authTarget.value) return;
+  resendBusy.value = true;
+  try {
+    await accountsApi.resendCode(authTarget.value.id);
+    isCodeViaApp.value = false;
+  } catch (err: any) {
+    authError.value =
+      err.response?.data?.error ?? t("accounts.errors.sendFailed");
+  } finally {
+    resendBusy.value = false;
+  }
+}
+
 async function verifyCode() {
   if (!authTarget.value) return;
-  authError.value = '';
+  authError.value = "";
   authBusy.value = true;
   try {
-    const res = await accountsApi.verify(authTarget.value.id, { code: authCode.value });
-    if (res.step === '2fa') {
-      authStep.value = '2fa';
+    const res = await accountsApi.verify(authTarget.value.id, {
+      code: authCode.value,
+    });
+    if (res.step === "2fa") {
+      authStep.value = "2fa";
     } else {
       showAuth.value = false;
       await load();
     }
   } catch (err: any) {
-    authError.value = err.response?.data?.error ?? t('accounts.errors.verifyFailed');
+    authError.value =
+      err.response?.data?.error ?? t("accounts.errors.verifyFailed");
   } finally {
     authBusy.value = false;
   }
@@ -536,14 +917,17 @@ async function verifyCode() {
 
 async function verify2fa() {
   if (!authTarget.value) return;
-  authError.value = '';
+  authError.value = "";
   authBusy.value = true;
   try {
-    await accountsApi.verify(authTarget.value.id, { password: authPassword.value });
+    await accountsApi.verify(authTarget.value.id, {
+      password: authPassword.value,
+    });
     showAuth.value = false;
     await load();
   } catch (err: any) {
-    authError.value = err.response?.data?.error ?? t('accounts.errors.twoFaFailed');
+    authError.value =
+      err.response?.data?.error ?? t("accounts.errors.twoFaFailed");
   } finally {
     authBusy.value = false;
   }
@@ -556,6 +940,13 @@ async function verify2fa() {
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+}
+
+.code-hint-note {
+  font-size: 12px;
+  color: #9ca3af;
+  margin: 6px 0 12px;
+  line-height: 1.5;
 }
 
 .warn-box {
@@ -594,5 +985,25 @@ async function verify2fa() {
   gap: 6px;
   padding: 6px 0;
   border-bottom: 1px solid #f5f5f5;
+}
+
+.drag-handle {
+  cursor: grab;
+  color: #ccc;
+  padding: 0 4px;
+  user-select: none;
+  width: 20px;
+}
+
+.drag-handle:hover {
+  color: #888;
+}
+
+tr[draggable] {
+  cursor: default;
+}
+
+tr.drag-over td {
+  background: #eef2ff;
 }
 </style>

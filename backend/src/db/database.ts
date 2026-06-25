@@ -97,6 +97,8 @@ try { db.exec('ALTER TABLE jobs ADD COLUMN template_id INTEGER REFERENCES job_te
 try { db.exec('ALTER TABLE tg_accounts ADD COLUMN proxy_id TEXT'); } catch {}
 try { db.exec('ALTER TABLE tg_accounts ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0'); } catch {}
 try { db.exec('ALTER TABLE tg_accounts ADD COLUMN app_client_id TEXT'); } catch {}
+try { db.exec('ALTER TABLE tg_accounts ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0'); } catch {}
+try { db.exec('UPDATE tg_accounts SET sort_order = id WHERE sort_order = 0'); } catch {}
 
 // Seed default TG app client profiles (Linux is default)
 try {

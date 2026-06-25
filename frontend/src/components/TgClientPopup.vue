@@ -102,7 +102,16 @@
               <span class="tgc-spinner"></span>
             </div>
             <div v-else-if="dialogError" class="tgc-list-error">
-              {{ dialogError }}
+              <i class="fa-solid fa-triangle-exclamation tgc-list-error-icon"></i>
+              <span>{{ dialogError }}</span>
+              <button
+                class="tgc-reconnect-btn"
+                :disabled="reconnecting"
+                @click="reconnectAccount"
+              >
+                <span v-if="reconnecting"><span class="tgc-spinner tgc-spinner-sm"></span> Reconnecting...</span>
+                <span v-else><i class="fa-solid fa-rotate-right"></i> Reconnect</span>
+              </button>
             </div>
             <template v-else>
               <div
@@ -771,6 +780,30 @@
       </div>
     </div>
   </div>
+  <!-- Invite link join confirmation -->
+  <div v-if="invitePreview || checkingInvite" class="tgc-invite-overlay" @click.self="invitePreview = null">
+    <div class="tgc-invite-card">
+      <template v-if="checkingInvite">
+        <span class="tgc-spinner" style="margin: 24px auto;display:block;width:28px;height:28px;"></span>
+      </template>
+      <template v-else-if="invitePreview">
+        <div class="tgc-invite-icon">
+          <i :class="invitePreview.type === 'channel' ? 'fa-solid fa-bullhorn' : 'fa-solid fa-users'"></i>
+        </div>
+        <div class="tgc-invite-title">{{ invitePreview.title }}</div>
+        <div class="tgc-invite-meta">
+          {{ invitePreview.memberCount.toLocaleString() }} {{ invitePreview.type === 'channel' ? 'subscribers' : 'members' }}
+        </div>
+        <div class="tgc-invite-actions">
+          <button class="tgc-invite-cancel" @click="invitePreview = null">Cancel</button>
+          <button class="tgc-invite-join" :disabled="joiningInvite" @click="confirmJoinInvite">
+            <span v-if="joiningInvite"><span class="tgc-spinner tgc-spinner-sm"></span> Joining...</span>
+            <span v-else>Join {{ invitePreview.type === 'channel' ? 'Channel' : 'Group' }}</span>
+          </button>
+        </div>
+      </template>
+    </div>
+  </div>
   <!-- end tgc-backdrop -->
 </template>
 
@@ -794,6 +827,7 @@ import {
   type TgContact,
   type TgFolder,
   type TgProfile,
+  type TgInvitePreview,
 } from "../api/client";
 
 const { inline = false } = defineProps<{ inline?: boolean }>();
@@ -810,6 +844,7 @@ const selectedAccountId = ref<number | null>(null);
 const dialogs = ref<TgDialog[]>([]);
 const loadingDialogs = ref(false);
 const dialogError = ref("");
+const reconnecting = ref(false);
 
 const searchQuery = ref("");
 const searchResults = ref<TgDialog[] | null>(null);
@@ -855,6 +890,11 @@ const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "👎", "🔥", 
 // Bot commands
 const botCommands = ref<TgBotCommand[]>([]);
 const selectedCmdIdx = ref(-1);
+
+// Invite link preview / join confirmation
+const invitePreview = ref<TgInvitePreview | null>(null);
+const checkingInvite = ref(false);
+const joiningInvite = ref(false);
 
 // Thread / comments panel
 const showThread = ref(false);
@@ -1105,15 +1145,51 @@ async function copyField(value: string) {
 }
 
 // Open a Telegram URL within the messenger if possible, else fall back to browser.
-// Plain t.me/username links are resolved to a dialog and opened in-app.
-// Invite links (joinchat / +HASH) and non-TG URLs go to the browser.
+// Plain t.me/username or t.me/username/123 links are resolved and opened in-app.
+// Invite links (t.me/+HASH or t.me/joinchat/HASH) show an in-app join confirmation.
+// URLs with query params (?start=, ?startapp=), non-numeric path segments (Mini App paths
+// like t.me/bot/app), and non-TG URLs all fall through to the browser.
 async function handleTgUrl(url: string) {
   if (!selectedAccountId.value) {
     window.open(url, "_blank", "noopener");
     return;
   }
+
+  // Invite links: t.me/+HASH or t.me/joinchat/HASH
+  const inviteM =
+    url.match(/https?:\/\/t(?:elegram)?\.me\/\+([A-Za-z0-9_-]+)/i) ??
+    url.match(/https?:\/\/t(?:elegram)?\.me\/joinchat\/([A-Za-z0-9_-]+)/i);
+  if (inviteM) {
+    const hash = inviteM[1];
+    checkingInvite.value = true;
+    try {
+      const preview = await tgClientApi.checkInvite(selectedAccountId.value, hash);
+      if (preview.alreadyJoined && preview.chatId) {
+        await openChat({
+          chatId: preview.chatId,
+          name: preview.title,
+          type: preview.type,
+          username: null,
+          unreadCount: 0,
+          lastMessage: null,
+        });
+      } else {
+        invitePreview.value = preview;
+      }
+    } catch {
+      copyToast.value = "Could not load group info -- try the official Telegram app";
+      if (copyToastTimer) clearTimeout(copyToastTimer);
+      copyToastTimer = setTimeout(() => { copyToast.value = ""; }, 4000);
+    } finally {
+      checkingInvite.value = false;
+    }
+    return;
+  }
+
+  // Require end-of-string after the optional /messageId -- this intentionally excludes
+  // ?start=, ?startapp=, and non-numeric path segments used by Telegram Mini Apps.
   const m = url.match(
-    /https?:\/\/t(?:elegram)?\.me\/([A-Za-z]\w+)(?:\/\d+)?(?:[?#].*)?$/i,
+    /https?:\/\/t(?:elegram)?\.me\/([A-Za-z]\w+)(?:\/(\d+))?$/i,
   );
   const username = m?.[1];
   if (username && username.toLowerCase() !== "joinchat" && username.toLowerCase() !== "s") {
@@ -1128,15 +1204,38 @@ async function handleTgUrl(url: string) {
   window.open(url, "_blank", "noopener");
 }
 
+async function confirmJoinInvite() {
+  if (!invitePreview.value || !selectedAccountId.value) return;
+  joiningInvite.value = true;
+  const hash = invitePreview.value.hash;
+  try {
+    const dialog = await tgClientApi.joinInvite(selectedAccountId.value, hash);
+    invitePreview.value = null;
+    await openChat(dialog);
+  } catch (e: any) {
+    const raw = e?.response?.data?.error ?? e?.message ?? "Failed to join";
+    copyToast.value = friendlyTgError(raw);
+    if (copyToastTimer) clearTimeout(copyToastTimer);
+    copyToastTimer = setTimeout(() => { copyToast.value = ""; }, 4000);
+  } finally {
+    joiningInvite.value = false;
+  }
+}
+
 async function clickInlineButton(
   msg: TgMessage,
-  btn: { text: string; data: string | null; url: string | null },
+  btn: { text: string; data: string | null; url: string | null; webApp: boolean },
   ri: number,
   bi: number,
 ) {
   if (!selectedAccountId.value || !activeChatId.value) return;
   const key = `${msg.id}-${ri}-${bi}`;
   if (btn.url) {
+    // Mini App (Web App) buttons must open in a real browser -- we can't run Mini Apps in-app.
+    if (btn.webApp) {
+      window.open(btn.url, "_blank", "noopener");
+      return;
+    }
     btnLoadingKey.value = key;
     try {
       await handleTgUrl(btn.url);
@@ -1163,9 +1262,13 @@ async function clickInlineButton(
     }
     if (res.url) await handleTgUrl(res.url);
   } catch (e: any) {
-    const errMsg =
-      e?.response?.data?.error ?? e?.message ?? "Button click failed";
-    copyToast.value = errMsg;
+    const raw = e?.response?.data?.error ?? e?.message ?? "Button click failed";
+    if (raw.includes("MESSAGE_ID_INVALID")) {
+      copyToast.value = "Message was updated by the bot -- refreshing...";
+      refreshMessages();
+    } else {
+      copyToast.value = friendlyTgError(raw);
+    }
     if (copyToastTimer) clearTimeout(copyToastTimer);
     copyToastTimer = setTimeout(() => {
       copyToast.value = "";
@@ -1189,13 +1292,23 @@ async function refreshMessages() {
       { limit: 20 },
     );
     const fresh = msgs.reverse(); // oldest first
+    if (!fresh.length) return;
+
+    const freshIds = new Set(fresh.map((m) => m.id));
+    const oldestFreshId = fresh[0].id;
+
+    // Remove messages the server no longer returns within the fresh ID range --
+    // these were deleted by the bot/user after we last loaded them.
+    messages.value = messages.value.filter(
+      (m) => m.id < oldestFreshId || freshIds.has(m.id),
+    );
+
     let appended = false;
     const lastId = messages.value[messages.value.length - 1]?.id ?? 0;
     for (const msg of fresh) {
       const idx = messages.value.findIndex((m) => m.id === msg.id);
       if (idx !== -1) {
-        // Update edited messages in-place
-        messages.value[idx] = msg;
+        messages.value[idx] = msg; // update edited messages in-place
       } else if (msg.id > lastId) {
         messages.value.push(msg);
         appended = true;
@@ -1484,6 +1597,50 @@ async function onAccountChange() {
 
 // ── Dialogs ───────────────────────────────────────────────────────────────────
 
+// Maps raw Telegram API error strings to human-readable guidance.
+function friendlyTgError(raw: string): string {
+  if (raw.includes("AUTH_KEY_DUPLICATED"))
+    return "Session conflict: this account is already connected elsewhere. Click Reconnect to fix this.";
+  if (raw.includes("AUTH_KEY_INVALID") || raw.includes("AUTH_KEY_UNREGISTERED"))
+    return "Session is no longer valid. Click Reconnect or re-authenticate this account.";
+  if (raw.includes("SESSION_REVOKED") || raw.includes("SESSION_EXPIRED"))
+    return "This session was revoked (e.g. via Telegram Settings > Devices). Please reconnect.";
+  if (raw.includes("USER_DEACTIVATED"))
+    return "This Telegram account has been deactivated.";
+  if (raw.includes("FLOOD_WAIT"))
+    return "Too many requests -- Telegram has asked us to slow down. Please wait a moment and try again.";
+  if (raw.includes("PHONE_NUMBER_BANNED"))
+    return "This phone number is banned from Telegram.";
+  if (raw.includes("CONNECTION") || raw.includes("NETWORK") || raw.includes("ECONNREFUSED"))
+    return "Network error connecting to Telegram. Check your server connection and try again.";
+  return raw;
+}
+
+// Returns true for errors that a reconnect can potentially fix.
+function isAuthError(raw: string): boolean {
+  return (
+    raw.includes("AUTH_KEY_DUPLICATED") ||
+    raw.includes("AUTH_KEY_INVALID") ||
+    raw.includes("AUTH_KEY_UNREGISTERED") ||
+    raw.includes("SESSION_REVOKED") ||
+    raw.includes("SESSION_EXPIRED")
+  );
+}
+
+async function reconnectAccount() {
+  if (!selectedAccountId.value || reconnecting.value) return;
+  reconnecting.value = true;
+  dialogError.value = "";
+  try {
+    await tgClientApi.reconnect(selectedAccountId.value);
+    await loadDialogs();
+  } catch (e: any) {
+    dialogError.value = friendlyTgError(e?.response?.data?.error ?? e?.message ?? "Reconnect failed");
+  } finally {
+    reconnecting.value = false;
+  }
+}
+
 async function loadDialogs() {
   if (!selectedAccountId.value) return;
   loadingDialogs.value = true;
@@ -1504,8 +1661,8 @@ async function loadDialogs() {
     // Background: load full 200 dialogs -- abortable when user clicks a chat
     startBgDialogLoad(accountId);
   } catch (e: any) {
-    dialogError.value =
-      e?.response?.data?.error ?? e.message ?? "Failed to load chats";
+    const raw = e?.response?.data?.error ?? e?.message ?? "Failed to load chats";
+    dialogError.value = friendlyTgError(raw);
     loadingDialogs.value = false;
   }
 }
@@ -2851,10 +3008,51 @@ async function addContactSubmit() {
 }
 
 .tgc-list-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
   color: #e63946;
   font-size: 13px;
-  padding: 16px;
+  padding: 20px 16px;
   text-align: center;
+  line-height: 1.5;
+}
+
+.tgc-list-error-icon {
+  font-size: 24px;
+  opacity: 0.8;
+}
+
+.tgc-reconnect-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 7px 16px;
+  border: none;
+  border-radius: 8px;
+  background: #4361ee;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.tgc-reconnect-btn:hover:not(:disabled) {
+  background: #3451d1;
+}
+
+.tgc-reconnect-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tgc-spinner-sm {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
 }
 
 .tgc-spinner-wrap {
@@ -3565,5 +3763,101 @@ async function addContactSubmit() {
     z-index: 20;
     border-left: none;
   }
+}
+
+/* ── Invite join confirmation overlay ─────────────────────────────────────── */
+
+.tgc-invite-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.tgc-invite-card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 32px 24px 24px;
+  max-width: 320px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.tgc-invite-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #e8eeff;
+  color: #4361ee;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  margin: 0 auto 14px;
+}
+
+.tgc-invite-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111;
+  margin-bottom: 6px;
+  word-break: break-word;
+}
+
+.tgc-invite-meta {
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 24px;
+}
+
+.tgc-invite-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.tgc-invite-cancel {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fff;
+  color: #444;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.tgc-invite-cancel:hover {
+  background: #f5f5f5;
+}
+
+.tgc-invite-join {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 8px;
+  background: #4361ee;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.tgc-invite-join:hover:not(:disabled) {
+  background: #3451d1;
+}
+
+.tgc-invite-join:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 </style>

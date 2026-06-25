@@ -464,6 +464,18 @@ tr:hover td {
 	margin-bottom: 14px;
 }
 
+.info-box {
+	background: #eff6ff;
+	color: #1e40af;
+	padding: 10px 14px;
+	border-radius: 6px;
+	font-size: 13px;
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
 /* ── Card with padding (for form/settings cards) ─────────────────────────────── */
 
 .card-body {

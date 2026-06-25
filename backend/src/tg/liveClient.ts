@@ -21,6 +21,7 @@ export type TgButton = {
   text: string;
   data: string | null; // base64-encoded callback data
   url: string | null;
+  webApp: boolean; // Telegram Mini App button -- must open in a real browser
 };
 
 export type TgMsgPayload = {
@@ -111,6 +112,9 @@ function extractButtons(msg: Api.Message): TgButton[][] | null {
           text: btn.text ?? "",
           data: btn.data ? Buffer.from(btn.data).toString("base64") : null,
           url: btn.url ?? null,
+          webApp:
+            btn instanceof Api.KeyboardButtonWebView ||
+            btn instanceof Api.KeyboardButtonSimpleWebView,
         }),
       ),
     );
@@ -172,6 +176,37 @@ function resolveDeviceParams(
   }
 }
 
+export async function reconnectClient(accountId: number): Promise<void> {
+  const entry = liveClients.get(accountId);
+  if (entry) {
+    try { await entry.client.disconnect(); } catch { /* ignore */ }
+    liveClients.delete(accountId);
+  }
+  await getLiveClient(accountId);
+}
+
+const AUTH_ERROR_CODES = [
+  'AUTH_KEY_DUPLICATED',
+  'AUTH_KEY_INVALID',
+  'SESSION_REVOKED',
+  'SESSION_EXPIRED',
+  'USER_DEACTIVATED',
+  'USER_DEACTIVATED_BAN',
+];
+
+export function isAuthError(msg: string): boolean {
+  return AUTH_ERROR_CODES.some((code) => msg.includes(code));
+}
+
+export function markSessionExpired(accountId: number): void {
+  db.prepare("UPDATE tg_accounts SET auth_status = 'session_expired' WHERE id = ?").run(accountId);
+  const entry = liveClients.get(accountId);
+  if (entry) {
+    entry.client.disconnect().catch(() => {});
+    liveClients.delete(accountId);
+  }
+}
+
 export async function getLiveClient(accountId: number): Promise<LiveEntry> {
   let entry = liveClients.get(accountId);
   if (entry) {
@@ -203,7 +238,14 @@ export async function getLiveClient(accountId: number): Promise<LiveEntry> {
     },
   );
 
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (err: any) {
+    if (isAuthError(err?.message ?? '')) {
+      db.prepare("UPDATE tg_accounts SET auth_status = 'session_expired' WHERE id = ?").run(accountId);
+    }
+    throw err;
+  }
 
   entry = { client, entityCache: new Map(), subscribers: new Set() };
   liveClients.set(accountId, entry);
@@ -739,6 +781,15 @@ export type TgButtonResult = {
   url: string | null;
 };
 
+export type TgInvitePreview = {
+  hash: string;
+  title: string;
+  memberCount: number;
+  type: "group" | "channel";
+  alreadyJoined: boolean;
+  chatId?: string;
+};
+
 export type TgBotCommand = {
   command: string;
   description: string;
@@ -916,6 +967,77 @@ export async function markRead(
       new Api.messages.ReadHistory({ peer: entity as any, maxId }),
     );
   }
+}
+
+export async function checkInvite(
+  entry: LiveEntry,
+  hash: string,
+): Promise<TgInvitePreview> {
+  const result = await entry.client.invoke(
+    new Api.messages.CheckChatInvite({ hash }),
+  );
+  if (
+    result instanceof Api.ChatInviteAlready ||
+    result instanceof Api.ChatInvitePeek
+  ) {
+    const chat = result.chat as Api.Chat | Api.Channel;
+    let chatId = "";
+    let title = "";
+    let memberCount = 0;
+    let type: "group" | "channel" = "group";
+    if (chat instanceof Api.Channel) {
+      chatId = `c${chat.id}`;
+      title = chat.title ?? "";
+      memberCount = (chat as any).participantsCount ?? 0;
+      type = chat.megagroup ? "group" : "channel";
+      entry.entityCache.set(chatId, chat);
+    } else if (chat instanceof Api.Chat) {
+      chatId = `g${chat.id}`;
+      title = chat.title ?? "";
+      memberCount = (chat as any).participantsCount ?? 0;
+      entry.entityCache.set(chatId, chat);
+    }
+    return { hash, title, memberCount, type, alreadyJoined: true, chatId: chatId || undefined };
+  }
+  const invite = result as Api.ChatInvite;
+  const type: "group" | "channel" =
+    (invite as any).channel && !(invite as any).megagroup ? "channel" : "group";
+  return {
+    hash,
+    title: (invite as any).title ?? "",
+    memberCount: (invite as any).participantsCount ?? 0,
+    type,
+    alreadyJoined: false,
+  };
+}
+
+export async function joinInvite(
+  entry: LiveEntry,
+  hash: string,
+): Promise<TgDialogItem> {
+  const updates = await entry.client.invoke(
+    new Api.messages.ImportChatInvite({ hash }),
+  );
+  const chats = (updates as any).chats as (Api.Chat | Api.Channel)[];
+  const chat = chats?.[0];
+  if (!chat) throw new Error("Failed to join: no chat in response");
+  let chatId: string;
+  let name: string;
+  let type: TgDialogItem["type"];
+  let username: string | null = null;
+  if (chat instanceof Api.Channel) {
+    chatId = `c${chat.id}`;
+    name = chat.title ?? "";
+    type = chat.megagroup ? "group" : "channel";
+    username = chat.username ?? null;
+    entry.entityCache.set(chatId, chat);
+  } else {
+    chatId = `g${(chat as Api.Chat).id}`;
+    name = (chat as Api.Chat).title ?? "";
+    type = "group";
+    entry.entityCache.set(chatId, chat as Api.Chat);
+  }
+  return { chatId, name, type, username, unreadCount: 0, lastMessage: null };
 }
 
 export function subscribeToMessages(

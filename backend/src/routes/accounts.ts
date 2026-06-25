@@ -1,9 +1,17 @@
 import { Router } from 'express';
 import { db } from '../db/database';
-import { requestCode, submitCode, submitPassword, checkAccountStatus } from '../auth/tgAuth';
+import { requestCode, submitCode, submitPassword, checkAccountStatus, resendCodeAsSms } from '../auth/tgAuth';
 import type { AuthStatus, TgAppClient } from '../types';
 import type { TgDeviceParams } from '../auth/tgAuth';
 import { parseTgProxy } from '../jobs/runner';
+import { isAuthError, markSessionExpired } from '../tg/liveClient';
+
+// Reasons set by checkAccountStatus for frozen/revoked sessions that need re-auth
+const REAUTH_REASONS = new Set(['auth_key_duplicated', 'session_revoked', 'auth_key_unregistered', 'account_frozen']);
+
+function statusNeedsReauth(status: import('../auth/tgAuth').TgAccountStatus): boolean {
+  return status.restrictions.some((r) => REAUTH_REASONS.has(r.reason.toLowerCase()));
+}
 
 const router = Router();
 
@@ -19,6 +27,7 @@ type AccountRow = {
   disabled: number;
   app_client_id: string | null;
   created_at: string;
+  sort_order: number;
 };
 
 function resolveAppClientParams(appClientId: string | null | undefined): TgDeviceParams | undefined {
@@ -61,11 +70,12 @@ function toJson(row: AccountRow) {
     disabled: Boolean(row.disabled),
     appClientId: row.app_client_id ?? null,
     createdAt: row.created_at,
+    sortOrder: row.sort_order ?? 0,
   };
 }
 
 router.get('/', (req, res) => {
-  const rows = db.prepare('SELECT * FROM tg_accounts ORDER BY id').all() as AccountRow[];
+  const rows = db.prepare('SELECT * FROM tg_accounts ORDER BY sort_order, id').all() as AccountRow[];
   res.json(rows.map(toJson));
 });
 
@@ -76,12 +86,23 @@ router.post('/', (req, res) => {
     return;
   }
 
+  const maxRow = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM tg_accounts').get() as { m: number };
   const result = db.prepare(
-    'INSERT INTO tg_accounts (name, phone_number, api_id, api_hash, proxy_id, app_client_id) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(name, phoneNumber, Number(apiId), apiHash, proxyId || null, appClientId || null);
+    'INSERT INTO tg_accounts (name, phone_number, api_id, api_hash, proxy_id, app_client_id, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(name, phoneNumber, Number(apiId), apiHash, proxyId || null, appClientId || null, maxRow.m + 1);
 
   const row = db.prepare('SELECT * FROM tg_accounts WHERE id = ?').get(result.lastInsertRowid) as AccountRow;
   res.status(201).json(toJson(row));
+});
+
+// PUT /reorder -- update sort_order for multiple accounts at once
+router.put('/reorder', (req, res) => {
+  const { items } = req.body as { items?: Array<{ id: number; sortOrder: number }> };
+  if (!Array.isArray(items)) { res.status(400).json({ error: 'items array required' }); return; }
+  const update = db.prepare('UPDATE tg_accounts SET sort_order = ? WHERE id = ?');
+  const tx = db.transaction(() => { for (const { id, sortOrder } of items) update.run(sortOrder, id); });
+  tx();
+  res.json({ ok: true });
 });
 
 type AccountImportItem = {
@@ -198,10 +219,58 @@ router.post('/:id/check-status', async (req, res) => {
     const proxy = parseTgProxy(proxyUrl);
     const deviceParams = resolveAppClientParams(account.app_client_id);
     const status = await checkAccountStatus(account.api_id, account.api_hash, account.session_string, proxy, deviceParams);
+    if (statusNeedsReauth(status)) markSessionExpired(account.id);
     res.json(status);
   } catch (err: any) {
+    if (isAuthError(err?.message ?? '')) markSessionExpired(account.id);
     res.status(500).json({ error: err.message });
   }
+});
+
+// POST /check-enabled-sessions -- check all enabled+authenticated accounts and mark expired ones
+router.post('/check-enabled-sessions', async (req, res) => {
+  const rows = db.prepare(
+    "SELECT * FROM tg_accounts WHERE disabled = 0 AND auth_status = 'authenticated'"
+  ).all() as AccountRow[];
+
+  const results = await Promise.allSettled(
+    rows.map(async (account) => {
+      if (!account.session_string) return { id: account.id, expired: true };
+      try {
+        const proxyUrl = resolveProxyUrl(account.proxy_id);
+        const proxy = parseTgProxy(proxyUrl);
+        const deviceParams = resolveAppClientParams(account.app_client_id);
+        const status = await checkAccountStatus(account.api_id, account.api_hash, account.session_string, proxy, deviceParams);
+        if (statusNeedsReauth(status)) {
+          markSessionExpired(account.id);
+          return { id: account.id, expired: true };
+        }
+        return { id: account.id, expired: false };
+      } catch (err: any) {
+        if (isAuthError(err?.message ?? '')) {
+          markSessionExpired(account.id);
+          return { id: account.id, expired: true };
+        }
+        return { id: account.id, expired: false };
+      }
+    })
+  );
+
+  const expired = results
+    .filter((r) => r.status === 'fulfilled' && (r as PromiseFulfilledResult<any>).value.expired)
+    .map((r) => (r as PromiseFulfilledResult<any>).value.id);
+
+  res.json({ checked: rows.length, expired });
+});
+
+// POST /:id/force-reauth -- clear session and reset auth status so the account can be re-authenticated
+router.post('/:id/force-reauth', (req, res) => {
+  const account = db.prepare('SELECT * FROM tg_accounts WHERE id = ?').get(req.params.id) as AccountRow | undefined;
+  if (!account) { res.status(404).json({ error: 'Not found' }); return; }
+  db.prepare("UPDATE tg_accounts SET session_string = NULL, auth_status = 'unauthenticated' WHERE id = ?").run(account.id);
+  markSessionExpired(account.id);
+  const row = db.prepare('SELECT * FROM tg_accounts WHERE id = ?').get(account.id) as AccountRow;
+  res.json(toJson(row));
 });
 
 // ── Telegram auth flow ──────────────────────────────────────────────────────
@@ -214,9 +283,20 @@ router.post('/:id/auth/request', async (req, res) => {
     const proxyUrl = resolveProxyUrl(account.proxy_id);
     const proxy = parseTgProxy(proxyUrl);
     const deviceParams = resolveAppClientParams(account.app_client_id);
-    await requestCode(account.id, account.api_id, account.api_hash, account.phone_number, proxy, deviceParams);
+    const { isCodeViaApp } = await requestCode(account.id, account.api_id, account.api_hash, account.phone_number, proxy, deviceParams);
     db.prepare("UPDATE tg_accounts SET auth_status = 'pending_code' WHERE id = ?").run(account.id);
-    res.json({ message: 'Verification code sent' });
+    res.json({ message: 'Verification code sent', isCodeViaApp });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:id/auth/resend', async (req, res) => {
+  const account = db.prepare('SELECT * FROM tg_accounts WHERE id = ?').get(req.params.id) as AccountRow | undefined;
+  if (!account) { res.status(404).json({ error: 'Not found' }); return; }
+  try {
+    await resendCodeAsSms(account.id);
+    res.json({ ok: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

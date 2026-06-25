@@ -27,7 +27,8 @@ export type AuthStatus =
   | "unauthenticated"
   | "pending_code"
   | "pending_2fa"
-  | "authenticated";
+  | "authenticated"
+  | "session_expired";
 
 export type TgAppClient = {
   id: string;
@@ -51,6 +52,7 @@ export type Account = {
   disabled: boolean;
   appClientId: string | null;
   createdAt: string;
+  sortOrder: number;
 };
 
 export type AccountExportItem = {
@@ -295,7 +297,7 @@ export const authApi = {
 export const accountsApi = {
   list: () => api.get<Account[]>("/accounts").then((r) => r.data),
   create: (
-    data: Omit<Account, "id" | "authStatus" | "createdAt" | "disabled"> & {
+    data: Omit<Account, "id" | "authStatus" | "createdAt" | "disabled" | "sortOrder"> & {
       apiHash: string;
     },
   ) => api.post<Account>("/accounts", data).then((r) => r.data),
@@ -306,8 +308,10 @@ export const accountsApi = {
   delete: (id: number) => api.delete(`/accounts/${id}`),
   requestCode: (id: number) =>
     api
-      .post<{ message: string }>(`/accounts/${id}/auth/request`)
+      .post<{ message: string; isCodeViaApp: boolean }>(`/accounts/${id}/auth/request`)
       .then((r) => r.data),
+  resendCode: (id: number) =>
+    api.post(`/accounts/${id}/auth/resend`).then((r) => r.data),
   verify: (id: number, data: { code?: string; password?: string }) =>
     api
       .post<{ step: string }>(`/accounts/${id}/auth/verify`, data)
@@ -326,6 +330,14 @@ export const accountsApi = {
         accounts,
       })
       .then((r) => r.data),
+  checkEnabledSessions: () =>
+    api
+      .post<{ checked: number; expired: number[] }>("/accounts/check-enabled-sessions")
+      .then((r) => r.data),
+  reorder: (items: Array<{ id: number; sortOrder: number }>) =>
+    api.put("/accounts/reorder", { items }).then((r) => r.data),
+  forceReauth: (id: number) =>
+    api.post<Account>(`/accounts/${id}/force-reauth`).then((r) => r.data),
 };
 
 // ── Jobs ─────────────────────────────────────────────────────────────────────
@@ -555,12 +567,22 @@ export type TgButton = {
   text: string;
   data: string | null;
   url: string | null;
+  webApp: boolean; // Telegram Mini App -- must open in a real browser
 };
 
 export type TgReaction = {
   emoji: string;
   count: number;
   mine: boolean;
+};
+
+export type TgInvitePreview = {
+  hash: string;
+  title: string;
+  memberCount: number;
+  type: "group" | "channel";
+  alreadyJoined: boolean;
+  chatId?: string;
 };
 
 export type TgMessage = {
@@ -774,6 +796,21 @@ export const tgClientApi = {
   resolvePeer: (accountId: number, username: string) =>
     api
       .post<TgDialog>(`/tg-client/${accountId}/resolve-peer`, { username })
+      .then((r) => r.data),
+
+  reconnect: (accountId: number) =>
+    api
+      .post(`/tg-client/${accountId}/reconnect`)
+      .then((r) => r.data),
+
+  checkInvite: (accountId: number, hash: string) =>
+    api
+      .get<TgInvitePreview>(`/tg-client/${accountId}/invite/${encodeURIComponent(hash)}`)
+      .then((r) => r.data),
+
+  joinInvite: (accountId: number, hash: string) =>
+    api
+      .post<TgDialog>(`/tg-client/${accountId}/invite/${encodeURIComponent(hash)}`)
       .then((r) => r.data),
 };
 

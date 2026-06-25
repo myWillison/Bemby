@@ -18,9 +18,21 @@ import {
   getBotCommands,
   markRead,
   resolvePeer,
+  reconnectClient,
   subscribeToMessages,
   getFolders,
+  checkInvite,
+  joinInvite,
+  isAuthError,
+  markSessionExpired,
 } from "../tg/liveClient";
+import type { Response } from "express";
+
+// Centralised error response: marks session expired for auth errors automatically.
+function tgError(err: any, accountId: number, res: Response): void {
+  if (isAuthError(err?.message ?? "")) markSessionExpired(accountId);
+  res.status(500).json({ error: err?.message ?? "Unknown error" });
+}
 
 const router = Router();
 
@@ -31,7 +43,7 @@ router.get("/:accountId/folders", async (req, res) => {
     const entry = await getLiveClient(accountId);
     res.json(await getFolders(entry));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
   }
 });
 
@@ -44,7 +56,7 @@ router.get("/:accountId/dialogs", async (req, res) => {
     const dialogs = await loadDialogs(entry, limit);
     res.json(dialogs);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
   }
 });
 
@@ -59,7 +71,7 @@ router.get("/:accountId/messages/:chatId", async (req, res) => {
     const msgs = await getMessages(entry, chatId, limit, offsetId);
     res.json(msgs);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
   }
 });
 
@@ -85,7 +97,7 @@ router.post("/:accountId/messages/:chatId", async (req, res) => {
     );
     res.json(result);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
   }
 });
 
@@ -97,7 +109,7 @@ router.get("/:accountId/contacts", async (req, res) => {
     const contacts = await getContacts(entry);
     res.json(contacts);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
   }
 });
 
@@ -122,7 +134,7 @@ router.post("/:accountId/contacts", async (req, res) => {
     }
     res.json(contact);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
   }
 });
 
@@ -139,7 +151,7 @@ router.get("/:accountId/search", async (req, res) => {
     const results = await searchPeers(entry, q);
     res.json(results);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
   }
 });
 
@@ -153,7 +165,7 @@ router.post("/:accountId/mute/:chatId", async (req, res) => {
     await muteDialog(entry, chatId, Number(muteSecs));
     res.json({ ok: true });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
   }
 });
 
@@ -167,7 +179,7 @@ router.post("/:accountId/pin/:chatId", async (req, res) => {
     await pinDialog(entry, chatId, Boolean(pinned));
     res.json({ ok: true });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
   }
 });
 
@@ -198,7 +210,7 @@ router.get("/:accountId/profile/:chatId", async (req, res) => {
     const entry = await getLiveClient(accountId);
     res.json(await getEntityDetails(entry, chatId));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
   }
 });
 
@@ -217,7 +229,7 @@ router.post("/:accountId/messages/:chatId/:msgId/button", async (req, res) => {
     const result = await clickButton(entry, chatId, msgId, data);
     res.json(result);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
   }
 });
 
@@ -234,7 +246,7 @@ router.post(
       await sendReaction(entry, chatId, msgId, emoji ?? null);
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      tgError(err, accountId, res);
     }
   },
 );
@@ -251,7 +263,7 @@ router.get("/:accountId/messages/:chatId/:msgId/thread", async (req, res) => {
     const msgs = await getThreadMessages(entry, chatId, msgId, limit, offsetId);
     res.json(msgs);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
   }
 });
 
@@ -271,7 +283,44 @@ router.get("/:accountId/messages/:chatId/:msgId/photo", async (req, res) => {
     res.set("Cache-Control", "private, max-age=3600");
     res.send(buf);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/reconnect -- disconnect and reconnect a live client
+router.post("/:accountId/reconnect", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  try {
+    await reconnectClient(accountId);
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// GET /:accountId/invite/:hash -- preview a t.me/+ invite link
+router.get("/:accountId/invite/:hash", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const hash = req.params.hash;
+  try {
+    const entry = await getLiveClient(accountId);
+    const preview = await checkInvite(entry, hash);
+    res.json(preview);
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/invite/:hash -- join via invite link
+router.post("/:accountId/invite/:hash", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const hash = req.params.hash;
+  try {
+    const entry = await getLiveClient(accountId);
+    const dialog = await joinInvite(entry, hash);
+    res.json(dialog);
+  } catch (err: any) {
+    tgError(err, accountId, res);
   }
 });
 
@@ -292,7 +341,7 @@ router.post("/:accountId/resolve-peer", async (req, res) => {
     }
     res.json(dialog);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
   }
 });
 
@@ -310,7 +359,7 @@ router.post("/:accountId/mark-read/:chatId", async (req, res) => {
     await markRead(entry, chatId, Number(maxId));
     res.json({ ok: true });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
   }
 });
 
@@ -322,7 +371,7 @@ router.get("/:accountId/bot-commands/:chatId", async (req, res) => {
     const entry = await getLiveClient(accountId);
     res.json(await getBotCommands(entry, chatId));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    tgError(err, accountId, res);
   }
 });
 

@@ -1,4 +1,4 @@
-export type AuthStatus = 'unauthenticated' | 'pending_code' | 'pending_2fa' | 'authenticated';
+export type AuthStatus = 'unauthenticated' | 'pending_code' | 'pending_2fa' | 'authenticated' | 'session_expired';
 export type JobType = 'checkin' | 'embywatch' | 'custom';
 export type LogStatus = 'success' | 'failed' | 'running';
 
