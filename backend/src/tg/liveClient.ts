@@ -1065,6 +1065,52 @@ export async function getFolders(entry: LiveEntry): Promise<TgFolderItem[]> {
   }
 }
 
+export async function addChatToFolder(
+  entry: LiveEntry,
+  folderId: number,
+  chatId: string,
+): Promise<void> {
+  await ensureEntityCached(entry, chatId);
+  const entity = entry.entityCache.get(chatId);
+  if (!entity) throw new Error("Entity not found");
+
+  let inputPeer: any;
+  if (entity instanceof Api.User) {
+    inputPeer = new Api.InputPeerUser({
+      userId: (entity as any).id,
+      accessHash: (entity as any).accessHash ?? (BigInt(0) as any),
+    });
+  } else if (entity instanceof Api.Channel) {
+    inputPeer = new Api.InputPeerChannel({
+      channelId: (entity as any).id,
+      accessHash: (entity as any).accessHash ?? (BigInt(0) as any),
+    });
+  } else {
+    inputPeer = new Api.InputPeerChat({ chatId: (entity as any).id as any });
+  }
+
+  const raw = await entry.client.invoke(new Api.messages.GetDialogFilters());
+  const filters: any[] = Array.isArray(raw) ? raw : ((raw as any)?.filters ?? []);
+  const filter = filters.find((f: any) => f.id === folderId);
+  if (!filter) throw new Error("Folder not found");
+
+  // Avoid duplicates
+  const alreadyIncluded = ((filter.includePeers ?? []) as any[]).some(
+    (p: any) => inputPeerToChatId(p) === chatId,
+  );
+  if (!alreadyIncluded) {
+    filter.includePeers = [...(filter.includePeers ?? []), inputPeer];
+    // Remove from excludedPeers if present
+    filter.excludePeers = ((filter.excludePeers ?? []) as any[]).filter(
+      (p: any) => inputPeerToChatId(p) !== chatId,
+    );
+  }
+
+  await entry.client.invoke(
+    new Api.messages.UpdateDialogFilter({ id: folderId, filter }),
+  );
+}
+
 export type TgButtonResult = {
   alert: boolean;
   message: string | null;
