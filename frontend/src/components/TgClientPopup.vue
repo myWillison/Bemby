@@ -853,6 +853,27 @@
       <button class="tgc-ctx-item" @click="ctxPin(false)">
         <i class="fa-regular fa-thumbtack"></i> Unpin
       </button>
+      <template v-if="tgFolders.length">
+        <div class="tgc-ctx-divider"></div>
+        <button class="tgc-ctx-item" @click.stop="ctxFolderExpanded = !ctxFolderExpanded">
+          <i class="fa-solid fa-folder-plus"></i> Add to folder
+          <i
+            class="fa-solid fa-chevron-down tgc-ctx-chevron"
+            :class="{ rotated: ctxFolderExpanded }"
+          ></i>
+        </button>
+        <template v-if="ctxFolderExpanded">
+          <button
+            v-for="folder in tgFolders"
+            :key="folder.id"
+            class="tgc-ctx-item tgc-ctx-folder-item"
+            @click="ctxAddToFolder(folder)"
+          >
+            <span class="tgc-ctx-folder-emoji">{{ folder.emoticon ?? "📁" }}</span>
+            {{ folder.title }}
+          </button>
+        </template>
+      </template>
     </div>
 
     <!-- Emoji reaction picker -->
@@ -1221,6 +1242,7 @@ const threadEl = ref<HTMLElement | null>(null);
 
 // Context menu for dialog actions
 const ctxMenu = ref<{ dialog: TgDialog; x: number; y: number } | null>(null);
+const ctxFolderExpanded = ref(false);
 // ── Priority request management ───────────────────────────────────────────────
 // bgDialogCtrl: the in-flight background 200-dialog fetch -- aborted when the
 // user initiates any action so their request gets the connection immediately.
@@ -1380,6 +1402,7 @@ function onDialogTouchEnd() {
 
 function closeCtx() {
   ctxMenu.value = null;
+  ctxFolderExpanded.value = false;
 }
 
 async function ctxMute(secs: number) {
@@ -1416,6 +1439,25 @@ async function ctxPin(pinned: boolean) {
     copyToastTimer = setTimeout(() => {
       copyToast.value = "";
     }, 2000);
+  } catch {
+    /* silent */
+  }
+}
+
+async function ctxAddToFolder(folder: TgFolder) {
+  if (!ctxMenu.value || !selectedAccountId.value) return;
+  const { dialog } = ctxMenu.value;
+  closeCtx();
+  try {
+    await tgClientApi.addChatToFolder(selectedAccountId.value, folder.id, dialog.chatId);
+    // Update local folder state so the tab filter picks it up immediately
+    const local = tgFolders.value.find((f) => f.id === folder.id);
+    if (local && !local.includedChatIds.includes(dialog.chatId)) {
+      local.includedChatIds.push(dialog.chatId);
+    }
+    copyToast.value = `Added to ${folder.title}`;
+    if (copyToastTimer) clearTimeout(copyToastTimer);
+    copyToastTimer = setTimeout(() => { copyToast.value = ""; }, 2000);
   } catch {
     /* silent */
   }
@@ -4898,6 +4940,28 @@ async function saveContactEdit() {
   height: 1px;
   background: #e8e9ed;
   margin: 4px 0;
+}
+
+.tgc-ctx-chevron {
+  margin-left: auto;
+  font-size: 11px;
+  color: #aaa;
+  transition: transform 0.15s;
+  &.rotated {
+    transform: rotate(180deg);
+  }
+}
+
+.tgc-ctx-folder-item {
+  padding-left: 28px;
+  font-size: 13px;
+  color: #555;
+}
+
+.tgc-ctx-folder-emoji {
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
 }
 
 /* ── Back button ──────────────────────────────────────────────────────────────

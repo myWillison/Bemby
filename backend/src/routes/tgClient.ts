@@ -22,6 +22,7 @@ import {
   reconnectClient,
   subscribeToMessages,
   getFolders,
+  addChatToFolder,
   checkInvite,
   joinInvite,
   isAuthError,
@@ -179,6 +180,24 @@ router.get("/:accountId/folders", async (req, res) => {
   try {
     const entry = await getLiveClient(accountId);
     res.json(await getFolders(entry));
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/folders/:folderId/chats -- add a chat to a folder
+router.post("/:accountId/folders/:folderId/chats", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const folderId = Number(req.params.folderId);
+  const { chatId } = req.body as { chatId?: string };
+  if (!chatId) {
+    res.status(400).json({ error: "chatId is required" });
+    return;
+  }
+  try {
+    const entry = await getLiveClient(accountId);
+    await addChatToFolder(entry, folderId, chatId);
+    res.json({ ok: true });
   } catch (err: any) {
     tgError(err, accountId, res);
   }

@@ -789,6 +789,11 @@ export const tgClientApi = {
   folders: (accountId: number) =>
     api.get<TgFolder[]>(`/tg-client/${accountId}/folders`).then((r) => r.data),
 
+  addChatToFolder: (accountId: number, folderId: number, chatId: string) =>
+    api
+      .post(`/tg-client/${accountId}/folders/${folderId}/chats`, { chatId })
+      .then((r) => r.data),
+
   avatarUrl: (accountId: number, chatId: string) => {
     const token = localStorage.getItem("token") ?? "";
     return `/api/tg-client/${accountId}/avatar/${encodeURIComponent(chatId)}?token=${encodeURIComponent(token)}`;
