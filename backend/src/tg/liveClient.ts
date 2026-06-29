@@ -707,6 +707,41 @@ export async function addContact(
   };
 }
 
+export async function editContact(
+  entry: LiveEntry,
+  chatId: string,
+  firstName: string,
+  lastName = "",
+): Promise<TgContactItem | null> {
+  await ensureEntityCached(entry, chatId);
+  const entity = entry.entityCache.get(chatId);
+  if (!(entity instanceof Api.User)) return null;
+
+  // ImportContacts updates an existing contact when the user is already known
+  const result = await entry.client.invoke(
+    new Api.contacts.ImportContacts({
+      contacts: [
+        new Api.InputPhoneContact({
+          clientId: BigInt(Date.now() % 1_000_000) as any,
+          phone: (entity as any).phone ?? "",
+          firstName,
+          lastName,
+        }),
+      ],
+    }),
+  );
+
+  const updated = ((result as any).users as Api.User[])[0] ?? entity;
+  entry.entityCache.set(chatId, updated);
+  return {
+    chatId,
+    firstName: (updated as any).firstName ?? "",
+    lastName: (updated as any).lastName ?? "",
+    username: (updated as any).username ?? null,
+    phone: (updated as any).phone ?? null,
+  };
+}
+
 export async function searchPeers(
   entry: LiveEntry,
   query: string,
@@ -832,6 +867,8 @@ export type TgProfileInfo = {
   phone: string | null;
   bio: string | null;
   memberCount: number | null;
+  firstName: string | null;
+  lastName: string | null;
 };
 
 export async function getEntityDetails(
@@ -880,6 +917,7 @@ export async function getEntityDetails(
     // Full details unavailable -- basic info from entity cache is still returned
   }
 
+  const isUser = entity instanceof Api.User;
   return {
     chatId,
     name: entityName(entity),
@@ -888,6 +926,8 @@ export async function getEntityDetails(
     phone: (entity as any).phone ?? null,
     bio,
     memberCount,
+    firstName: isUser ? ((entity as Api.User).firstName ?? null) : null,
+    lastName: isUser ? ((entity as Api.User).lastName ?? null) : null,
   };
 }
 
