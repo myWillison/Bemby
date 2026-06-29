@@ -592,9 +592,19 @@
           <div v-if="showProfile && !showThread" class="tgc-profile-panel">
             <div class="tgc-profile-header">
               <span class="tgc-profile-title">Info</span>
-              <button class="tgc-icon-btn" @click="showProfile = false">
-                <i class="fa-solid fa-xmark"></i>
-              </button>
+              <div style="display:flex;gap:4px;align-items:center">
+                <button
+                  v-if="profileDetails && (profileDetails.type === 'user' || profileDetails.type === 'bot') && !editingContact"
+                  class="tgc-icon-btn"
+                  title="Edit contact"
+                  @click="startEditContact"
+                >
+                  <i class="fa-solid fa-pen"></i>
+                </button>
+                <button class="tgc-icon-btn" @click="showProfile = false">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
             </div>
 
             <div v-if="profileLoading" class="tgc-spinner-wrap" style="flex: 1">
@@ -619,6 +629,39 @@
                 <div class="tgc-profile-type-badge">
                   {{ profileDetails.type }}
                 </div>
+              </div>
+
+              <!-- Inline contact edit form -->
+              <div v-if="editingContact" class="tgc-contact-edit-form">
+                <input
+                  v-model="editFirstName"
+                  class="tgc-input tgc-contact-edit-input"
+                  placeholder="First name"
+                  :disabled="savingContact"
+                  @keydown.enter.exact.prevent="saveContactEdit"
+                  @keydown.esc.prevent="editingContact = false"
+                />
+                <input
+                  v-model="editLastName"
+                  class="tgc-input tgc-contact-edit-input"
+                  placeholder="Last name"
+                  :disabled="savingContact"
+                  @keydown.enter.exact.prevent="saveContactEdit"
+                  @keydown.esc.prevent="editingContact = false"
+                />
+                <div class="tgc-contact-edit-actions">
+                  <button
+                    class="tgc-contact-save-btn"
+                    :disabled="!editFirstName.trim() || savingContact"
+                    @click="saveContactEdit"
+                  >{{ savingContact ? "Saving..." : "Save" }}</button>
+                  <button
+                    class="tgc-contact-cancel-btn"
+                    :disabled="savingContact"
+                    @click="editingContact = false"
+                  >Cancel</button>
+                </div>
+                <div v-if="saveContactError" class="error-msg">{{ saveContactError }}</div>
               </div>
 
               <div class="tgc-profile-rows">
@@ -1121,6 +1164,11 @@ const contactSearch = ref("");
 const newPhone = ref("");
 const newFirstName = ref("");
 const addingContact = ref(false);
+const editingContact = ref(false);
+const editFirstName = ref("");
+const editLastName = ref("");
+const savingContact = ref(false);
+const saveContactError = ref("");
 const addContactError = ref("");
 const addContactOk = ref(false);
 
@@ -3101,6 +3149,39 @@ async function addContactSubmit() {
     addingContact.value = false;
   }
 }
+
+function startEditContact() {
+  if (!profileDetails.value) return;
+  editFirstName.value = profileDetails.value.firstName ?? profileDetails.value.name.split(" ")[0] ?? "";
+  editLastName.value = profileDetails.value.lastName ?? profileDetails.value.name.split(" ").slice(1).join(" ") ?? "";
+  saveContactError.value = "";
+  editingContact.value = true;
+}
+
+async function saveContactEdit() {
+  if (!selectedAccountId.value || !profileDetails.value) return;
+  saveContactError.value = "";
+  savingContact.value = true;
+  try {
+    const contact = await tgClientApi.editContact(
+      selectedAccountId.value,
+      profileDetails.value.chatId,
+      editFirstName.value.trim(),
+      editLastName.value.trim(),
+    );
+    // Update local state
+    profileDetails.value.firstName = contact.firstName;
+    profileDetails.value.lastName = contact.lastName;
+    profileDetails.value.name = [contact.firstName, contact.lastName].filter(Boolean).join(" ") || profileDetails.value.name;
+    const dialog = dialogs.value.find((d) => d.chatId === profileDetails.value!.chatId);
+    if (dialog) dialog.name = profileDetails.value.name;
+    editingContact.value = false;
+  } catch (e: any) {
+    saveContactError.value = e?.response?.data?.error ?? e.message ?? "Failed to save";
+  } finally {
+    savingContact.value = false;
+  }
+}
 </script>
 
 <style scoped>
@@ -4609,6 +4690,59 @@ async function addContactSubmit() {
   font-size: 12px;
   color: #888;
   text-transform: capitalize;
+}
+
+.tgc-contact-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e8eaed;
+}
+
+.tgc-contact-edit-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.tgc-contact-edit-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.tgc-contact-save-btn {
+  padding: 6px 18px;
+  border-radius: 6px;
+  border: none;
+  background: #4361ee;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  &:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  &:not(:disabled):hover {
+    opacity: 0.85;
+  }
+}
+
+.tgc-contact-cancel-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  background: none;
+  color: #555;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+  &:hover {
+    background: #f0f2f5;
+  }
 }
 
 .tgc-profile-rows {

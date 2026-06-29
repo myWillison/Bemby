@@ -6,6 +6,7 @@ import {
   sendMessage,
   getContacts,
   addContact,
+  editContact,
   searchPeers,
   fetchPhoto,
   fetchAvatar,
@@ -352,6 +353,31 @@ router.post("/:accountId/contacts", async (req, res) => {
     const contact = await addContact(entry, phone, firstName, lastName ?? "");
     if (!contact) {
       res.status(404).json({ error: "Phone number not found on Telegram" });
+      return;
+    }
+    res.json(contact);
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// PUT /:accountId/contacts/:userId -- update first/last name of an existing contact
+router.put("/:accountId/contacts/:userId", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const userId = decodeURIComponent(req.params.userId);
+  const { firstName, lastName } = req.body as {
+    firstName?: string;
+    lastName?: string;
+  };
+  if (!firstName) {
+    res.status(400).json({ error: "firstName is required" });
+    return;
+  }
+  try {
+    const entry = await getLiveClient(accountId);
+    const contact = await editContact(entry, userId, firstName, lastName ?? "");
+    if (!contact) {
+      res.status(404).json({ error: "User not found or not a contact" });
       return;
     }
     res.json(contact);

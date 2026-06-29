@@ -681,6 +681,8 @@ export type TgProfile = {
   phone: string | null;
   bio: string | null;
   memberCount: number | null;
+  firstName: string | null;
+  lastName: string | null;
 };
 
 export type TgBotCommand = {
@@ -757,6 +759,19 @@ export const tgClientApi = {
         firstName,
         lastName,
       })
+      .then((r) => r.data),
+
+  editContact: (
+    accountId: number,
+    userId: string,
+    firstName: string,
+    lastName?: string,
+  ) =>
+    api
+      .put<TgContact>(
+        `/tg-client/${accountId}/contacts/${encodeURIComponent(userId)}`,
+        { firstName, lastName },
+      )
       .then((r) => r.data),
 
   search: (accountId: number, q: string) =>
