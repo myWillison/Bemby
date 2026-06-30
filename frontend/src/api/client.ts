@@ -304,6 +304,7 @@ export const authApi = {
     api
       .post<{
         token: string;
+        requirePasswordChange?: boolean;
       }>("/auth/login", { username, password, captchaToken, captchaAnswer })
       .then((r) => r.data),
   changeCredentials: (
@@ -314,6 +315,7 @@ export const authApi = {
     api
       .put<{
         message: string;
+        token?: string;
       }>("/auth/credentials", { currentPassword, username, newPassword })
       .then((r) => r.data),
 };

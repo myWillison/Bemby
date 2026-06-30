@@ -93,8 +93,10 @@ router.post('/login', loginLimiter, (req, res) => {
     return;
   }
 
-  const token = jwt.sign({ sub: username }, getJwtSecret(), { expiresIn: '7d' });
-  res.json({ token });
+  const requirePasswordChange = password === 'changeme';
+  const payload = requirePasswordChange ? { sub: username, requirePasswordChange: true } : { sub: username };
+  const token = jwt.sign(payload, getJwtSecret(), { expiresIn: '7d' });
+  res.json(requirePasswordChange ? { token, requirePasswordChange: true } : { token });
 });
 
 router.put('/credentials', requireAuth, (req, res) => {
@@ -130,7 +132,10 @@ router.put('/credentials', requireAuth, (req, res) => {
     if (newPassword) stmt.run('admin_password_hash', hashPassword(newPassword));
   })();
 
-  res.json({ message: 'Credentials updated' });
+  // Issue a fresh token so any requirePasswordChange claim is cleared
+  const newUsername = username || stored.username;
+  const freshToken = jwt.sign({ sub: newUsername }, getJwtSecret(), { expiresIn: '7d' });
+  res.json({ message: 'Credentials updated', token: freshToken });
 });
 
 export default router;

@@ -73,8 +73,9 @@ async function submit() {
   error.value = '';
   loading.value = true;
   try {
-    const { token } = await authApi.login(form.username, form.password, captchaToken.value, form.captchaAnswer);
+    const { token, requirePasswordChange } = await authApi.login(form.username, form.password, captchaToken.value, form.captchaAnswer);
     localStorage.setItem('token', token);
+    if (requirePasswordChange) localStorage.setItem('bemby:requirePasswordChange', '1');
     router.push('/');
   } catch (err: unknown) {
     const status = (err as { response?: { status?: number } })?.response?.status;
