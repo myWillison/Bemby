@@ -150,8 +150,7 @@ try {
   db.exec(
     "ALTER TABLE tg_accounts ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
   );
-} catch {}
-try {
+  // only seed sort_order on first migration; subsequent starts must not overwrite user-defined order
   db.exec("UPDATE tg_accounts SET sort_order = id WHERE sort_order = 0");
 } catch {}
 try {
