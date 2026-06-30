@@ -1375,21 +1375,44 @@ export async function startBot(
 
 // Resolves a mini app URL to an authenticated web app URL.
 // Handles two cases:
-//   - t.me/BotName?startapp=HASH  -- uses RequestWebView with the start param
+//   - t.me/BotName?startapp=HASH            -- uses RequestMainWebView
+//   - t.me/BotName/AppShortName?startapp=HASH -- uses RequestAppWebView
 //   - Direct web app URL from a KeyboardButtonWebView -- uses RequestSimpleWebView
 export async function resolveWebApp(
   entry: LiveEntry,
   tmeOrUrl: string,
   botChatId?: string, // for direct URLs we need to know which bot owns the app
 ): Promise<string> {
-  // t.me/BotName?startapp=HASH pattern
+  // t.me/BotName[/AppShortName]?startapp=HASH pattern
   const startappM = tmeOrUrl.match(
-    /t(?:elegram)?\.me\/([A-Za-z]\w+)\?startapp=([^&\s]+)/i,
+    /t(?:elegram)?\.me\/([A-Za-z]\w+)(?:\/([A-Za-z]\w+))?\?startapp=([^&\s]+)/i,
   );
   if (startappM) {
-    const [, botUsername, startParam] = startappM;
+    const [, botUsername, appShortName, startParam] = startappM;
     const bot = (await entry.client.getEntity(botUsername)) as Api.User;
     entry.entityCache.set(entityToChatId(bot), bot);
+
+    if (appShortName) {
+      // Named mini app: use RequestAppWebView with InputBotAppShortName
+      const inputUser = new Api.InputUser({
+        userId: bot.id,
+        accessHash: bot.accessHash!,
+      });
+      const result = (await entry.client.invoke(
+        new Api.messages.RequestAppWebView({
+          peer: bot,
+          app: new Api.InputBotAppShortName({
+            botId: inputUser,
+            shortName: appShortName,
+          }),
+          startParam,
+          platform: "web",
+          writeAllowed: true,
+        }),
+      )) as any;
+      return result.url as string;
+    }
+
     const result = (await entry.client.invoke(
       new Api.messages.RequestMainWebView({
         peer: bot,
