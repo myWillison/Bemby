@@ -241,6 +241,14 @@
               </button>
               <button
                 class="tgc-icon-btn"
+                :class="{ 'tgc-icon-btn--active': openMiniAppInApp }"
+                @click="openMiniAppInApp = !openMiniAppInApp"
+                :title="openMiniAppInApp ? 'Mini apps open inside Bemby (click to toggle off)' : 'Mini apps open in browser (click to open inside Bemby)'"
+              >
+                <i class="fa-solid fa-puzzle-piece"></i>
+              </button>
+              <button
+                class="tgc-icon-btn"
                 @click="openGoUrlDialog"
                 title="Open URL"
               >
@@ -1215,6 +1223,7 @@ const composing = ref(false);
 const showMobileChat = ref(false);
 const showProfile = ref(false);
 const webViewPanel = ref<{ url: string; title: string } | null>(null);
+const openMiniAppInApp = ref(false);
 const profileDetails = ref<TgProfile | null>(null);
 const profileLoading = ref(false);
 const copyToast = ref("");
@@ -1674,7 +1683,7 @@ function onWebViewLoad(e: Event) {
   } catch {}
 }
 
-function handleMiniAppMessage(e: MessageEvent) {
+async function handleMiniAppMessage(e: MessageEvent) {
   if (!webViewPanel.value) return;
   let eventType: string | undefined;
   try {
@@ -1708,7 +1717,12 @@ function handleMiniAppMessage(e: MessageEvent) {
     try {
       const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
       const url = data?.eventData?.url;
-      if (url) window.open(url, "_blank", "noopener");
+      if (!url) return;
+      if (openMiniAppInApp.value && isMiniAppUrl(url)) {
+        await handleLinkClick(url);
+      } else {
+        window.open(url, "_blank", "noopener");
+      }
     } catch {}
   }
 }
@@ -1728,9 +1742,20 @@ async function openMiniApp(
       url,
       botChatId,
     );
-    window.open(webAppUrl, "_blank", "noopener");
+    if (openMiniAppInApp.value) {
+      webViewPanel.value = { url: webAppUrl, title };
+    } else {
+      window.open(webAppUrl, "_blank", "noopener");
+    }
   } catch {
-    window.open(url, "_blank", "noopener");
+    // Resolve failed — if toggle is on, still open in panel (unauthenticated fallback)
+    if (openMiniAppInApp.value) {
+      let title = url;
+      try { title = new URL(url).hostname; } catch {}
+      webViewPanel.value = { url, title };
+    } else {
+      window.open(url, "_blank", "noopener");
+    }
   }
 }
 
@@ -3359,6 +3384,11 @@ async function saveContactEdit() {
 .tgc-icon-btn:hover {
   background: #f0f2f5;
   color: #1a1a2e;
+}
+
+.tgc-icon-btn--active {
+  color: #4361ee;
+  background: #eef0fd;
 }
 
 .tgc-close-btn:hover {
