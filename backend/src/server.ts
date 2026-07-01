@@ -21,9 +21,12 @@ import debugRouter from "./routes/debug";
 import aiSuppliersRouter from "./routes/ai-suppliers";
 import templatesRouter from "./routes/templates";
 import tgClientRouter from "./routes/tgClient";
-import { requireAuth } from "./middleware/auth";
+import { requireAuth, getJwtSecret } from "./middleware/auth";
 import { startScheduler } from "./scheduler";
 import { attachWebSocket } from "./tg/wsHandler";
+
+// Validate critical env vars before accepting any requests
+getJwtSecret();
 
 const app = express();
 const PORT = Number(process.env.PORT ?? 3000);

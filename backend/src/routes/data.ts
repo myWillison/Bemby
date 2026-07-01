@@ -2,6 +2,12 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { db } from '../db/database';
 import { refreshScheduler } from '../scheduler';
+import {
+  verifyPassword,
+  legacyHashPassword,
+  timingSafeCompare,
+  getStoredCredentials,
+} from '../auth/credentials';
 
 type EncryptedEnvelope = {
   encrypted: true;
@@ -155,7 +161,9 @@ export type ExportPayload = {
   settings: Record<string, string>;
 };
 
-router.get('/export', (req, res) => {
+router.post('/export', (req, res) => {
+  const { secret } = req.body as { secret?: string };
+
   const accounts = db.prepare('SELECT * FROM tg_accounts ORDER BY id').all() as AccountRow[];
   const templates = db.prepare('SELECT * FROM job_templates ORDER BY id').all() as TemplateRow[];
   const jobs = db.prepare('SELECT * FROM jobs ORDER BY id').all() as JobRow[];
@@ -222,7 +230,18 @@ router.get('/export', (req, res) => {
     settings: Object.fromEntries(settings.map(s => [s.key, s.value])),
   };
 
-  const secret = typeof req.query.secret === 'string' && req.query.secret ? req.query.secret : null;
+  // Encryption is mandatory when the payload contains sensitive credentials
+  const hasSecrets = payload.accounts.some(a => a.sessionString)
+    || (payload.aiSuppliers ?? []).some(s => s.apiKey);
+
+  if (hasSecrets && !secret) {
+    res.status(400).json({
+      error: 'This export contains sensitive credentials (session strings or API keys). Provide an encryption secret.',
+      code: 'SECRET_REQUIRED',
+    });
+    return;
+  }
+
   if (secret) {
     res.json(encryptPayload(JSON.stringify(payload), secret));
   } else {
@@ -230,8 +249,8 @@ router.get('/export', (req, res) => {
   }
 });
 
-router.post('/import', (req, res) => {
-  let { data, mode, secret, forceReauth = true } = req.body as { data: ExportPayload | EncryptedEnvelope; mode: 'merge' | 'replace'; secret?: string; forceReauth?: boolean };
+router.post('/import', async (req, res) => {
+  let { data, mode, secret, forceReauth = true, confirmPassword } = req.body as { data: ExportPayload | EncryptedEnvelope; mode: 'merge' | 'replace'; secret?: string; forceReauth?: boolean; confirmPassword?: string };
 
   if (data && (data as EncryptedEnvelope).encrypted === true) {
     if (!secret) {
@@ -256,6 +275,21 @@ router.post('/import', (req, res) => {
   if (!Array.isArray(payload.accounts) || !Array.isArray(payload.jobs)) {
     res.status(400).json({ error: 'Malformed export file: missing accounts or jobs' });
     return;
+  }
+
+  if (mode === 'replace') {
+    if (!confirmPassword) {
+      res.status(400).json({ error: 'Current password confirmation is required for replace-mode import.', code: 'CONFIRM_REQUIRED' });
+      return;
+    }
+    const stored = getStoredCredentials();
+    const valid = stored.passwordHash
+      ? await verifyPassword(confirmPassword, stored.passwordHash)
+      : timingSafeCompare(legacyHashPassword(confirmPassword), legacyHashPassword(process.env.ADMIN_PASSWORD ?? ''));
+    if (!valid) {
+      res.status(401).json({ error: 'Incorrect password', code: 'WRONG_PASSWORD' });
+      return;
+    }
   }
 
   const results = { accountsImported: 0, accountsSkipped: 0, templatesImported: 0, jobsImported: 0, aiSuppliersImported: 0, aiModelsImported: 0, settingsUpdated: 0 };

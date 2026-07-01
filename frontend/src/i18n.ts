@@ -555,6 +555,11 @@ const zh = {
       importSecretLabel: "解密密钥",
       importSecretPlaceholder: "输入导出时使用的密钥",
       wrongSecret: "密钥错误或文件损坏",
+      exportSecretRequired: "导出包含敏感凭据，必须设置加密密钥",
+      confirmPasswordLabel: "当前密码确认",
+      confirmPasswordPlaceholder: "输入当前密码以确认替换操作",
+      confirmPasswordRequired: "替换模式需要输入当前密码",
+      wrongConfirmPassword: "当前密码不正确",
       forceReauthLabel: "强制重新认证（推荐）",
       forceReauthHint: "导入后清除会话令牌，账户需重新认证",
       forceReauthRisk:
@@ -1142,6 +1147,11 @@ const en: typeof zh = {
       importSecretLabel: "Decryption secret",
       importSecretPlaceholder: "Enter the secret used when exporting",
       wrongSecret: "Incorrect secret or corrupted file",
+      exportSecretRequired: "Export contains sensitive credentials -- an encryption secret is required",
+      confirmPasswordLabel: "Confirm current password",
+      confirmPasswordPlaceholder: "Enter your current password to confirm replace",
+      confirmPasswordRequired: "Current password is required for replace-mode import",
+      wrongConfirmPassword: "Current password is incorrect",
       forceReauthLabel: "Force reauthenticate (recommended)",
       forceReauthHint:
         "Clears session tokens on import; accounts must reauthenticate",

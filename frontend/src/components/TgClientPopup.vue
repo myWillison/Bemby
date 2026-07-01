@@ -3066,36 +3066,34 @@ function startLiveSocket() {
   const accountId = selectedAccountId.value;
   wsAccountId = accountId;
   const token = localStorage.getItem("token") ?? "";
-  // Derive ws(s):// from the current page origin
   const proto = location.protocol === "https:" ? "wss" : "ws";
+  // accountId in the URL is non-sensitive; token is sent as the first message so it never appears in access logs
   const ws = new WebSocket(
-    `${proto}://${location.host}/ws?accountId=${accountId}&token=${encodeURIComponent(token)}`,
+    `${proto}://${location.host}/ws?accountId=${accountId}`,
   );
   liveWs = ws;
 
   ws.onopen = () => {
-    wsBackoff = 1_000; // reset backoff after a successful connection
-    if (wsEverOpen) {
-      // Reconnected after a drop -- catch up on missed messages
-      catchUpActiveChatMessages();
-    }
-    wsEverOpen = true;
-    // Re-register active chat so the backend resumes periodic sync
-    if (activeChatId.value) {
-      ws.send(
-        JSON.stringify({ type: "activateChat", chatId: activeChatId.value }),
-      );
-    }
+    wsBackoff = 1_000;
+    ws.send(JSON.stringify({ type: "auth", token }));
   };
 
   ws.onmessage = (e) => {
     try {
       const data = JSON.parse(e.data as string);
-      if (data.type === "message")
+      if (data.type === "authenticated") {
+        // Auth handshake complete -- resume normal operation
+        if (wsEverOpen) {
+          catchUpActiveChatMessages();
+        }
+        wsEverOpen = true;
+        if (activeChatId.value) {
+          ws.send(JSON.stringify({ type: "activateChat", chatId: activeChatId.value }));
+        }
+      } else if (data.type === "message") {
         onIncomingMessage(data.chatId as string, data.message as TgMessage);
-      else if (data.type === "dialogs" && Array.isArray(data.dialogs)) {
-        const updated = data.dialogs as TgDialog[];
-        dialogs.value = updated;
+      } else if (data.type === "dialogs" && Array.isArray(data.dialogs)) {
+        dialogs.value = data.dialogs as TgDialog[];
       } else if (data.type === "readOutbox") {
         onReadOutbox(data.chatId as string, data.maxId as number);
       }

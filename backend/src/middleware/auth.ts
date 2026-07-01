@@ -2,7 +2,12 @@ import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
 export function getJwtSecret(): string {
-  return process.env.JWT_SECRET || 'change-me-in-production';
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    console.error('FATAL: JWT_SECRET env var is not set. Set it before starting Bemby.');
+    process.exit(1);
+  }
+  return secret;
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
