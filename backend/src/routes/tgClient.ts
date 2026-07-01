@@ -1,4 +1,6 @@
 import { Router } from "express";
+import dns from "dns";
+import net from "net";
 import {
   getLiveClient,
   loadDialogs,
@@ -52,6 +54,40 @@ function tgError(err: any, accountId: number, res: Response): void {
 
 const router = Router();
 
+// Reject IPs in private/reserved ranges to prevent SSRF against internal services.
+function isBlockedIp(ip: string): boolean {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split(".").map(Number);
+    return (
+      a === 0 ||
+      a === 127 ||
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254)
+    );
+  }
+  if (net.isIPv6(ip)) {
+    const lower = ip.toLowerCase();
+    return lower === "::1" || lower.startsWith("fc") || lower.startsWith("fd");
+  }
+  return true; // reject unrecognised formats
+}
+
+async function assertPublicUrl(rawUrl: string): Promise<void> {
+  const parsed = new URL(rawUrl);
+  const hostname = parsed.hostname;
+  if (net.isIP(hostname)) {
+    if (isBlockedIp(hostname)) throw new Error("Private IP not allowed");
+    return;
+  }
+  // Resolve to IP before fetching so literal hostname tricks don't bypass the check
+  const { address } = await dns.promises.lookup(hostname).catch(async () =>
+    dns.promises.lookup(hostname, { family: 6 }),
+  );
+  if (isBlockedIp(address)) throw new Error("Private IP not allowed");
+}
+
 // GET /miniapp-proxy -- proxy mini app content through the backend.
 // For HTML: rewrites <script src> and <link href> (stylesheet/modulepreload) so all
 // JS/CSS also flows through this proxy, bypassing CORS and X-Frame-Options on the bot server.
@@ -61,6 +97,12 @@ router.get("/miniapp-proxy", async (req, res) => {
   const token = (req.query.token as string) ?? "";
   if (!url || !/^https?:\/\//i.test(url)) {
     res.status(400).json({ error: "valid url required" });
+    return;
+  }
+  try {
+    await assertPublicUrl(url);
+  } catch {
+    res.status(400).json({ error: "URL not allowed" });
     return;
   }
   try {
