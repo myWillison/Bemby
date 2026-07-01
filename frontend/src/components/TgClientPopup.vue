@@ -1647,7 +1647,7 @@ function linkifyBio(text: string): string {
     /(https?:\/\/[^\s<]+)|@([A-Za-z0-9_]{3,})/g,
     (_, url, mention) =>
       url
-        ? `<a href="${url}" class="tgc-bio-link">${url}</a>`
+        ? `<a href="${url.replace(/"/g, '&quot;')}" class="tgc-bio-link">${url}</a>`
         : `<a href="https://t.me/${mention}" class="tgc-bio-link">@${mention}</a>`,
   );
 }
