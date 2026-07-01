@@ -666,20 +666,19 @@ export type ImportResult = {
 };
 
 export const dataApi = {
-  export: (secret?: string) => {
-    const params = secret ? { secret } : undefined;
-    return api
-      .get<ExportPayload | EncryptedEnvelope>("/data/export", { params })
-      .then((r) => r.data);
-  },
+  export: (secret?: string) =>
+    api
+      .post<ExportPayload | EncryptedEnvelope>("/data/export", { secret })
+      .then((r) => r.data),
   import: (
     data: ExportPayload | EncryptedEnvelope,
     mode: "merge" | "replace",
     secret?: string,
     forceReauth = true,
+    confirmPassword?: string,
   ) =>
     api
-      .post<ImportResult>("/data/import", { data, mode, secret, forceReauth })
+      .post<ImportResult>("/data/import", { data, mode, secret, forceReauth, confirmPassword })
       .then((r) => r.data),
 };
 

@@ -75,6 +75,11 @@ function statusNeedsReauth(
   );
 }
 
+function internalError(res: import('express').Response, err: unknown, context: string): void {
+  console.error(`[accounts] ${context}:`, err);
+  res.status(500).json({ error: 'An internal error occurred' });
+}
+
 const router = Router();
 
 type AccountRow = {
@@ -304,6 +309,15 @@ router.post("/export", (req, res) => {
       disabled: Boolean(a.disabled),
     })),
   };
+  const hasSessionStrings = payload.accounts.some(a => a.sessionString != null);
+  if (hasSessionStrings && !secret) {
+    res.status(400).json({
+      error: 'This export contains session strings. Provide an encryption secret.',
+      code: 'SECRET_REQUIRED',
+    });
+    return;
+  }
+
   if (secret) {
     res.json(encryptPayload(JSON.stringify(payload), secret));
   } else {
@@ -461,7 +475,7 @@ router.post("/:id/check-status", async (req, res) => {
     res.json(status);
   } catch (err: any) {
     if (isAuthError(err?.message ?? "")) markSessionExpired(account.id);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'check-status');
   }
 });
 
@@ -501,7 +515,7 @@ router.post("/:id/refresh-tg-meta", async (req, res) => {
     });
   } catch (err: any) {
     if (isAuthError(err?.message ?? "")) markSessionExpired(account.id);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'refresh-tg-meta');
   }
 });
 
@@ -583,7 +597,7 @@ router.post("/:id/check-spam", async (req, res) => {
     res.json(result);
   } catch (err: any) {
     if (isAuthError(err?.message ?? "")) markSessionExpired(account.id);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'check-spam');
   }
 });
 
@@ -621,7 +635,7 @@ router.post("/:id/update-2fa", async (req, res) => {
     res.json({ success: true });
   } catch (err: any) {
     if (isAuthError(err?.message ?? "")) markSessionExpired(account.id);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'update-2fa');
   }
 });
 
@@ -653,7 +667,7 @@ router.get("/:id/sessions", async (req, res) => {
     res.json(sessions);
   } catch (err: any) {
     if (isAuthError(err?.message ?? "")) markSessionExpired(account.id);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'sessions');
   }
 });
 
@@ -691,7 +705,7 @@ router.post("/:id/terminate-session", async (req, res) => {
     res.json({ success: true });
   } catch (err: any) {
     if (isAuthError(err?.message ?? "")) markSessionExpired(account.id);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'terminate-session');
   }
 });
 
@@ -723,7 +737,7 @@ router.post("/:id/terminate-other-sessions", async (req, res) => {
     res.json({ success: true });
   } catch (err: any) {
     if (isAuthError(err?.message ?? "")) markSessionExpired(account.id);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'terminate-other-sessions');
   }
 });
 
@@ -775,7 +789,7 @@ router.post("/:id/auth/request", async (req, res) => {
     ).run(account.id);
     res.json({ message: "Verification code sent", isCodeViaApp });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'auth/request');
   }
 });
 
@@ -791,7 +805,7 @@ router.post("/:id/auth/resend", async (req, res) => {
     await resendCodeAsSms(account.id);
     res.json({ ok: true });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'auth/resend');
   }
 });
 
@@ -832,7 +846,7 @@ router.post("/:id/auth/verify", async (req, res) => {
         .json({ error: "Invalid auth state or missing credentials" });
     }
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'auth/verify');
   }
 });
 

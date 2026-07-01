@@ -892,6 +892,27 @@
             </div>
           </div>
 
+          <div v-if="importMode === 'replace'" class="form-group">
+            <label class="form-label">{{
+              t("settings.importExport.confirmPasswordLabel")
+            }}</label>
+            <div class="input-with-toggle">
+              <input
+                :type="showImportConfirmPassword ? 'text' : 'password'"
+                class="form-control"
+                v-model="importConfirmPassword"
+                :placeholder="t('settings.importExport.confirmPasswordPlaceholder')"
+              />
+              <button
+                type="button"
+                class="toggle-secret-btn"
+                @click="showImportConfirmPassword = !showImportConfirmPassword"
+              >
+                <i :class="showImportConfirmPassword ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye'"></i>
+              </button>
+            </div>
+          </div>
+
           <button
             class="btn btn-primary"
             :disabled="importing"
@@ -1855,6 +1876,8 @@ const exportSecret = ref("");
 const showExportSecret = ref(false);
 const importSecret = ref("");
 const showImportSecret = ref(false);
+const importConfirmPassword = ref("");
+const showImportConfirmPassword = ref(false);
 // Set when a loaded file is detected as encrypted
 const importFileEncrypted = ref(false);
 
@@ -1877,10 +1900,6 @@ function onFileChange(e: Event) {
 
 async function doExport() {
   const secret = exportSecret.value.trim() || undefined;
-  if (!secret) {
-    const ok = confirm(t("settings.importExport.exportWarning"));
-    if (!ok) return;
-  }
   try {
     const data = await dataApi.export(secret);
     const blob = new Blob([JSON.stringify(data, null, 2)], {
@@ -1894,8 +1913,10 @@ async function doExport() {
     a.click();
     URL.revokeObjectURL(url);
   } catch (err: any) {
-    importError.value =
-      err.response?.data?.error ?? t("settings.importExport.importFailed");
+    const code = err.response?.data?.code;
+    importError.value = code === "SECRET_REQUIRED"
+      ? t("settings.importExport.exportSecretRequired")
+      : (err.response?.data?.error ?? t("settings.importExport.importFailed"));
   }
 }
 
@@ -1905,10 +1926,6 @@ async function doImport() {
   if (!importFile.value) {
     importError.value = t("settings.importExport.noFileSelected");
     return;
-  }
-  if (importMode.value === "replace") {
-    const ok = confirm(t("settings.importExport.replaceWarning"));
-    if (!ok) return;
   }
   importing.value = true;
   try {
@@ -1921,11 +1938,15 @@ async function doImport() {
       return;
     }
     const secret = importSecret.value.trim() || undefined;
+    const confirmPassword = importMode.value === "replace"
+      ? importConfirmPassword.value.trim() || undefined
+      : undefined;
     const result = await dataApi.import(
       parsed,
       importMode.value,
       secret,
       importForceReauth.value,
+      confirmPassword,
     );
     importMsg.value = t("settings.importExport.importSuccess")
       .replace("{a}", String(result.accountsImported))
@@ -1938,13 +1959,18 @@ async function doImport() {
     importFile.value = null;
     importFileEncrypted.value = false;
     importSecret.value = "";
+    importConfirmPassword.value = "";
   } catch (err: any) {
     const code = err.response?.data?.code;
     importError.value =
       code === "WRONG_SECRET"
         ? t("settings.importExport.wrongSecret")
-        : (err.response?.data?.error ??
-          t("settings.importExport.importFailed"));
+        : code === "CONFIRM_REQUIRED"
+          ? t("settings.importExport.confirmPasswordRequired")
+          : code === "WRONG_PASSWORD"
+            ? t("settings.importExport.wrongConfirmPassword")
+            : (err.response?.data?.error ??
+              t("settings.importExport.importFailed"));
   } finally {
     importing.value = false;
   }

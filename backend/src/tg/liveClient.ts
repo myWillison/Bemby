@@ -1194,9 +1194,9 @@ export async function clickButton(
   const entity = entry.entityCache.get(chatId);
   if (!entity) throw new Error("Chat not found");
   const dataBytes = Buffer.from(data, "base64");
-  console.log(
-    `[button] chatId=${chatId} msgId=${msgId} data_hex=${dataBytes.toString("hex")} data_utf8=${dataBytes.toString("utf8")}`,
-  );
+  if (process.env.DEBUG === '1') {
+    console.log(`[button] chatId=${chatId} msgId=${msgId} data_hex=${dataBytes.toString('hex')}`);
+  }
   const result = await client.invoke(
     new Api.messages.GetBotCallbackAnswer({
       peer: entity as any,
@@ -1205,9 +1205,12 @@ export async function clickButton(
       game: false,
     }),
   );
-  console.log(
-    `[button] result alert=${result.alert} message=${JSON.stringify(result.message)} url=${result.url ?? "null"}`,
-  );
+  if (process.env.DEBUG === '1') {
+    const safeUrl = result.url
+      ? result.url.replace(/([?&](?:token|hash|tgaddr)=)[^&]*/gi, '$1[REDACTED]')
+      : 'null';
+    console.log(`[button] alert=${result.alert} msg=${JSON.stringify(result.message)} url=${safeUrl}`);
+  }
   return {
     alert: result.alert ?? false,
     message: result.message ?? null,
