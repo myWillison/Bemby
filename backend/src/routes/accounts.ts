@@ -17,6 +17,7 @@ import type { AuthStatus, TgAppClient } from "../types";
 import type { TgDeviceParams } from "../auth/tgAuth";
 import { parseTgProxy } from "../jobs/runner";
 import { isAuthError, markSessionExpired } from "../tg/liveClient";
+import { refreshScheduler } from "../scheduler";
 
 type EncryptedEnvelope = {
   encrypted: true;
@@ -468,7 +469,21 @@ router.put("/:id", (req, res) => {
 });
 
 router.delete("/:id", (req, res) => {
+  // checkin/custom jobs can't run without their linked account; deleting it here
+  // would silently drop the job out of the scheduler (account_id -> NULL via FK)
+  const linkedJobs = db
+    .prepare(
+      "SELECT name FROM jobs WHERE account_id = ? AND (job_type = 'checkin' OR job_type = 'custom')",
+    )
+    .all(req.params.id) as Array<{ name: string }>;
+  if (linkedJobs.length) {
+    res.status(400).json({
+      error: `Cannot delete account: ${linkedJobs.length} job(s) still depend on it (${linkedJobs.map((j) => j.name).join(", ")}). Reassign or delete those jobs first.`,
+    });
+    return;
+  }
   db.prepare("DELETE FROM tg_accounts WHERE id = ?").run(req.params.id);
+  refreshScheduler();
   res.status(204).send();
 });
 

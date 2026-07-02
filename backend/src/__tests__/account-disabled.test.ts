@@ -296,3 +296,73 @@ describe("loadEligibleJobs — disabled account filter", () => {
     expect(entry!.account!.appClientId).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Scheduler filter — orphaned account_id (account row deleted / never existed)
+//
+// Regression test: deleting a tg_accounts row that still had jobs pointing at
+// it (account_id INTEGER REFERENCES tg_accounts(id) ON DELETE SET NULL) used
+// to silently vanish from the scheduler forever, since the WHERE clause
+// treated "no joined account row" the same as "job legitimately has no
+// account" (embywatch). Only embywatch jobs kept appearing as a result.
+// ---------------------------------------------------------------------------
+
+describe("loadEligibleJobs — orphaned account (account_id set but row missing)", () => {
+  it("excludes a checkin job after its linked account is deleted", () => {
+    const acct = insertAccount({ disabled: 0 });
+    const job = insertJob({ accountId: acct.id, jobType: "checkin" });
+
+    testDb.prepare("DELETE FROM tg_accounts WHERE id = ?").run(acct.id);
+    // ON DELETE SET NULL should have nulled the FK
+    const row = testDb
+      .prepare("SELECT account_id FROM jobs WHERE id = ?")
+      .get(job.id) as any;
+    expect(row.account_id).toBeNull();
+
+    const eligible = loadEligibleJobs();
+    expect(eligible.map((e) => e.job.id)).not.toContain(job.id);
+  });
+
+  it("excludes a custom job whose account_id points at a nonexistent account", () => {
+    // Simulates legacy data from before the FK constraint existed — insert
+    // with FK checks off since a live SQLite connection would otherwise
+    // reject a dangling reference outright.
+    testDb.pragma("foreign_keys = OFF");
+    const job = insertJob({ accountId: 999999, jobType: "custom" });
+    testDb.pragma("foreign_keys = ON");
+
+    const eligible = loadEligibleJobs();
+
+    expect(eligible.map((e) => e.job.id)).not.toContain(job.id);
+  });
+
+  it("keeps an embywatch job schedulable once cascade nulls its optional account link", () => {
+    // account_id is optional for embywatch — once ON DELETE SET NULL fires,
+    // the job correctly falls back to running without a linked account.
+    const acct = insertAccount({ disabled: 0 });
+    const job = insertJob({ accountId: acct.id, jobType: "embywatch" });
+
+    testDb.prepare("DELETE FROM tg_accounts WHERE id = ?").run(acct.id);
+
+    const eligible = loadEligibleJobs();
+
+    expect(eligible.map((e) => e.job.id)).toContain(job.id);
+  });
+
+  it("still includes healthy checkin/custom/embywatch jobs alongside an orphaned one", () => {
+    const acct = insertAccount({ disabled: 0 });
+    const healthyCheckin = insertJob({ accountId: acct.id, jobType: "checkin" });
+    const healthyWatch = insertJob({ accountId: null, jobType: "embywatch" });
+
+    testDb.pragma("foreign_keys = OFF");
+    const orphaned = insertJob({ accountId: 424242, jobType: "checkin" });
+    testDb.pragma("foreign_keys = ON");
+
+    const eligible = loadEligibleJobs();
+    const ids = eligible.map((e) => e.job.id);
+
+    expect(ids).toContain(healthyCheckin.id);
+    expect(ids).toContain(healthyWatch.id);
+    expect(ids).not.toContain(orphaned.id);
+  });
+});

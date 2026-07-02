@@ -307,32 +307,40 @@ try {
     notnull: number;
   }>;
   if (cols.find((c) => c.name === "account_id")?.notnull === 1) {
-    db.exec(`
-      DROP TABLE IF EXISTS jobs_v2;
-      CREATE TABLE jobs_v2 (
-        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-        name                  TEXT    NOT NULL,
-        account_id            INTEGER REFERENCES tg_accounts(id) ON DELETE SET NULL,
-        job_type              TEXT    NOT NULL DEFAULT 'checkin',
-        bot_username          TEXT    NOT NULL,
-        schedule_window_start INTEGER NOT NULL DEFAULT 1400,
-        schedule_window_end   INTEGER NOT NULL DEFAULT 1600,
-        timezone              TEXT    NOT NULL DEFAULT 'Australia/Sydney',
-        reply_timeout_ms      INTEGER NOT NULL DEFAULT 40000,
-        retry_max             INTEGER NOT NULL DEFAULT 5,
-        enabled               INTEGER NOT NULL DEFAULT 1,
-        created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
-        config                TEXT,
-        start_command         TEXT    NOT NULL DEFAULT '/start',
-        checkin_button        TEXT    NOT NULL DEFAULT '签到',
-        template_id           INTEGER REFERENCES job_templates(id) ON DELETE SET NULL,
-        run_every_days        INTEGER NOT NULL DEFAULT 1
-      );
-      INSERT INTO jobs_v2 SELECT * FROM jobs;
-      DROP TABLE jobs;
-      ALTER TABLE jobs_v2 RENAME TO jobs;
-    `);
-    console.log("[db] Migrated jobs.account_id to nullable");
+    // job_logs.job_id -> jobs(id) ON DELETE CASCADE: with foreign_keys on,
+    // DROP TABLE jobs below fires that cascade and wipes all job history.
+    // Turn enforcement off for the swap, per SQLite's documented table-rebuild pattern.
+    db.pragma("foreign_keys = OFF");
+    try {
+      db.exec(`
+        DROP TABLE IF EXISTS jobs_v2;
+        CREATE TABLE jobs_v2 (
+          id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+          name                  TEXT    NOT NULL,
+          account_id            INTEGER REFERENCES tg_accounts(id) ON DELETE SET NULL,
+          job_type              TEXT    NOT NULL DEFAULT 'checkin',
+          bot_username          TEXT    NOT NULL,
+          schedule_window_start INTEGER NOT NULL DEFAULT 1400,
+          schedule_window_end   INTEGER NOT NULL DEFAULT 1600,
+          timezone              TEXT    NOT NULL DEFAULT 'Australia/Sydney',
+          reply_timeout_ms      INTEGER NOT NULL DEFAULT 40000,
+          retry_max             INTEGER NOT NULL DEFAULT 5,
+          enabled               INTEGER NOT NULL DEFAULT 1,
+          created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
+          config                TEXT,
+          start_command         TEXT    NOT NULL DEFAULT '/start',
+          checkin_button        TEXT    NOT NULL DEFAULT '签到',
+          template_id           INTEGER REFERENCES job_templates(id) ON DELETE SET NULL,
+          run_every_days        INTEGER NOT NULL DEFAULT 1
+        );
+        INSERT INTO jobs_v2 SELECT * FROM jobs;
+        DROP TABLE jobs;
+        ALTER TABLE jobs_v2 RENAME TO jobs;
+      `);
+      console.log("[db] Migrated jobs.account_id to nullable");
+    } finally {
+      db.pragma("foreign_keys = ON");
+    }
   }
 } catch (e) {
   console.error("[db] account_id migration failed:", e);
@@ -373,34 +381,45 @@ try {
     notnull: number;
   }>;
   if (cols.find((c) => c.name === "api_id")?.notnull === 1) {
-    db.exec(`
-      CREATE TABLE tg_accounts_v2 (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        name            TEXT    NOT NULL,
-        phone_number    TEXT    NOT NULL,
-        api_id          INTEGER,
-        api_hash        TEXT,
-        session_string  TEXT,
-        auth_status     TEXT    NOT NULL DEFAULT 'unauthenticated',
-        created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-        proxy_id        TEXT,
-        disabled        INTEGER NOT NULL DEFAULT 0,
-        app_client_id   TEXT,
-        sort_order      INTEGER NOT NULL DEFAULT 0,
-        tg_display_name TEXT,
-        tg_username     TEXT
-      );
-      INSERT INTO tg_accounts_v2 SELECT
-        id, name, phone_number,
-        NULLIF(api_id, 0), NULLIF(api_hash, ''),
-        session_string, auth_status, created_at,
-        proxy_id, disabled, app_client_id, sort_order,
-        tg_display_name, tg_username
-      FROM tg_accounts;
-      DROP TABLE tg_accounts;
-      ALTER TABLE tg_accounts_v2 RENAME TO tg_accounts;
-    `);
-    console.log("[db] Migrated tg_accounts api_id/api_hash to nullable");
+    // jobs.account_id -> tg_accounts(id) ON DELETE SET NULL: with foreign_keys
+    // on, DROP TABLE tg_accounts below fires that cascade on every linked job,
+    // wiping account_id to NULL even though the account itself is preserved
+    // under the same id in tg_accounts_v2. Turn enforcement off for the swap,
+    // per SQLite's documented table-rebuild pattern.
+    db.pragma("foreign_keys = OFF");
+    try {
+      db.exec(`
+        CREATE TABLE tg_accounts_v2 (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          name            TEXT    NOT NULL,
+          phone_number    TEXT    NOT NULL,
+          api_id          INTEGER,
+          api_hash        TEXT,
+          session_string  TEXT,
+          auth_status     TEXT    NOT NULL DEFAULT 'unauthenticated',
+          created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+          proxy_id        TEXT,
+          disabled        INTEGER NOT NULL DEFAULT 0,
+          app_client_id   TEXT,
+          sort_order      INTEGER NOT NULL DEFAULT 0,
+          tg_display_name TEXT,
+          tg_username     TEXT,
+          notes           TEXT
+        );
+        INSERT INTO tg_accounts_v2 SELECT
+          id, name, phone_number,
+          NULLIF(api_id, 0), NULLIF(api_hash, ''),
+          session_string, auth_status, created_at,
+          proxy_id, disabled, app_client_id, sort_order,
+          tg_display_name, tg_username, notes
+        FROM tg_accounts;
+        DROP TABLE tg_accounts;
+        ALTER TABLE tg_accounts_v2 RENAME TO tg_accounts;
+      `);
+      console.log("[db] Migrated tg_accounts api_id/api_hash to nullable");
+    } finally {
+      db.pragma("foreign_keys = ON");
+    }
   }
 } catch (e) {
   console.error("[db] tg_accounts nullable migration failed:", e);

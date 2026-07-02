@@ -57,6 +57,13 @@ const BASE_SCHEMA = `
     enabled               INTEGER NOT NULL DEFAULT 1,
     created_at            DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS job_logs (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id  INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    ran_at  TEXT    NOT NULL,
+    status  TEXT    NOT NULL
+  );
 `;
 
 // All ALTER TABLE jobs ADD COLUMN statements from database.ts, in order.
@@ -110,8 +117,21 @@ function buildFreshDb(): DB {
 function runAccountIdMigration(db: DB) {
   const cols = db.prepare('PRAGMA table_info(jobs)').all() as ColInfo[];
   if (cols.find(c => c.name === 'account_id')?.notnull === 1) {
-    db.exec(JOBS_V2_MIGRATION);
+    // Mirrors database.ts: foreign_keys must be off during the swap, otherwise
+    // DROP TABLE jobs cascades ON DELETE CASCADE and wipes every job_logs row.
+    db.pragma('foreign_keys = OFF');
+    try {
+      db.exec(JOBS_V2_MIGRATION);
+    } finally {
+      db.pragma('foreign_keys = ON');
+    }
   }
+}
+
+function insertJobLog(db: DB, jobId: number) {
+  return db.prepare(
+    "INSERT INTO job_logs (job_id, ran_at, status) VALUES (?, '2026-01-01T00:00:00Z', 'success')",
+  ).run(jobId).lastInsertRowid as number;
 }
 
 function jobsColumns(db: DB) {
@@ -186,5 +206,35 @@ describe('jobs account_id nullable migration', () => {
 
     // Second run must be a no-op — should not throw
     expect(() => runAccountIdMigration(db)).not.toThrow();
+  });
+
+  // Regression: DROP TABLE jobs fires job_logs.job_id's ON DELETE CASCADE when
+  // foreign_keys is on, silently deleting all job run history. This is why the
+  // migration must toggle foreign_keys off for the swap.
+  it('preserves job_logs history across the migration', () => {
+    const db = buildFreshDb();
+    const accId = insertAccount(db);
+    const jobId = insertJob(db, accId).lastInsertRowid as number;
+    insertJobLog(db, jobId);
+    insertJobLog(db, jobId);
+
+    runAccountIdMigration(db);
+
+    const logs = db.prepare('SELECT * FROM job_logs').all() as any[];
+    expect(logs).toHaveLength(2);
+    expect(logs.every(l => l.job_id === jobId)).toBe(true);
+  });
+
+  it('demonstrates the cascade-delete bug when foreign_keys is left on during the swap', () => {
+    const db = buildFreshDb();
+    const accId = insertAccount(db);
+    const jobId = insertJob(db, accId).lastInsertRowid as number;
+    insertJobLog(db, jobId);
+
+    // Unpatched version of the migration — no foreign_keys toggle.
+    db.exec(JOBS_V2_MIGRATION);
+
+    const logs = db.prepare('SELECT * FROM job_logs').all() as any[];
+    expect(logs).toHaveLength(0);
   });
 });
