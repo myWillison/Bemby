@@ -306,6 +306,7 @@
                   <option value="delay">{{ t('jobs.custom.actionDelay') }}</option>
                   <option value="click_button">{{ t('jobs.custom.actionClickButton') }}</option>
                   <option value="enter_captcha" :disabled="aiKeyMissing">{{ t('jobs.custom.actionEnterCaptcha') }}{{ aiKeyMissing ? ' (' + t('jobs.noApiKey') + ')' : '' }}</option>
+                  <option value="join_group">{{ t('jobs.custom.actionJoinGroup') }}</option>
                 </select>
                 <button type="button" class="btn btn-ghost btn-sm btn-icon" :disabled="i === 0" @click="moveUp(i)"><i class="fa-solid fa-arrow-up"></i></button>
                 <button type="button" class="btn btn-ghost btn-sm btn-icon" :disabled="i === customActions.length - 1" @click="moveDown(i)"><i class="fa-solid fa-arrow-down"></i></button>
@@ -426,6 +427,22 @@
                 </div>
                 <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.aiInputLengthHint') }}</div>
                 <div v-if="aiKeyMissing" style="font-size:11px;color:#e63946;margin-top:4px">{{ t('jobs.aiKeyWarning') }}</div>
+              </div>
+
+              <!-- join_group -->
+              <div v-if="action.type === 'join_group'" class="custom-action-params">
+                <div class="form-group" style="margin-bottom:0">
+                  <label class="form-label">{{ t('jobs.custom.labelGroupId') }}</label>
+                  <input v-model.trim="action.groupId" class="form-input" :placeholder="t('jobs.custom.groupIdPlaceholder')" />
+                  <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.custom.groupIdHint') }}</div>
+                </div>
+                <div class="form-group" style="margin-bottom:0;margin-top:8px">
+                  <label class="form-checkbox-label">
+                    <input type="checkbox" v-model="action.checkMembership" />
+                    {{ t('jobs.custom.labelCheckMembership') }}
+                  </label>
+                  <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.custom.checkMembershipHint') }}</div>
+                </div>
               </div>
             </div>
 
@@ -663,7 +680,7 @@ import { t, locale } from '../i18n';
 import { usePersistedRef } from '../composables/usePersistedRef';
 
 type CustomActionForm = {
-  type: 'send_command' | 'wait_reply' | 'delay' | 'click_button' | 'enter_captcha';
+  type: 'send_command' | 'wait_reply' | 'delay' | 'click_button' | 'enter_captcha' | 'join_group';
   content: string;
   contentDropdown: string;
   contentCustom: string;
@@ -678,6 +695,8 @@ type CustomActionForm = {
   captchaLength: string;
   successContains: string;
   failContains: string;
+  groupId: string;
+  checkMembership: boolean;
 };
 
 const jobs = ref<Job[]>([]);
@@ -877,7 +896,7 @@ function onJobTypeChange() {
 }
 
 function defaultAction(): CustomActionForm {
-  return { type: 'send_command', content: '/start', contentDropdown: '/start', contentCustom: '', contentAiInputLength: '', maxWaitMs: 30000, waitMs: 2000, button: '签到', buttonDropdown: '签到', buttonCustom: '', buttonAiHint: '', maxRetries: 3, captchaLength: '', successContains: '', failContains: '' };
+  return { type: 'send_command', content: '/start', contentDropdown: '/start', contentCustom: '', contentAiInputLength: '', maxWaitMs: 30000, waitMs: 2000, button: '签到', buttonDropdown: '签到', buttonCustom: '', buttonAiHint: '', maxRetries: 3, captchaLength: '', successContains: '', failContains: '', groupId: '', checkMembership: false };
 }
 
 function addAction() {
@@ -949,6 +968,7 @@ function applyTemplate(tpl: JobTemplate) {
           if (a.type === 'wait_reply') return { ...base, type: 'wait_reply' as const, maxWaitMs: a.maxWaitMs, successContains: a.successContains ?? '', failContains: a.failContains ?? '', maxRetries: a.maxRetries ?? 0 };
           if (a.type === 'delay') return { ...base, type: 'delay' as const, waitMs: a.waitMs };
           if (a.type === 'enter_captcha') return { ...base, type: 'enter_captcha' as const, maxWaitMs: a.maxWaitMs, captchaLength: String(a.captchaLength ?? ''), maxRetries: a.maxRetries ?? 0 };
+          if (a.type === 'join_group') return { ...base, type: 'join_group' as const, groupId: a.groupId, checkMembership: a.checkMembership ?? false };
           if (a.type === 'click_button') {
             const aiMatch = a.button.match(/^\{aiBtn(?::(.+))?\}$/);
             let buttonDropdown: string, buttonCustom = '', buttonAiHint = '';
@@ -1092,6 +1112,7 @@ function openEdit(j: Job) {
           if (a.type === 'wait_reply') return { ...base, type: 'wait_reply', maxWaitMs: a.maxWaitMs, successContains: a.successContains ?? '', failContains: a.failContains ?? '', maxRetries: a.maxRetries ?? 0 };
           if (a.type === 'delay') return { ...base, type: 'delay', waitMs: a.waitMs };
           if (a.type === 'enter_captcha') return { ...base, type: 'enter_captcha', maxWaitMs: a.maxWaitMs, captchaLength: String(a.captchaLength ?? ''), maxRetries: a.maxRetries ?? 0 };
+          if (a.type === 'join_group') return { ...base, type: 'join_group', groupId: a.groupId, checkMembership: a.checkMembership ?? false };
           if (a.type === 'click_button') {
             const aiMatch = a.button.match(/^\{aiBtn(?::(.+))?\}$/);
             let buttonDropdown: string, buttonCustom = '', buttonAiHint = '';
@@ -1179,6 +1200,7 @@ function buildConfig(): EmbywatchConfig | CustomConfig | Record<string, string> 
           const captchaLength = a.captchaLength ? parseInt(a.captchaLength) || undefined : undefined;
           return { type: 'enter_captcha' as const, maxWaitMs: a.maxWaitMs, captchaLength, ...(a.maxRetries > 0 ? { maxRetries: a.maxRetries } : {}) };
         }
+        if (a.type === 'join_group') return { type: 'join_group' as const, groupId: a.groupId, ...(a.checkMembership ? { checkMembership: true } : {}) };
         let button: string;
         if (a.buttonDropdown === 'custom') button = a.buttonCustom;
         else if (a.buttonDropdown === '{aiBtn}') button = a.buttonAiHint.trim() ? `{aiBtn:${a.buttonAiHint.trim()}}` : '{aiBtn}';

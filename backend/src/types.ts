@@ -97,7 +97,8 @@ export type CustomAction =
       maxWaitMs: number;
       captchaLength?: number;
       maxRetries?: number;
-    };
+    }
+  | { type: "join_group"; groupId: string; checkMembership?: boolean };
 
 export type CustomConfig = {
   actions: CustomAction[];

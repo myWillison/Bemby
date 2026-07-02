@@ -626,6 +626,68 @@ export async function runCustom(
                   );
                 break;
               }
+
+              case "join_group": {
+                const raw = action.groupId.trim();
+                step.label = `Join group: ${raw}`;
+
+                // Detect invite link: https://t.me/+HASH or https://t.me/joinchat/HASH
+                const inviteMatch = raw.match(/(?:t\.me\/(?:joinchat\/|\+))([A-Za-z0-9_-]+)/);
+                if (inviteMatch) {
+                  const hash = inviteMatch[1];
+
+                  if (action.checkMembership) {
+                    // CheckChatInvite returns ChatInviteAlready when the user is already a member
+                    const check = await client.invoke(new Api.messages.CheckChatInvite({ hash }));
+                    if (check instanceof Api.ChatInviteAlready || check instanceof Api.ChatInvitePeek) {
+                      step.result = "Already a member (verified)";
+                      break;
+                    }
+                  }
+
+                  try {
+                    await client.invoke(new Api.messages.ImportChatInvite({ hash }));
+                    step.result = "Joined via invite link";
+                  } catch (err: any) {
+                    if (err?.message?.includes("ALREADY_PARTICIPANT")) {
+                      step.result = "Already a member";
+                    } else if (err?.message?.includes("INVITE_REQUEST_SENT")) {
+                      step.result = "Join request sent (pending approval)";
+                    } else {
+                      throw err;
+                    }
+                  }
+                } else {
+                  // Public username: strip leading @
+                  const username = raw.replace(/^@/, "");
+                  const entity = await client.getEntity(username);
+
+                  if (action.checkMembership && entity instanceof Api.Channel) {
+                    const channels = await client.invoke(
+                      new Api.channels.GetChannels({ id: [entity] }),
+                    ) as Api.messages.Chats;
+                    const fresh = channels.chats?.[0] as Api.Channel | undefined;
+                    if (fresh && !fresh.left) {
+                      step.result = "Already a member (verified)";
+                      break;
+                    }
+                  }
+
+                  try {
+                    await client.invoke(new Api.channels.JoinChannel({ channel: entity as any }));
+                    step.result = "Joined";
+                  } catch (err: any) {
+                    if (err?.message?.includes("ALREADY_PARTICIPANT")) {
+                      step.result = "Already a member";
+                    } else if (err?.message?.includes("INVITE_REQUEST_SENT")) {
+                      step.result = "Join request sent (pending approval)";
+                    } else {
+                      throw err;
+                    }
+                  }
+                }
+                break;
+              }
             }
 
             actionSucceeded = true;

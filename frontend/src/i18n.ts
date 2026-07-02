@@ -298,6 +298,7 @@ const zh = {
       actionDelay: "延时",
       actionClickButton: "点击按钮",
       actionEnterCaptcha: "输入验证码",
+      actionJoinGroup: "加入群组",
       labelContent: "消息/命令",
       contentHint: "支持占位符：{word:N} {WORD:N} {num:N} {alpha:N} {uuid}",
       labelMaxWait: "最长等待（毫秒）",
@@ -316,6 +317,11 @@ const zh = {
       failContainsHint: "收到含该文字的回复时标记失败，留空则不按文字判断",
       labelJobMaxRetries: "任务最大重试次数",
       jobMaxRetriesHint: "整个动作链失败后的重试次数，1 表示不重试",
+      labelGroupId: "群组 ID / 邀请链接",
+      groupIdPlaceholder: "例：@groupname 或 https://t.me/+xxx",
+      groupIdHint: "支持公开用户名（@group）或私有邀请链接",
+      labelCheckMembership: "验证群组成员资格",
+      checkMembershipHint: "勾选后，在发送加入请求前先检查是否已是成员（已加入则直接成功）；发送请求后再次验证，根据是否成功加入标记任务成功或失败",
     },
   },
   templates: {
@@ -891,6 +897,7 @@ const en: typeof zh = {
       actionDelay: "Delay",
       actionClickButton: "Click button",
       actionEnterCaptcha: "Enter captcha",
+      actionJoinGroup: "Join a group",
       labelContent: "Message / command",
       contentHint:
         "Supports placeholders: {word:N} {WORD:N} {num:N} {alpha:N} {uuid}",
@@ -911,6 +918,11 @@ const en: typeof zh = {
       labelJobMaxRetries: "Job max retries",
       jobMaxRetriesHint:
         "How many times to retry the whole action chain on failure; 1 means no retry",
+      labelGroupId: "Group ID / invite link",
+      groupIdPlaceholder: "e.g. @groupname or https://t.me/+xxx",
+      groupIdHint: "Accepts a public username (@group) or a private invite link",
+      labelCheckMembership: "Verify group membership",
+      checkMembershipHint: "When enabled, checks membership before sending a join request (success if already a member); after the request is sent, re-verifies membership and marks the action as success or failed accordingly",
     },
   },
   templates: {
