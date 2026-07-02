@@ -44,7 +44,7 @@
         <button class="btn btn-sm btn-success" @click="showBulkRunModal = true"><i class="fa-solid fa-play"></i> {{ t('jobs.bulkRun').replace('{n}', String(selectedJobIds.length)) }}</button>
         <button class="btn btn-sm btn-secondary" @click="bulkEnableJobs"><i class="fa-solid fa-circle-check"></i> {{ t('jobs.bulkEnable').replace('{n}', String(selectedJobIds.length)) }}</button>
         <button class="btn btn-sm btn-secondary" @click="confirmBulkDisableJobs = true"><i class="fa-solid fa-ban"></i> {{ t('jobs.bulkDisable').replace('{n}', String(selectedJobIds.length)) }}</button>
-        <button class="btn btn-sm btn-danger" @click="confirmBulkDeleteJobs = true"><i class="fa-solid fa-trash"></i> {{ t('jobs.bulkDelete').replace('{n}', String(selectedJobIds.length)) }}</button>
+        <button class="btn btn-sm btn-danger" @click="confirmBulkRetireJobs = true"><i class="fa-solid fa-box-archive"></i> {{ t('jobs.bulkRetire').replace('{n}', String(selectedJobIds.length)) }}</button>
         <button class="btn btn-sm btn-secondary" @click="showBulkWindowModal = true"><i class="fa-solid fa-clock"></i> {{ t('jobs.bulkWindow').replace('{n}', String(selectedJobIds.length)) }}</button>
         <button class="btn btn-sm btn-ghost" style="margin-left:auto" @click="selectedJobIds = []"><i class="fa-solid fa-xmark"></i></button>
       </div>
@@ -98,7 +98,7 @@
                   </button>
                   <button class="btn btn-sm btn-ghost btn-icon" :title="t('common.edit')" @click="openEdit(j)"><i class="fa-solid fa-pen"></i></button>
                   <button class="btn btn-sm btn-ghost btn-icon" :title="t('common.duplicate')" @click="openDuplicate(j)"><i class="fa-solid fa-copy"></i></button>
-                  <button class="btn btn-sm btn-danger btn-icon" :title="t('common.delete')" @click="remove(j.id)"><i class="fa-solid fa-trash"></i></button>
+                  <button class="btn btn-sm btn-danger btn-icon" :title="t('common.retire')" @click="retire(j.id)"><i class="fa-solid fa-box-archive"></i></button>
                 </div>
                 <!-- mobile: single button opens action sheet -->
                 <button class="btn btn-sm btn-ghost btn-icon show-mobile" @click="actionMenuJob = j">
@@ -611,16 +611,16 @@
       </div>
     </div>
 
-    <!-- Bulk delete confirmation -->
-    <div v-if="confirmBulkDeleteJobs" class="modal-backdrop">
+    <!-- Bulk retire confirmation -->
+    <div v-if="confirmBulkRetireJobs" class="modal-backdrop">
       <div class="modal" style="width:380px">
-        <h3 class="modal-title">{{ t('common.delete') }}</h3>
+        <h3 class="modal-title">{{ t('common.retire') }}</h3>
         <div class="modal-body">
-          <p>{{ t('jobs.confirmBulkDelete').replace('{n}', String(selectedJobIds.length)) }}</p>
+          <p>{{ t('jobs.confirmBulkRetire').replace('{n}', String(selectedJobIds.length)) }}</p>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-ghost" @click="confirmBulkDeleteJobs = false"><i class="fa-solid fa-xmark"></i> {{ t('common.cancel') }}</button>
-          <button class="btn btn-danger" @click="executeBulkDeleteJobs"><i class="fa-solid fa-trash"></i> {{ t('common.delete') }}</button>
+          <button class="btn btn-ghost" @click="confirmBulkRetireJobs = false"><i class="fa-solid fa-xmark"></i> {{ t('common.cancel') }}</button>
+          <button class="btn btn-danger" @click="executeBulkRetireJobs"><i class="fa-solid fa-box-archive"></i> {{ t('common.retire') }}</button>
         </div>
       </div>
     </div>
@@ -642,8 +642,8 @@
           <i :class="actionMenuJob.enabled ? 'fa-solid fa-ban' : 'fa-solid fa-circle-check'"></i>
           {{ actionMenuJob.enabled ? t('common.disable') : t('common.enable') }}
         </button>
-        <button class="action-sheet-btn danger" @click="remove(actionMenuJob.id); actionMenuJob = null">
-          <i class="fa-solid fa-trash"></i> {{ t('common.delete') }}
+        <button class="action-sheet-btn danger" @click="retire(actionMenuJob.id); actionMenuJob = null">
+          <i class="fa-solid fa-box-archive"></i> {{ t('common.retire') }}
         </button>
         <div class="action-sheet-divider"></div>
         <button class="action-sheet-btn action-sheet-cancel" @click="actionMenuJob = null">
@@ -715,7 +715,7 @@ const confirmDisableJob = ref<Job | null>(null);
 const selectedJobIds = ref<number[]>([]);
 const allJobsSelected = computed(() => sortedJobs.value.length > 0 && sortedJobs.value.every(j => selectedJobIds.value.includes(j.id)));
 const confirmBulkDisableJobs = ref(false);
-const confirmBulkDeleteJobs = ref(false);
+const confirmBulkRetireJobs = ref(false);
 const showBulkRunModal = ref(false);
 const bulkRunDelay = ref(70);
 const showBulkWindowModal = ref(false);
@@ -1305,8 +1305,8 @@ async function executeDisable() {
   confirmDisableJob.value = null;
 }
 
-async function remove(id: number) {
-  if (!confirm(t('jobs.confirmDelete'))) return;
+async function retire(id: number) {
+  if (!confirm(t('jobs.confirmRetire'))) return;
   await jobsApi.delete(id);
   selectedJobIds.value = selectedJobIds.value.filter(i => i !== id);
   await loadJobs();
@@ -1335,10 +1335,10 @@ async function executeBulkDisableJobs() {
   selectedJobIds.value = [];
 }
 
-async function executeBulkDeleteJobs() {
+async function executeBulkRetireJobs() {
   await Promise.all(selectedJobIds.value.map(id => jobsApi.delete(id)));
   await loadJobs();
-  confirmBulkDeleteJobs.value = false;
+  confirmBulkRetireJobs.value = false;
   selectedJobIds.value = [];
 }
 

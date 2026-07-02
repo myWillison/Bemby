@@ -194,6 +194,9 @@ try {
 try {
   db.exec("ALTER TABLE tg_accounts ADD COLUMN notes TEXT");
 } catch {}
+try {
+  db.exec("ALTER TABLE jobs ADD COLUMN retired TEXT");
+} catch {}
 
 // Seed default TG app client profiles (Linux is default)
 try {

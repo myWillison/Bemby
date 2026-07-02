@@ -473,7 +473,7 @@ router.delete("/:id", (req, res) => {
   // would silently drop the job out of the scheduler (account_id -> NULL via FK)
   const linkedJobs = db
     .prepare(
-      "SELECT name FROM jobs WHERE account_id = ? AND (job_type = 'checkin' OR job_type = 'custom')",
+      "SELECT name FROM jobs WHERE account_id = ? AND retired IS NULL AND (job_type = 'checkin' OR job_type = 'custom')",
     )
     .all(req.params.id) as Array<{ name: string }>;
   if (linkedJobs.length) {

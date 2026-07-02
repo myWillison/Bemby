@@ -73,6 +73,7 @@ const ALTER_MIGRATIONS = [
   "ALTER TABLE jobs ADD COLUMN checkin_button TEXT NOT NULL DEFAULT '签到'",
   "ALTER TABLE jobs ADD COLUMN template_id INTEGER REFERENCES job_templates(id) ON DELETE SET NULL",
   "ALTER TABLE jobs ADD COLUMN run_every_days INTEGER NOT NULL DEFAULT 1",
+  "ALTER TABLE jobs ADD COLUMN retired TEXT",
 ];
 
 // The jobs_v2 swap block from database.ts — must list every column that ALTER_MIGRATIONS adds.
@@ -95,7 +96,8 @@ const JOBS_V2_MIGRATION = `
     start_command         TEXT    NOT NULL DEFAULT '/start',
     checkin_button        TEXT    NOT NULL DEFAULT '签到',
     template_id           INTEGER REFERENCES job_templates(id) ON DELETE SET NULL,
-    run_every_days        INTEGER NOT NULL DEFAULT 1
+    run_every_days        INTEGER NOT NULL DEFAULT 1,
+    retired               TEXT
   );
   INSERT INTO jobs_v2 SELECT * FROM jobs;
   DROP TABLE jobs;

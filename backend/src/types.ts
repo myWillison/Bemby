@@ -54,6 +54,7 @@ export type Job = {
   checkinButton: string;
   templateId?: number | null;
   runEveryDays: number;
+  retired?: string | null;
 };
 
 export type JobTemplate = {

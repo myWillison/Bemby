@@ -65,6 +65,7 @@ export function loadEligibleJobs(): Array<{
     FROM jobs j
     LEFT JOIN tg_accounts a ON j.account_id = a.id
     WHERE j.enabled = 1
+      AND j.retired IS NULL
       AND (j.account_id IS NULL OR (a.id IS NOT NULL AND a.disabled = 0))
       AND (
         (j.job_type != 'checkin' AND j.job_type != 'custom')
