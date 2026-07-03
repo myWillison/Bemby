@@ -11,11 +11,18 @@ import {
   getSessions,
   terminateSession,
   terminateOtherSessions,
+  getPasswordInfo,
+  getRecoveryEmail,
+  updateRecoveryEmail,
+  confirmRecoveryEmail,
+  cancelRecoveryEmail,
+  resendRecoveryEmail,
+  type PasswordInfo,
 } from "../auth/tgAuth";
 import { checkSpamStatus } from "../jobs/checkin";
-import type { AuthStatus, TgAppClient } from "../types";
-import type { TgDeviceParams } from "../auth/tgAuth";
+import type { AuthStatus } from "../types";
 import { parseTgProxy } from "../jobs/runner";
+import { resolveAppClientParams } from "../tg/appClient";
 import { isAuthError, markSessionExpired } from "../tg/liveClient";
 import { refreshScheduler } from "../scheduler";
 
@@ -114,45 +121,6 @@ function resolveApiCredentials(account: AccountRow): {
     );
   }
   return { apiId, apiHash };
-}
-
-function resolveAppClientParams(
-  appClientId: string | null | undefined,
-): TgDeviceParams | undefined {
-  try {
-    const row = db
-      .prepare("SELECT value FROM settings WHERE key = ?")
-      .get("tg_app_clients") as { value: string } | undefined;
-    if (!row?.value) return undefined;
-    const list = JSON.parse(row.value) as TgAppClient[];
-    if (!list.length) return undefined;
-
-    let client: TgAppClient | undefined;
-    if (appClientId) {
-      client = list.find((c) => c.id === appClientId);
-    } else {
-      const modeRow = db
-        .prepare("SELECT value FROM settings WHERE key = ?")
-        .get("tg_client_mode") as { value: string } | undefined;
-      if (modeRow?.value === "random") {
-        client = list[Math.floor(Math.random() * list.length)];
-      } else {
-        client = list.find((c) => c.isDefault);
-      }
-    }
-
-    if (!client) return undefined;
-    return {
-      deviceModel: client.deviceModel,
-      systemVersion: client.systemVersion,
-      appVersion: client.appVersion,
-      langCode: client.langCode,
-      langPack: client.langPack,
-      systemLangCode: client.systemLangCode,
-    };
-  } catch {
-    return undefined;
-  }
 }
 
 function resolveProxyUrl(
@@ -506,7 +474,7 @@ router.post("/:id/check-status", async (req, res) => {
     const { apiId, apiHash } = resolveApiCredentials(account);
     const proxyUrl = resolveProxyUrl(account.proxy_id);
     const proxy = parseTgProxy(proxyUrl);
-    const deviceParams = resolveAppClientParams(account.app_client_id);
+    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
     const status = await checkAccountStatus(
       apiId,
       apiHash,
@@ -540,7 +508,7 @@ router.post("/:id/refresh-tg-meta", async (req, res) => {
     const { apiId, apiHash } = resolveApiCredentials(account);
     const proxyUrl = resolveProxyUrl(account.proxy_id);
     const proxy = parseTgProxy(proxyUrl);
-    const deviceParams = resolveAppClientParams(account.app_client_id);
+    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
     const status = await checkAccountStatus(
       apiId,
       apiHash,
@@ -578,7 +546,7 @@ router.post("/check-enabled-sessions", async (req, res) => {
         const { apiId, apiHash } = resolveApiCredentials(account);
         const proxyUrl = resolveProxyUrl(account.proxy_id);
         const proxy = parseTgProxy(proxyUrl);
-        const deviceParams = resolveAppClientParams(account.app_client_id);
+        const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
         const status = await checkAccountStatus(
           apiId,
           apiHash,
@@ -630,7 +598,7 @@ router.post("/:id/check-spam", async (req, res) => {
     const { apiId, apiHash } = resolveApiCredentials(account);
     const proxyUrl = resolveProxyUrl(account.proxy_id);
     const proxy = parseTgProxy(proxyUrl);
-    const deviceParams = resolveAppClientParams(account.app_client_id);
+    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
     const result = await checkSpamStatus(
       apiId,
       apiHash,
@@ -667,7 +635,7 @@ router.post("/:id/update-2fa", async (req, res) => {
     const { apiId, apiHash } = resolveApiCredentials(account);
     const proxyUrl = resolveProxyUrl(account.proxy_id);
     const proxy = parseTgProxy(proxyUrl);
-    const deviceParams = resolveAppClientParams(account.app_client_id);
+    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
     await updateTwoFa(
       apiId,
       apiHash,
@@ -700,7 +668,7 @@ router.get("/:id/sessions", async (req, res) => {
     const { apiId, apiHash } = resolveApiCredentials(account);
     const proxyUrl = resolveProxyUrl(account.proxy_id);
     const proxy = parseTgProxy(proxyUrl);
-    const deviceParams = resolveAppClientParams(account.app_client_id);
+    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
     const sessions = await getSessions(
       apiId,
       apiHash,
@@ -737,7 +705,7 @@ router.post("/:id/terminate-session", async (req, res) => {
     const { apiId, apiHash } = resolveApiCredentials(account);
     const proxyUrl = resolveProxyUrl(account.proxy_id);
     const proxy = parseTgProxy(proxyUrl);
-    const deviceParams = resolveAppClientParams(account.app_client_id);
+    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
     await terminateSession(
       apiId,
       apiHash,
@@ -770,7 +738,7 @@ router.post("/:id/terminate-other-sessions", async (req, res) => {
     const { apiId, apiHash } = resolveApiCredentials(account);
     const proxyUrl = resolveProxyUrl(account.proxy_id);
     const proxy = parseTgProxy(proxyUrl);
-    const deviceParams = resolveAppClientParams(account.app_client_id);
+    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
     await terminateOtherSessions(
       apiId,
       apiHash,
@@ -804,6 +772,141 @@ router.post("/:id/force-reauth", (req, res) => {
   res.json(toJson(row));
 });
 
+// ── Recovery email management ─────────────────────────────────────────────────
+
+function requireAuth(account: AccountRow | undefined, res: any): account is AccountRow & { session_string: string } {
+  if (!account) { res.status(404).json({ error: "Not found" }); return false; }
+  if (!account.session_string) { res.status(400).json({ error: "Account not authenticated" }); return false; }
+  return true;
+}
+
+// GET /:id/password-info -- returns basic 2FA / recovery email status (no password needed)
+router.get("/:id/password-info", async (req, res) => {
+  const account = db
+    .prepare("SELECT * FROM tg_accounts WHERE id = ?")
+    .get(req.params.id) as AccountRow | undefined;
+  if (!requireAuth(account, res)) return;
+  try {
+    const { apiId, apiHash } = resolveApiCredentials(account);
+    const proxyUrl = resolveProxyUrl(account.proxy_id);
+    const proxy = parseTgProxy(proxyUrl);
+    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
+    const info = await getPasswordInfo(apiId, apiHash, account.session_string, proxy, deviceParams);
+    res.json(info);
+  } catch (err: any) {
+    if (isAuthError(err?.message ?? "")) markSessionExpired(account!.id);
+    internalError(res, err, "password-info");
+  }
+});
+
+// POST /:id/recovery-email/get -- return full recovery email (requires 2FA password)
+router.post("/:id/recovery-email/get", async (req, res) => {
+  const account = db
+    .prepare("SELECT * FROM tg_accounts WHERE id = ?")
+    .get(req.params.id) as AccountRow | undefined;
+  if (!requireAuth(account, res)) return;
+  const { currentPassword } = req.body as { currentPassword?: string };
+  if (!currentPassword) { res.status(400).json({ error: "currentPassword required" }); return; }
+  try {
+    const { apiId, apiHash } = resolveApiCredentials(account);
+    const proxyUrl = resolveProxyUrl(account.proxy_id);
+    const proxy = parseTgProxy(proxyUrl);
+    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
+    const result = await getRecoveryEmail(apiId, apiHash, account.session_string, currentPassword, proxy, deviceParams);
+    res.json(result);
+  } catch (err: any) {
+    if (isAuthError(err?.message ?? "")) markSessionExpired(account!.id);
+    internalError(res, err, "recovery-email/get");
+  }
+});
+
+// PUT /:id/recovery-email -- set, change, or remove the recovery email
+router.put("/:id/recovery-email", async (req, res) => {
+  const account = db
+    .prepare("SELECT * FROM tg_accounts WHERE id = ?")
+    .get(req.params.id) as AccountRow | undefined;
+  if (!requireAuth(account, res)) return;
+  const { currentPassword, newEmail } = req.body as {
+    currentPassword?: string;
+    newEmail?: string | null;
+  };
+  if (!currentPassword) { res.status(400).json({ error: "currentPassword required" }); return; }
+  try {
+    const { apiId, apiHash } = resolveApiCredentials(account);
+    const proxyUrl = resolveProxyUrl(account.proxy_id);
+    const proxy = parseTgProxy(proxyUrl);
+    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
+    const result = await updateRecoveryEmail(
+      apiId, apiHash, account.session_string,
+      { currentPassword, newEmail: newEmail ?? null },
+      proxy, deviceParams,
+    );
+    res.json(result);
+  } catch (err: any) {
+    if (isAuthError(err?.message ?? "")) markSessionExpired(account!.id);
+    internalError(res, err, "recovery-email/update");
+  }
+});
+
+// POST /:id/recovery-email/confirm -- confirm pending email with code
+router.post("/:id/recovery-email/confirm", async (req, res) => {
+  const account = db
+    .prepare("SELECT * FROM tg_accounts WHERE id = ?")
+    .get(req.params.id) as AccountRow | undefined;
+  if (!requireAuth(account, res)) return;
+  const { code } = req.body as { code?: string };
+  if (!code) { res.status(400).json({ error: "code required" }); return; }
+  try {
+    const { apiId, apiHash } = resolveApiCredentials(account);
+    const proxyUrl = resolveProxyUrl(account.proxy_id);
+    const proxy = parseTgProxy(proxyUrl);
+    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
+    await confirmRecoveryEmail(apiId, apiHash, account.session_string, code, proxy, deviceParams);
+    res.json({ ok: true });
+  } catch (err: any) {
+    if (isAuthError(err?.message ?? "")) markSessionExpired(account!.id);
+    internalError(res, err, "recovery-email/confirm");
+  }
+});
+
+// POST /:id/recovery-email/cancel -- cancel pending email confirmation
+router.post("/:id/recovery-email/cancel", async (req, res) => {
+  const account = db
+    .prepare("SELECT * FROM tg_accounts WHERE id = ?")
+    .get(req.params.id) as AccountRow | undefined;
+  if (!requireAuth(account, res)) return;
+  try {
+    const { apiId, apiHash } = resolveApiCredentials(account);
+    const proxyUrl = resolveProxyUrl(account.proxy_id);
+    const proxy = parseTgProxy(proxyUrl);
+    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
+    await cancelRecoveryEmail(apiId, apiHash, account.session_string, proxy, deviceParams);
+    res.json({ ok: true });
+  } catch (err: any) {
+    if (isAuthError(err?.message ?? "")) markSessionExpired(account!.id);
+    internalError(res, err, "recovery-email/cancel");
+  }
+});
+
+// POST /:id/recovery-email/resend -- resend confirmation code
+router.post("/:id/recovery-email/resend", async (req, res) => {
+  const account = db
+    .prepare("SELECT * FROM tg_accounts WHERE id = ?")
+    .get(req.params.id) as AccountRow | undefined;
+  if (!requireAuth(account, res)) return;
+  try {
+    const { apiId, apiHash } = resolveApiCredentials(account);
+    const proxyUrl = resolveProxyUrl(account.proxy_id);
+    const proxy = parseTgProxy(proxyUrl);
+    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
+    await resendRecoveryEmail(apiId, apiHash, account.session_string, proxy, deviceParams);
+    res.json({ ok: true });
+  } catch (err: any) {
+    if (isAuthError(err?.message ?? "")) markSessionExpired(account!.id);
+    internalError(res, err, "recovery-email/resend");
+  }
+});
+
 // ── Telegram auth flow ──────────────────────────────────────────────────────
 
 router.post("/:id/auth/request", async (req, res) => {
@@ -819,7 +922,7 @@ router.post("/:id/auth/request", async (req, res) => {
     const { apiId, apiHash } = resolveApiCredentials(account);
     const proxyUrl = resolveProxyUrl(account.proxy_id);
     const proxy = parseTgProxy(proxyUrl);
-    const deviceParams = resolveAppClientParams(account.app_client_id);
+    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
     const { isCodeViaApp } = await requestCode(
       account.id,
       apiId,

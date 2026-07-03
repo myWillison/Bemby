@@ -4,14 +4,13 @@ import type {
   EmbywatchConfig,
   EmbywatchLog,
   TgProxy,
-  TgAppClient,
   CheckinConfig,
 } from "../types";
 import { runCheckin, CheckinError, type CheckinAttemptLog } from "./checkin";
 import { runEmbywatch } from "./embywatch";
 import { runCustom, CustomJobError, type CustomJobLog } from "./custom";
 import { db } from "../db/database";
-import type { TgDeviceParams } from "../auth/tgAuth";
+import { resolveAppClientParams } from "../tg/appClient";
 
 function resolveProxyUrl(
   jobConfig: string | null,
@@ -52,32 +51,6 @@ function resolveProxyUrl(
     if (!row?.value) return undefined;
     const list = JSON.parse(row.value) as Array<{ id: string; url: string }>;
     return list.find((p) => p.id === proxyId)?.url;
-  } catch {
-    return undefined;
-  }
-}
-
-function resolveAppClientParams(
-  appClientId: string | null | undefined,
-): TgDeviceParams | undefined {
-  try {
-    const row = db
-      .prepare("SELECT value FROM settings WHERE key = ?")
-      .get("tg_app_clients") as { value: string } | undefined;
-    if (!row?.value) return undefined;
-    const list = JSON.parse(row.value) as TgAppClient[];
-    const client = appClientId
-      ? list.find((c) => c.id === appClientId)
-      : list.find((c) => c.isDefault);
-    if (!client) return undefined;
-    return {
-      deviceModel: client.deviceModel,
-      systemVersion: client.systemVersion,
-      appVersion: client.appVersion,
-      langCode: client.langCode,
-      langPack: client.langPack,
-      systemLangCode: client.systemLangCode,
-    };
   } catch {
     return undefined;
   }
@@ -150,7 +123,7 @@ export async function runJob(
             account.proxyId,
           );
           const checkinProxy = parseTgProxy(checkinProxyUrl);
-          const checkinDevice = resolveAppClientParams(account.appClientId);
+          const checkinDevice = resolveAppClientParams(account.id, account.appClientId);
           let checkinCfg: CheckinConfig = {};
           try {
             // For template-linked jobs, use template config as base then overlay job config
@@ -226,7 +199,7 @@ export async function runJob(
             account.proxyId,
           );
           const customProxy = parseTgProxy(customProxyUrl);
-          const customDevice = resolveAppClientParams(account.appClientId);
+          const customDevice = resolveAppClientParams(account.id, account.appClientId);
           const customLog = await runCustom(
             account.apiId,
             account.apiHash,

@@ -81,6 +81,13 @@ export type Account = {
   notes: string | null;
 };
 
+export type PasswordInfo = {
+  hasPassword: boolean;
+  hasRecovery: boolean;
+  hint: string | null;
+  emailUnconfirmedPattern: string | null;
+};
+
 export type AccountExportItem = {
   name: string;
   phoneNumber: string;
@@ -458,6 +465,25 @@ export const accountsApi = {
     api.put("/accounts/bulk-notes", { ids, notes }).then((r) => r.data),
   forceReauth: (id: number) =>
     api.post<Account>(`/accounts/${id}/force-reauth`).then((r) => r.data),
+  getPasswordInfo: (id: number) =>
+    api.get<PasswordInfo>(`/accounts/${id}/password-info`).then((r) => r.data),
+  getRecoveryEmail: (id: number, currentPassword: string) =>
+    api
+      .post<{ email: string | null }>(`/accounts/${id}/recovery-email/get`, { currentPassword })
+      .then((r) => r.data),
+  updateRecoveryEmail: (id: number, currentPassword: string, newEmail: string | null) =>
+    api
+      .put<{ pendingConfirmation: boolean; codeLength?: number }>(
+        `/accounts/${id}/recovery-email`,
+        { currentPassword, newEmail },
+      )
+      .then((r) => r.data),
+  confirmRecoveryEmail: (id: number, code: string) =>
+    api.post(`/accounts/${id}/recovery-email/confirm`, { code }).then((r) => r.data),
+  cancelRecoveryEmail: (id: number) =>
+    api.post(`/accounts/${id}/recovery-email/cancel`).then((r) => r.data),
+  resendRecoveryEmail: (id: number) =>
+    api.post(`/accounts/${id}/recovery-email/resend`).then((r) => r.data),
 };
 
 // ── Jobs ─────────────────────────────────────────────────────────────────────

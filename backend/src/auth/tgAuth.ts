@@ -1,4 +1,4 @@
-import { TelegramClient, Api, Logger } from "telegram";
+import { TelegramClient, Api, Logger, errors } from "telegram";
 import { LogLevel } from "telegram/extensions/Logger";
 import { StringSession } from "telegram/sessions";
 import type { TgProxy } from "../types";
@@ -392,4 +392,163 @@ export async function submitPassword(
   await entry.client.disconnect();
   pending.delete(accountId);
   return session;
+}
+
+// ── Recovery email management ─────────────────────────────────────────────────
+
+export type PasswordInfo = {
+  hasPassword: boolean;
+  hasRecovery: boolean;
+  hint: string | null;
+  emailUnconfirmedPattern: string | null;
+};
+
+function makeTgClient(
+  sessionString: string,
+  apiId: number,
+  apiHash: string,
+  proxy?: TgProxy,
+  deviceParams?: TgDeviceParams,
+) {
+  return new TelegramClient(new StringSession(sessionString), apiId, apiHash, {
+    connectionRetries: 3,
+    baseLogger: new Logger(LogLevel.NONE),
+    ...(proxy ? { proxy } : {}),
+    ...(deviceParams ?? {}),
+  });
+}
+
+export async function getPasswordInfo(
+  apiId: number,
+  apiHash: string,
+  sessionString: string,
+  proxy?: TgProxy,
+  deviceParams?: TgDeviceParams,
+): Promise<PasswordInfo> {
+  const client = makeTgClient(sessionString, apiId, apiHash, proxy, deviceParams);
+  try {
+    await client.connect();
+    const pwd = await client.invoke(new Api.account.GetPassword());
+    return {
+      hasPassword: Boolean(pwd.hasPassword),
+      hasRecovery: Boolean(pwd.hasRecovery),
+      hint: pwd.hint ?? null,
+      emailUnconfirmedPattern: pwd.emailUnconfirmedPattern ?? null,
+    };
+  } finally {
+    await client.disconnect().catch(() => undefined);
+  }
+}
+
+export async function getRecoveryEmail(
+  apiId: number,
+  apiHash: string,
+  sessionString: string,
+  currentPassword: string,
+  proxy?: TgProxy,
+  deviceParams?: TgDeviceParams,
+): Promise<{ email: string | null }> {
+  const client = makeTgClient(sessionString, apiId, apiHash, proxy, deviceParams);
+  try {
+    await client.connect();
+    const { computeCheck } = await import("telegram/Password");
+    const pwd = await client.invoke(new Api.account.GetPassword());
+    const srp = await computeCheck(pwd, currentPassword);
+    const settings = await client.invoke(
+      new Api.account.GetPasswordSettings({ password: srp }),
+    );
+    return { email: settings.email || null };
+  } finally {
+    await client.disconnect().catch(() => undefined);
+  }
+}
+
+export type UpdateRecoveryEmailResult =
+  | { pendingConfirmation: false }
+  | { pendingConfirmation: true; codeLength: number };
+
+/** Set, change (newEmail = string), or remove (newEmail = null) the recovery email. */
+export async function updateRecoveryEmail(
+  apiId: number,
+  apiHash: string,
+  sessionString: string,
+  opts: { currentPassword: string; newEmail: string | null },
+  proxy?: TgProxy,
+  deviceParams?: TgDeviceParams,
+): Promise<UpdateRecoveryEmailResult> {
+  const client = makeTgClient(sessionString, apiId, apiHash, proxy, deviceParams);
+  try {
+    await client.connect();
+    const { computeCheck } = await import("telegram/Password");
+    const pwd = await client.invoke(new Api.account.GetPassword());
+    const srp = await computeCheck(pwd, opts.currentPassword);
+    try {
+      await client.invoke(
+        new Api.account.UpdatePasswordSettings({
+          password: srp,
+          newSettings: new Api.account.PasswordInputSettings({
+            // Pass empty string to clear, non-empty to set, undefined to leave unchanged
+            email: opts.newEmail === null ? "" : opts.newEmail,
+          }),
+        }),
+      );
+      return { pendingConfirmation: false };
+    } catch (e) {
+      if (e instanceof errors.EmailUnconfirmedError) {
+        return { pendingConfirmation: true, codeLength: e.codeLength };
+      }
+      throw e;
+    }
+  } finally {
+    await client.disconnect().catch(() => undefined);
+  }
+}
+
+export async function confirmRecoveryEmail(
+  apiId: number,
+  apiHash: string,
+  sessionString: string,
+  code: string,
+  proxy?: TgProxy,
+  deviceParams?: TgDeviceParams,
+): Promise<void> {
+  const client = makeTgClient(sessionString, apiId, apiHash, proxy, deviceParams);
+  try {
+    await client.connect();
+    await client.invoke(new Api.account.ConfirmPasswordEmail({ code }));
+  } finally {
+    await client.disconnect().catch(() => undefined);
+  }
+}
+
+export async function cancelRecoveryEmail(
+  apiId: number,
+  apiHash: string,
+  sessionString: string,
+  proxy?: TgProxy,
+  deviceParams?: TgDeviceParams,
+): Promise<void> {
+  const client = makeTgClient(sessionString, apiId, apiHash, proxy, deviceParams);
+  try {
+    await client.connect();
+    await client.invoke(new Api.account.CancelPasswordEmail());
+  } finally {
+    await client.disconnect().catch(() => undefined);
+  }
+}
+
+export async function resendRecoveryEmail(
+  apiId: number,
+  apiHash: string,
+  sessionString: string,
+  proxy?: TgProxy,
+  deviceParams?: TgDeviceParams,
+): Promise<void> {
+  const client = makeTgClient(sessionString, apiId, apiHash, proxy, deviceParams);
+  try {
+    await client.connect();
+    await client.invoke(new Api.account.ResendPasswordEmail());
+  } finally {
+    await client.disconnect().catch(() => undefined);
+  }
 }

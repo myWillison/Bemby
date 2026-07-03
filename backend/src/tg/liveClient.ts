@@ -4,7 +4,7 @@ import { StringSession } from "telegram/sessions";
 import { NewMessage, Raw, type NewMessageEvent } from "telegram/events";
 import { db, getDefaultTgApiCredentials } from "../db/database";
 import { parseTgProxy } from "../jobs/runner";
-import type { TgDeviceParams } from "../auth/tgAuth";
+import { resolveAppClientParams } from "./appClient";
 
 export type TgLiveMessage = {
   chatId: string;
@@ -275,33 +275,6 @@ function resolveProxy(proxyId: string | null) {
   }
 }
 
-function resolveDeviceParams(
-  appClientId: string | null,
-): TgDeviceParams | undefined {
-  try {
-    const row = db
-      .prepare("SELECT value FROM settings WHERE key = ?")
-      .get("tg_app_clients") as { value: string } | undefined;
-    if (!row?.value) return undefined;
-    const list: Array<{ id: string; isDefault?: boolean } & TgDeviceParams> =
-      JSON.parse(row.value);
-    const c = appClientId
-      ? list.find((x) => x.id === appClientId)
-      : list.find((x) => x.isDefault);
-    if (!c) return undefined;
-    return {
-      deviceModel: c.deviceModel,
-      systemVersion: c.systemVersion,
-      appVersion: c.appVersion,
-      langCode: c.langCode,
-      langPack: c.langPack,
-      systemLangCode: c.systemLangCode,
-    };
-  } catch {
-    return undefined;
-  }
-}
-
 export async function reconnectClient(accountId: number): Promise<void> {
   const entry = liveClients.get(accountId);
   if (entry) {
@@ -363,7 +336,7 @@ export async function getLiveClient(accountId: number): Promise<LiveEntry> {
     throw new Error("No API credentials available for this account");
 
   const proxy = resolveProxy(account.proxy_id);
-  const deviceParams = resolveDeviceParams(account.app_client_id);
+  const deviceParams = resolveAppClientParams(accountId, account.app_client_id);
 
   const client = new TelegramClient(
     new StringSession(account.session_string),

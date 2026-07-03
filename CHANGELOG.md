@@ -4,6 +4,24 @@ All notable changes to Bemby are documented here.
 
 ---
 
+## v0.9.29
+
+### 中文
+
+**账户**
+- **账户备注** -- 可在账户编辑面板的基本信息选项卡中添加自由文本备注；表格中的备注列可通过"显示/隐藏备注"按钮切换显示（移动端始终隐藏）；支持在勾选多个账户后批量设置备注
+- **恢复邮箱管理** -- 在账户编辑面板的高级选项卡中新增"恢复邮箱"区域，可查看（含完整邮箱地址）、设置、更改或移除 Telegram 2FA 恢复邮箱；变更操作均需输入当前 2FA 密码，设置新邮箱时提供完整的邮件确认流程（含重新发送和取消待确认功能）
+- **通行密钥说明** -- 高级选项卡新增通行密钥（Passkeys）说明区域，明确告知该功能需在官方 Telegram 客户端中操作
+
+### English
+
+**Accounts**
+- **Account notes** -- add free-text notes per account from the Basic tab of the edit panel; the Notes column in the accounts table can be shown/hidden via a toggle button (always hidden on mobile); bulk-update notes across selected accounts at once
+- **Recovery email management** -- new Recovery Email section in the Advanced tab of the account edit panel; view (including full address reveal), set, change, or remove the Telegram 2FA recovery email; all changes require the current 2FA password; a full confirmation code flow (with resend and cancel pending) handles new-address verification
+- **Passkeys note** -- the Advanced tab now includes a Passkeys section clarifying that WebAuthn passkey management requires the official Telegram client
+
+---
+
 ## v0.9.28
 
 ### 中文

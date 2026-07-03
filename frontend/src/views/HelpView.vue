@@ -121,6 +121,24 @@
                     导出账户备份时可设置密码加密；导入时自动识别加密状态并提示输入密码。勾选<strong>强制重新认证</strong>（推荐）可在导入时清除会话令牌，避免 Telegram 因令牌共用而撤销会话。
                   </td>
                 </tr>
+                <tr>
+                  <td>备注</td>
+                  <td>
+                    可在账户编辑面板的<strong>基本信息</strong>选项卡中为账户添加备注。表格中的备注列可通过页面顶部的"显示备注 / 隐藏备注"按钮切换显示（移动端始终隐藏）。勾选多个账户后点击"设置备注 (N)"可批量更新备注。
+                  </td>
+                </tr>
+                <tr>
+                  <td>恢复邮箱</td>
+                  <td>
+                    在<strong>高级</strong>选项卡中查看、设置、更改或移除 Telegram 账户的 2FA 恢复邮箱。查看完整邮箱地址或变更操作均需输入当前 2FA 密码；设置新邮箱时，Telegram 会向该地址发送确认码，输入后方可生效。
+                  </td>
+                </tr>
+                <tr>
+                  <td>通行密钥（Passkeys）</td>
+                  <td>
+                    Telegram 通行密钥（WebAuthn）的管理需在官方 Telegram 客户端中进行，Bemby 暂不支持。
+                  </td>
+                </tr>
               </tbody>
             </table>
             <div class="help-badges-row">
@@ -208,6 +226,34 @@
                     <strong>Force re-auth</strong> (recommended) to clear
                     session tokens on import and prevent Telegram from revoking
                     a shared token.
+                  </td>
+                </tr>
+                <tr>
+                  <td>Notes</td>
+                  <td>
+                    Add free-text notes per account from the
+                    <strong>Basic</strong> tab of the edit panel. The Notes
+                    column in the table can be toggled on/off via the
+                    Show/Hide Notes button (always hidden on mobile). Select
+                    multiple accounts and click <strong>Set Notes (N)</strong>
+                    to bulk-update notes at once.
+                  </td>
+                </tr>
+                <tr>
+                  <td>Recovery email</td>
+                  <td>
+                    View, set, change, or remove the 2FA recovery email from
+                    the <strong>Advanced</strong> tab. Revealing the full
+                    address or making changes requires the current 2FA password.
+                    When setting a new email, Telegram sends a confirmation code
+                    to that address; enter the code to complete the change.
+                  </td>
+                </tr>
+                <tr>
+                  <td>Passkeys</td>
+                  <td>
+                    Telegram WebAuthn passkey management requires the official
+                    Telegram client and is not available in Bemby.
                   </td>
                 </tr>
               </tbody>
