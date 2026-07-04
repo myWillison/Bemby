@@ -151,6 +151,7 @@ export type EmbywatchConfig = {
   playDuration?: number;
   userAgent?: string;
   markWatched?: boolean;
+  verifyPlayable?: boolean;
   proxyId?: string;
 };
 

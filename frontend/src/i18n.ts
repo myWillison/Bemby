@@ -266,6 +266,8 @@ const zh = {
     startCommandHint: "支持占位符：{word:N} {WORD:N} {num:N} {alpha:N} {uuid}",
     labelMarkWatched: "播放后标记已看",
     markWatchedHint: "播放完成后，将该剧集标记为已看",
+    labelVerifyPlayable: "上报前校验可播放",
+    verifyPlayableHint: "上报前先确认媒体文件可读取（磁盘在线），避免在文件离线时上报虚假观看",
     labelProxy: "代理",
     proxyNone: "不使用代理",
     playbackRulesHint:
@@ -910,6 +912,9 @@ const en: typeof zh = {
     labelMarkWatched: "Mark as watched after playback",
     markWatchedHint:
       "After playback completes, mark the episode as watched in Emby",
+    labelVerifyPlayable: "Verify playable before reporting",
+    verifyPlayableHint:
+      "Confirm the media file is readable (disk online) before reporting, to avoid reporting a fake watch when the file is offline",
     labelProxy: "Proxy",
     proxyNone: "No proxy",
     playbackRulesHint:

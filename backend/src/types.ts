@@ -187,6 +187,11 @@ export type EmbywatchConfig = {
   markWatched?: boolean;
   /** ID of a proxy from the settings proxies list, if any. */
   proxyId?: string;
+  /**
+   * Verify the media is actually streamable (disk online) before reporting
+   * playback, so an offline file is never reported as watched. Defaults to true.
+   */
+  verifyPlayable?: boolean;
 };
 
 export type EmbywatchLog = {
