@@ -25,6 +25,7 @@ export const ALLOWED_KEYS = [
   "tg_client_mode",
   "default_tg_api_id",
   "default_tg_api_hash",
+  "account_display_with_tg_name",
 ];
 
 /** Returns first 4 chars + **** + last 4 chars, or **** for short values. */

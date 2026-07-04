@@ -546,6 +546,7 @@ export type AvailableAccount = {
   name: string;
   phoneNumber: string;
   authStatus: AuthStatus;
+  tgDisplayName: string | null;
 };
 
 export const templatesApi = {
@@ -635,6 +636,8 @@ export type Settings = {
   default_tg_api_id?: string;
   /** Masked value returned by the server (e.g. abcd****efgh). Never the raw hash. */
   default_tg_api_hash?: string;
+  /** "true" to show accounts as "{Bemby name} - {TG name}" throughout the app. */
+  account_display_with_tg_name?: string;
 };
 
 export const settingsApi = {

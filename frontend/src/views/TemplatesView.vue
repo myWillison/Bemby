@@ -579,7 +579,7 @@
                     :disabled="row.account.authStatus !== 'authenticated'"
                     @change="row.selected = ($event.target as HTMLInputElement).checked"
                   />
-                  <span class="create-job-account-name">{{ row.account.name }}</span>
+                  <span class="create-job-account-name">{{ formatAccountLabel(row.account) }}</span>
                   <span style="font-size:11px;color:#aaa">{{ row.account.phoneNumber }}</span>
                   <span v-if="row.account.authStatus !== 'authenticated'" class="badge badge-grey" style="font-size:10px">
                     {{ t('templates.createJobsNotAuth') }}
@@ -727,6 +727,7 @@ import { ref, reactive, computed, onMounted } from 'vue';
 import { templatesApi, settingsApi, accountsApi, tgClientApi, type JobTemplate, type Settings, type UAPreset, type Proxy, type EmbywatchConfig, type CustomConfig, type CustomAction, type AvailableAccount } from '../api/client';
 import { t } from '../i18n';
 import { usePersistedRef } from '../composables/usePersistedRef';
+import { formatAccountLabel, loadAccountDisplaySetting } from '../composables/accountDisplay';
 
 type CustomActionForm = {
   type: 'send_command' | 'send_contact_message' | 'wait_reply' | 'delay' | 'click_button' | 'click_message_button' | 'enter_captcha' | 'join_group' | 'subscribe_channel';
@@ -1067,6 +1068,7 @@ function buildConfig(): EmbywatchConfig | CustomConfig | null {
 }
 
 onMounted(async () => {
+  loadAccountDisplaySetting();
   await Promise.all([loadTemplates(), loadSettings()]);
 });
 

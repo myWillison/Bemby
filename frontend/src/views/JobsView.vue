@@ -28,7 +28,7 @@
         >{{ opt.label }}</button>
         <select v-if="accounts.length > 1" v-model="filterAccountId" class="form-select" style="width:160px;height:30px;font-size:13px;padding:0 8px">
           <option value="">{{ t('jobs.allAccounts') }}</option>
-          <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
+          <option v-for="a in accounts" :key="a.id" :value="a.id">{{ formatAccountLabel(a) }}</option>
         </select>
         <select v-if="botUrlTplOptions.length > 1" v-model="filterBotUrlTpl" class="form-select" style="width:180px;height:30px;font-size:13px;padding:0 8px">
           <option value="">{{ t('jobs.allBotUrlTpl') }}</option>
@@ -73,7 +73,7 @@
               @click="toggleJobSelect(j.id)"
             >
               <td>{{ j.name }}</td>
-              <td>{{ j.accountName ?? j.accountId }}</td>
+              <td>{{ jobAccountLabel(j) }}</td>
               <td><span :class="jobTypeBadge(j.jobType)">{{ t(`logs.jobType.${j.jobType}`) }}</span></td>
               <td class="col-hide-mobile">
                 <template v-if="j.templateId">
@@ -170,7 +170,7 @@
             <label class="form-label">{{ t('jobs.labelAccount') }} <span style="color:#e63946">*</span></label>
             <select v-model="form.accountId" class="form-select">
               <option :value="null" disabled>{{ t('jobs.selectAccount') }}</option>
-              <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
+              <option v-for="a in accounts" :key="a.id" :value="a.id">{{ formatAccountLabel(a) }}</option>
             </select>
           </div>
         </div>
@@ -181,7 +181,7 @@
             <label class="form-label">{{ t('jobs.labelAccount') }} <span style="color:#e63946">*</span></label>
             <select v-model="form.accountId" class="form-select">
               <option :value="null" disabled>{{ t('jobs.selectAccount') }}</option>
-              <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
+              <option v-for="a in accounts" :key="a.id" :value="a.id">{{ formatAccountLabel(a) }}</option>
             </select>
           </div>
           <div class="form-group">
@@ -270,7 +270,7 @@
           </label>
           <select v-model="form.accountId" class="form-select">
             <option :value="null">{{ t('jobs.noAccount') }}</option>
-            <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
+            <option v-for="a in accounts" :key="a.id" :value="a.id">{{ formatAccountLabel(a) }}</option>
           </select>
         </div>
 
@@ -281,7 +281,7 @@
               <label class="form-label">{{ t('jobs.labelAccount') }} <span style="color:#e63946">*</span></label>
               <select v-model="form.accountId" class="form-select">
                 <option :value="null" disabled>{{ t('jobs.selectAccount') }}</option>
-                <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
+                <option v-for="a in accounts" :key="a.id" :value="a.id">{{ formatAccountLabel(a) }}</option>
               </select>
             </div>
             <div class="form-group">
@@ -790,6 +790,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { jobsApi, accountsApi, statusApi, settingsApi, logsApi, templatesApi, type Job, type JobTemplate, type Account, type ScheduleStatus, type Settings, type UAPreset, type EmbywatchConfig, type CustomConfig } from '../api/client';
 import { t, locale } from '../i18n';
 import { usePersistedRef } from '../composables/usePersistedRef';
+import { formatAccountLabel, loadAccountDisplaySetting } from '../composables/accountDisplay';
 
 type CustomActionForm = {
   type: 'send_command' | 'send_contact_message' | 'wait_reply' | 'delay' | 'click_button' | 'click_message_button' | 'enter_captcha' | 'join_group' | 'subscribe_channel';
@@ -1040,8 +1041,16 @@ function moveDown(i: number) {
 }
 
 onMounted(async () => {
+  loadAccountDisplaySetting();
   await Promise.all([loadJobs(), loadAccounts(), loadStatus(), loadSettings(), loadTemplates()]);
 });
+
+// Label for a job's account, honouring the "{Bemby name} - {TG name}" display setting.
+function jobAccountLabel(j: Job): string {
+  const acc = accounts.value.find((a) => a.id === j.accountId);
+  const fallback = j.accountName ?? (j.accountId != null ? String(j.accountId) : "");
+  return formatAccountLabel(acc, fallback);
+}
 
 async function loadSettings() {
   try { settings.value = await settingsApi.get(); } catch { /* ignore */ }

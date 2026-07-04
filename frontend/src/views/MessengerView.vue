@@ -30,7 +30,7 @@
               :key="acc.id"
               :value="acc.id"
             >
-              {{ acc.name }}
+              {{ formatAccountLabel(acc) }}
             </option>
           </select>
         </div>
@@ -1179,6 +1179,10 @@ import {
 } from "../api/client";
 import { avatarCache, avatarQueue, avatarQueued, avatarFetching, avatarConcurrencyState, persistAvatarCache } from "../composables/avatarCache";
 import { t } from "../i18n";
+import {
+  formatAccountLabel,
+  loadAccountDisplaySetting,
+} from "../composables/accountDisplay";
 
 // ── Messenger state persistence ───────────────────────────────────────────────
 
@@ -1430,6 +1434,7 @@ const commandSuggestions = computed(() => {
 
 onMounted(async () => {
   window.addEventListener("message", handleMiniAppMessage);
+  loadAccountDisplaySetting();
   accounts.value = await accountsApi.list().catch(() => []);
   if (!authenticatedAccounts.value.length) return;
 

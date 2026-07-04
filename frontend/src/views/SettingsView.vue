@@ -667,10 +667,15 @@
         </div>
       </div>
 
-      <!-- Default TG API Credentials -->
+      <!-- General settings -->
       <div class="card s-col-6">
         <div class="card-body">
           <div class="card-section-title">
+            {{ t("settings.generalSection") }}
+          </div>
+
+          <!-- Telegram API credentials -->
+          <div class="settings-subsection">
             {{ t("settings.defaultTgApiSection") }}
           </div>
           <p style="font-size: 12px; color: #888; margin: 0 0 14px">
@@ -746,6 +751,24 @@
                   : t("settings.defaultTgApiClear")
               }}
             </button>
+          </div>
+
+          <!-- TG account display -->
+          <div class="settings-subsection" style="margin-top: 28px">
+            {{ t("settings.accountDisplaySection") }}
+          </div>
+          <div class="form-group">
+            <label class="form-check">
+              <input
+                type="checkbox"
+                v-model="accountDisplayWithTgName"
+                @change="saveAccountDisplay"
+              />
+              <span>{{ t("settings.accountDisplayToggle") }}</span>
+            </label>
+            <p style="font-size: 12px; color: #888; margin: 4px 0 0 24px">
+              {{ t("settings.accountDisplayHint") }}
+            </p>
           </div>
         </div>
       </div>
@@ -1239,6 +1262,7 @@ import type {
   TgAppClient,
 } from "../api/client";
 import { t } from "../i18n";
+import { setAccountDisplayWithTgName } from "../composables/accountDisplay";
 
 const timezones = [
   "Australia/Sydney",
@@ -1504,6 +1528,9 @@ const defaultTgApiClearing = ref(false);
 const defaultTgApiMsg = ref("");
 const defaultTgApiError = ref("");
 
+// ── TG account display ─────────────────────────────────────────────────────────
+const accountDisplayWithTgName = ref(false);
+
 async function saveDefaultTgApi() {
   defaultTgApiMsg.value = "";
   defaultTgApiError.value = "";
@@ -1590,6 +1617,7 @@ onMounted(async () => {
     tgClientMode.value = s.tg_client_mode === "random" ? "random" : "default";
     defaultTgApiId.value = Number(s.default_tg_api_id) || 0;
     defaultTgApiHashMasked.value = s.default_tg_api_hash ?? "";
+    accountDisplayWithTgName.value = s.account_display_with_tg_name === "true";
     form.default_play_duration = Number(s.default_play_duration ?? 300);
     form.default_device_name = s.default_device_name ?? "Mac";
     form.ai_model = s.ai_model ?? "";
@@ -1788,6 +1816,19 @@ async function saveFallbackEnabled() {
   } catch {
     // revert on failure
     form.ai_fallback_enabled = !form.ai_fallback_enabled;
+  }
+}
+
+async function saveAccountDisplay() {
+  try {
+    await settingsApi.update({
+      account_display_with_tg_name: String(accountDisplayWithTgName.value),
+    });
+    // Reflect the change immediately across all views
+    setAccountDisplayWithTgName(accountDisplayWithTgName.value);
+  } catch {
+    // revert on failure
+    accountDisplayWithTgName.value = !accountDisplayWithTgName.value;
   }
 }
 
@@ -2107,6 +2148,15 @@ async function saveCredentials() {
 .import-mode-label {
   font-size: 13px;
   font-weight: 500;
+}
+
+.settings-subsection {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #888;
+  margin-bottom: 10px;
 }
 
 .input-with-toggle {
