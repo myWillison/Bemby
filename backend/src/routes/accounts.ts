@@ -14,11 +14,8 @@ import {
   terminateSession,
   terminateOtherSessions,
   getPasswordInfo,
-  getRecoveryEmail,
-  updateRecoveryEmail,
-  confirmRecoveryEmail,
-  cancelRecoveryEmail,
-  resendRecoveryEmail,
+  sendLoginEmailCode,
+  verifyLoginEmail,
   getPasskeys,
   deletePasskey,
   type PasswordInfo,
@@ -90,6 +87,15 @@ function statusNeedsReauth(
 function internalError(res: import('express').Response, err: unknown, context: string): void {
   console.error(`[accounts] ${context}:`, err);
   res.status(500).json({ error: 'An internal error occurred' });
+}
+
+// Surface Telegram RPC refusals (e.g. EMAIL_NOT_ALLOWED) as a 400 with the raw
+// error code so the frontend can translate them; returns false for other errors.
+function rpcBadRequest(res: import('express').Response, err: any, context: string): boolean {
+  if (typeof err?.errorMessage !== "string" || typeof err?.code !== "number") return false;
+  console.warn(`[accounts] ${context}: RPC ${err.errorMessage}`);
+  res.status(400).json({ error: err.errorMessage });
+  return true;
 }
 
 const router = Router();
@@ -860,7 +866,7 @@ router.post("/:id/force-reauth", (req, res) => {
   res.json(toJson(row));
 });
 
-// ── Recovery email management ─────────────────────────────────────────────────
+// ── Login email management ────────────────────────────────────────────────────
 
 function requireAuth(account: AccountRow | undefined, res: any): account is AccountRow & { session_string: string } {
   if (!account) { res.status(404).json({ error: "Not found" }); return false; }
@@ -868,7 +874,7 @@ function requireAuth(account: AccountRow | undefined, res: any): account is Acco
   return true;
 }
 
-// GET /:id/password-info -- returns basic 2FA / recovery email status (no password needed)
+// GET /:id/password-info -- returns 2FA status and masked login email pattern (no password needed)
 router.get("/:id/password-info", async (req, res) => {
   const account = db
     .prepare("SELECT * FROM tg_accounts WHERE id = ?")
@@ -887,57 +893,31 @@ router.get("/:id/password-info", async (req, res) => {
   }
 });
 
-// POST /:id/recovery-email/get -- return full recovery email (requires 2FA password)
-router.post("/:id/recovery-email/get", async (req, res) => {
+// POST /:id/login-email/send-code -- send a verification code to a new login email
+// Telegram has no API to remove the login email from an authorised session; it can only be replaced.
+router.post("/:id/login-email/send-code", async (req, res) => {
   const account = db
     .prepare("SELECT * FROM tg_accounts WHERE id = ?")
     .get(req.params.id) as AccountRow | undefined;
   if (!requireAuth(account, res)) return;
-  const { currentPassword } = req.body as { currentPassword?: string };
-  if (!currentPassword) { res.status(400).json({ error: "currentPassword required" }); return; }
+  const { email } = req.body as { email?: string };
+  if (!email) { res.status(400).json({ error: "email required" }); return; }
   try {
     const { apiId, apiHash } = resolveApiCredentials(account);
     const proxyUrl = resolveProxyUrl(account.proxy_id);
     const proxy = parseTgProxy(proxyUrl);
     const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
-    const result = await getRecoveryEmail(apiId, apiHash, account.session_string, currentPassword, proxy, deviceParams);
+    const result = await sendLoginEmailCode(apiId, apiHash, account.session_string, email, proxy, deviceParams);
     res.json(result);
   } catch (err: any) {
     if (isAuthError(err?.message ?? "")) markSessionExpired(account!.id);
-    internalError(res, err, "recovery-email/get");
+    if (rpcBadRequest(res, err, "login-email/send-code")) return;
+    internalError(res, err, "login-email/send-code");
   }
 });
 
-// PUT /:id/recovery-email -- set, change, or remove the recovery email
-router.put("/:id/recovery-email", async (req, res) => {
-  const account = db
-    .prepare("SELECT * FROM tg_accounts WHERE id = ?")
-    .get(req.params.id) as AccountRow | undefined;
-  if (!requireAuth(account, res)) return;
-  const { currentPassword, newEmail } = req.body as {
-    currentPassword?: string;
-    newEmail?: string | null;
-  };
-  if (!currentPassword) { res.status(400).json({ error: "currentPassword required" }); return; }
-  try {
-    const { apiId, apiHash } = resolveApiCredentials(account);
-    const proxyUrl = resolveProxyUrl(account.proxy_id);
-    const proxy = parseTgProxy(proxyUrl);
-    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
-    const result = await updateRecoveryEmail(
-      apiId, apiHash, account.session_string,
-      { currentPassword, newEmail: newEmail ?? null },
-      proxy, deviceParams,
-    );
-    res.json(result);
-  } catch (err: any) {
-    if (isAuthError(err?.message ?? "")) markSessionExpired(account!.id);
-    internalError(res, err, "recovery-email/update");
-  }
-});
-
-// POST /:id/recovery-email/confirm -- confirm pending email with code
-router.post("/:id/recovery-email/confirm", async (req, res) => {
+// POST /:id/login-email/verify -- confirm the new login email with the emailed code
+router.post("/:id/login-email/verify", async (req, res) => {
   const account = db
     .prepare("SELECT * FROM tg_accounts WHERE id = ?")
     .get(req.params.id) as AccountRow | undefined;
@@ -949,49 +929,12 @@ router.post("/:id/recovery-email/confirm", async (req, res) => {
     const proxyUrl = resolveProxyUrl(account.proxy_id);
     const proxy = parseTgProxy(proxyUrl);
     const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
-    await confirmRecoveryEmail(apiId, apiHash, account.session_string, code, proxy, deviceParams);
-    res.json({ ok: true });
+    const result = await verifyLoginEmail(apiId, apiHash, account.session_string, code, proxy, deviceParams);
+    res.json(result);
   } catch (err: any) {
     if (isAuthError(err?.message ?? "")) markSessionExpired(account!.id);
-    internalError(res, err, "recovery-email/confirm");
-  }
-});
-
-// POST /:id/recovery-email/cancel -- cancel pending email confirmation
-router.post("/:id/recovery-email/cancel", async (req, res) => {
-  const account = db
-    .prepare("SELECT * FROM tg_accounts WHERE id = ?")
-    .get(req.params.id) as AccountRow | undefined;
-  if (!requireAuth(account, res)) return;
-  try {
-    const { apiId, apiHash } = resolveApiCredentials(account);
-    const proxyUrl = resolveProxyUrl(account.proxy_id);
-    const proxy = parseTgProxy(proxyUrl);
-    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
-    await cancelRecoveryEmail(apiId, apiHash, account.session_string, proxy, deviceParams);
-    res.json({ ok: true });
-  } catch (err: any) {
-    if (isAuthError(err?.message ?? "")) markSessionExpired(account!.id);
-    internalError(res, err, "recovery-email/cancel");
-  }
-});
-
-// POST /:id/recovery-email/resend -- resend confirmation code
-router.post("/:id/recovery-email/resend", async (req, res) => {
-  const account = db
-    .prepare("SELECT * FROM tg_accounts WHERE id = ?")
-    .get(req.params.id) as AccountRow | undefined;
-  if (!requireAuth(account, res)) return;
-  try {
-    const { apiId, apiHash } = resolveApiCredentials(account);
-    const proxyUrl = resolveProxyUrl(account.proxy_id);
-    const proxy = parseTgProxy(proxyUrl);
-    const deviceParams = resolveAppClientParams(account.id, account.app_client_id);
-    await resendRecoveryEmail(apiId, apiHash, account.session_string, proxy, deviceParams);
-    res.json({ ok: true });
-  } catch (err: any) {
-    if (isAuthError(err?.message ?? "")) markSessionExpired(account!.id);
-    internalError(res, err, "recovery-email/resend");
+    if (rpcBadRequest(res, err, "login-email/verify")) return;
+    internalError(res, err, "login-email/verify");
   }
 });
 

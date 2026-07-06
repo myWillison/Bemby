@@ -462,10 +462,10 @@
             {{ t("accounts.tabDevices") }}
           </button>
           <button
-            :class="['edit-tab', editTab === 'recovery' ? 'active' : '']"
-            @click="editTab = 'recovery'"
+            :class="['edit-tab', editTab === 'others' ? 'active' : '']"
+            @click="editTab = 'others'"
           >
-            {{ t("accounts.tabRecovery") }}
+            {{ t("accounts.tabOthers") }}
           </button>
         </div>
 
@@ -800,14 +800,14 @@
 
         </div>
 
-        <!-- Recovery email tab (authenticated accounts only) -->
+        <!-- Login email tab (authenticated accounts only) -->
         <div
           v-if="editTarget?.authStatus === 'authenticated'"
-          v-show="editTab === 'recovery'"
+          v-show="editTab === 'others'"
         >
-          <!-- Recovery email section -->
+          <!-- Login email section -->
           <div class="form-section-label" style="margin-bottom: 12px">
-            {{ t("accounts.recoveryEmailSection") }}
+            {{ t("accounts.loginEmailSection") }}
           </div>
 
           <div v-if="pwdInfoLoading" style="color: #888; font-size: 13px; margin-bottom: 12px">
@@ -815,145 +815,92 @@
           </div>
 
           <template v-else-if="pwdInfo">
-            <div v-if="!pwdInfo.hasPassword" class="form-hint" style="margin-bottom: 12px">
-              {{ t("accounts.recoveryEmailNoPassword") }}
+            <!-- Status row: masked pattern comes straight from getPassword -->
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap">
+              <span class="badge" :class="pwdInfo.loginEmailPattern ? 'badge-green' : 'badge-grey'">
+                {{ pwdInfo.loginEmailPattern ? t("accounts.loginEmailSet") : t("accounts.loginEmailNone") }}
+              </span>
+              <span v-if="pwdInfo.loginEmailPattern" style="font-size: 13px; font-family: monospace">
+                {{ pwdInfo.loginEmailPattern }}
+              </span>
+              <span v-if="loginEmailPendingConfirm" class="badge badge-orange">
+                {{ t("accounts.loginEmailPending") }}
+              </span>
             </div>
 
-            <template v-else>
-              <!-- Status row -->
-              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap">
-                <span class="badge" :class="pwdInfo.hasRecovery ? 'badge-green' : 'badge-grey'">
-                  {{ pwdInfo.hasRecovery ? t("accounts.recoveryEmailSet") : t("accounts.recoveryEmailNone") }}
-                </span>
-                <span v-if="pwdInfo.emailUnconfirmedPattern" class="badge badge-orange">
-                  {{ t("accounts.recoveryEmailPending") }}
-                </span>
-                <span v-if="recoveryEmailRevealed" style="font-size: 13px; font-family: monospace">
-                  {{ recoveryEmailRevealed }}
-                </span>
+            <!-- Pending confirmation flow -->
+            <template v-if="loginEmailPendingConfirm">
+              <p class="form-hint" style="margin-bottom: 8px">
+                {{
+                  t("accounts.loginEmailPendingHint").replace(
+                    "{pattern}",
+                    loginEmailNewPattern || "?"
+                  )
+                }}
+              </p>
+              <div class="form-group">
+                <label class="form-label">{{ t("accounts.loginEmailConfirmCode") }}</label>
+                <input v-model="loginEmailCode" class="form-input" maxlength="12" />
+              </div>
+              <div v-if="loginEmailError" class="error-msg">{{ loginEmailError }}</div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap">
                 <button
-                  v-else-if="pwdInfo.hasRecovery && !recoveryEmailPendingConfirm"
-                  class="btn btn-xs btn-ghost"
-                  :disabled="recoveryEmailBusy"
-                  @click="openRevealEmail"
+                  class="btn btn-primary btn-inline"
+                  :disabled="loginEmailBusy || !loginEmailCode"
+                  @click="doVerifyLoginEmail"
                 >
-                  <i class="fa-solid fa-eye"></i> {{ t("accounts.recoveryEmailReveal") }}
+                  {{ loginEmailBusy ? t("common.saving") : t("accounts.loginEmailConfirm") }}
+                </button>
+                <button
+                  class="btn btn-ghost btn-inline"
+                  :disabled="loginEmailBusy"
+                  @click="doResendLoginEmailCode"
+                >
+                  {{ t("accounts.loginEmailResend") }}
+                </button>
+                <button
+                  class="btn btn-ghost btn-inline"
+                  :disabled="loginEmailBusy"
+                  @click="cancelLoginEmailChange"
+                >
+                  {{ t("common.cancel") }}
                 </button>
               </div>
+            </template>
 
-              <!-- Pending confirmation flow -->
-              <template v-if="recoveryEmailPendingConfirm || pwdInfo.emailUnconfirmedPattern">
-                <p class="form-hint" style="margin-bottom: 8px">
-                  {{
-                    t("accounts.recoveryEmailPendingHint").replace(
-                      "{pattern}",
-                      recoveryEmailNewPattern || pwdInfo.emailUnconfirmedPattern || "?"
-                    )
-                  }}
-                </p>
-                <div class="form-group">
-                  <label class="form-label">{{ t("accounts.recoveryEmailConfirmCode") }}</label>
-                  <input v-model="recoveryEmailCode" class="form-input" maxlength="12" />
-                </div>
-                <div v-if="recoveryEmailError" class="error-msg">{{ recoveryEmailError }}</div>
-                <div v-if="recoveryEmailMsg" class="success-msg">{{ recoveryEmailMsg }}</div>
-                <div style="display: flex; gap: 8px; flex-wrap: wrap">
-                  <button
-                    class="btn btn-primary btn-inline"
-                    :disabled="recoveryEmailBusy || !recoveryEmailCode"
-                    @click="doConfirmRecoveryEmail"
-                  >
-                    {{ recoveryEmailBusy ? t("common.saving") : t("accounts.recoveryEmailConfirm") }}
-                  </button>
-                  <button
-                    class="btn btn-ghost btn-inline"
-                    :disabled="recoveryEmailBusy"
-                    @click="doResendRecoveryEmail"
-                  >
-                    {{ t("accounts.recoveryEmailResend") }}
-                  </button>
-                  <button
-                    class="btn btn-ghost btn-inline"
-                    :disabled="recoveryEmailBusy"
-                    @click="doCancelRecoveryEmail"
-                  >
-                    {{ t("accounts.recoveryEmailCancel") }}
-                  </button>
-                </div>
-              </template>
+            <!-- Change / set form -->
+            <template v-else-if="loginEmailChangeMode">
+              <div class="form-group">
+                <label class="form-label">{{ t("accounts.loginEmailNewEmail") }}</label>
+                <input v-model="loginEmailNew" type="email" class="form-input" />
+              </div>
+              <div v-if="loginEmailError" class="error-msg">{{ loginEmailError }}</div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap">
+                <button
+                  class="btn btn-primary btn-inline"
+                  :disabled="loginEmailBusy || !loginEmailNew"
+                  @click="doSendLoginEmailCode"
+                >
+                  {{ loginEmailBusy ? t("common.saving") : t("accounts.loginEmailSendCode") }}
+                </button>
+                <button class="btn btn-ghost btn-inline" @click="loginEmailChangeMode = false">
+                  {{ t("common.cancel") }}
+                </button>
+              </div>
+            </template>
 
-              <!-- Reveal email password input -->
-              <template v-else-if="recoveryEmailRevealMode">
-                <div class="form-group">
-                  <label class="form-label">{{ t("accounts.recoveryEmailRevealPwd") }}</label>
-                  <input v-model="recoveryEmailPwd" type="password" class="form-input" autocomplete="current-password" />
-                </div>
-                <div v-if="recoveryEmailError" class="error-msg">{{ recoveryEmailError }}</div>
-                <div style="display: flex; gap: 8px">
-                  <button class="btn btn-primary btn-inline" :disabled="recoveryEmailBusy" @click="doRevealEmail">
-                    {{ recoveryEmailBusy ? t("common.loading") : t("accounts.recoveryEmailReveal") }}
-                  </button>
-                  <button class="btn btn-ghost btn-inline" @click="recoveryEmailRevealMode = false">
-                    {{ t("common.cancel") }}
-                  </button>
-                </div>
-              </template>
-
-              <!-- Change / set / remove form -->
-              <template v-else-if="recoveryEmailChangeMode">
-                <div class="form-group">
-                  <label class="form-label">{{ t("accounts.recoveryEmailCurrentPwd") }}</label>
-                  <input v-model="recoveryEmailPwd" type="password" class="form-input" autocomplete="current-password" />
-                </div>
-                <div class="form-group">
-                  <label class="form-label">{{ t("accounts.recoveryEmailNewEmail") }}</label>
-                  <input v-model="recoveryEmailNew" type="email" class="form-input" />
-                </div>
-                <div v-if="recoveryEmailError" class="error-msg">{{ recoveryEmailError }}</div>
-                <div style="display: flex; gap: 8px; flex-wrap: wrap">
-                  <button class="btn btn-primary btn-inline" :disabled="recoveryEmailBusy" @click="doUpdateRecoveryEmail">
-                    {{ recoveryEmailBusy ? t("common.saving") : t("accounts.recoveryEmailChange") }}
-                  </button>
-                  <button class="btn btn-ghost btn-inline" @click="recoveryEmailChangeMode = false">
-                    {{ t("common.cancel") }}
-                  </button>
-                </div>
-              </template>
-
-              <!-- Remove form -->
-              <template v-else-if="recoveryEmailRemoveMode">
-                <div class="form-group">
-                  <label class="form-label">{{ t("accounts.recoveryEmailCurrentPwd") }}</label>
-                  <input v-model="recoveryEmailPwd" type="password" class="form-input" autocomplete="current-password" />
-                </div>
-                <div v-if="recoveryEmailError" class="error-msg">{{ recoveryEmailError }}</div>
-                <div style="display: flex; gap: 8px">
-                  <button class="btn btn-danger btn-inline" :disabled="recoveryEmailBusy" @click="doRemoveRecoveryEmail">
-                    {{ recoveryEmailBusy ? t("common.saving") : t("accounts.recoveryEmailRemove") }}
-                  </button>
-                  <button class="btn btn-ghost btn-inline" @click="recoveryEmailRemoveMode = false">
-                    {{ t("common.cancel") }}
-                  </button>
-                </div>
-              </template>
-
-              <!-- Idle: action buttons -->
-              <template v-else>
-                <div v-if="recoveryEmailMsg" class="success-msg" style="margin-bottom: 8px">{{ recoveryEmailMsg }}</div>
-                <div style="display: flex; gap: 8px; flex-wrap: wrap">
-                  <button class="btn btn-secondary btn-inline" @click="openChangeEmail">
-                    <i class="fa-solid fa-envelope"></i>
-                    {{ pwdInfo.hasRecovery ? t("accounts.recoveryEmailChange") : t("accounts.recoveryEmailSet2") }}
-                  </button>
-                  <button
-                    v-if="pwdInfo.hasRecovery"
-                    class="btn btn-ghost btn-inline"
-                    @click="openRemoveEmail"
-                  >
-                    <i class="fa-solid fa-trash"></i> {{ t("accounts.recoveryEmailRemove") }}
-                  </button>
-                </div>
-              </template>
+            <!-- Idle: action buttons -->
+            <template v-else>
+              <div v-if="loginEmailMsg" class="success-msg" style="margin-bottom: 8px">{{ loginEmailMsg }}</div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap">
+                <button class="btn btn-secondary btn-inline" @click="openChangeLoginEmail">
+                  <i class="fa-solid fa-envelope"></i>
+                  {{ pwdInfo.loginEmailPattern ? t("accounts.loginEmailChange") : t("accounts.loginEmailSet2") }}
+                </button>
+              </div>
+              <p class="form-hint" style="margin-top: 10px">
+                {{ pwdInfo.loginEmailPattern ? t("accounts.loginEmailNoRemoveHint") : t("accounts.loginEmailSetupHint") }}
+              </p>
             </template>
           </template>
 
@@ -1430,7 +1377,7 @@ const deviceModelPreview = computed(() => {
 
 // ── Form state ────────────────────────────────────────────────────────────────
 const showForm = ref(false);
-const editTab = ref<"basic" | "profile" | "twofa" | "devices" | "recovery">(
+const editTab = ref<"basic" | "profile" | "twofa" | "devices" | "others">(
   "basic",
 );
 const editTarget = ref<Account | null>(null);
@@ -1480,18 +1427,14 @@ const passkeysLoading = ref(false);
 const passkeysError = ref("");
 const passkeysLoaded = ref(false);
 const deletingPasskeyId = ref<string | null>(null);
-const recoveryEmailBusy = ref(false);
-const recoveryEmailError = ref("");
-const recoveryEmailMsg = ref("");
-const recoveryEmailRevealed = ref<string | null>(null);
-const recoveryEmailRevealMode = ref(false);
-const recoveryEmailChangeMode = ref(false);
-const recoveryEmailRemoveMode = ref(false);
-const recoveryEmailPendingConfirm = ref(false);
-const recoveryEmailNewPattern = ref("");
-const recoveryEmailPwd = ref("");
-const recoveryEmailNew = ref("");
-const recoveryEmailCode = ref("");
+const loginEmailBusy = ref(false);
+const loginEmailError = ref("");
+const loginEmailMsg = ref("");
+const loginEmailChangeMode = ref(false);
+const loginEmailPendingConfirm = ref(false);
+const loginEmailNewPattern = ref("");
+const loginEmailNew = ref("");
+const loginEmailCode = ref("");
 
 // ── TG meta refresh (display name + username stored in DB, loaded with accounts list) ──
 const metaLoading = reactive(new Set<number>());
@@ -1761,7 +1704,7 @@ watch(editTab, (tab) => {
   if (editTarget.value?.authStatus !== "authenticated") return;
   if (tab === "profile" && !profileLoaded.value) loadProfile();
   if (tab === "devices" && sessions.value.length === 0) loadSessions();
-  if (tab === "recovery") {
+  if (tab === "others") {
     if (!pwdInfo.value) loadPasswordInfo();
     if (!passkeysLoaded.value) loadPasskeys();
   }
@@ -1869,18 +1812,14 @@ function openEdit(a: Account) {
   passkeysLoaded.value = false;
   passkeysError.value = "";
   deletingPasskeyId.value = null;
-  recoveryEmailBusy.value = false;
-  recoveryEmailError.value = "";
-  recoveryEmailMsg.value = "";
-  recoveryEmailRevealed.value = null;
-  recoveryEmailRevealMode.value = false;
-  recoveryEmailChangeMode.value = false;
-  recoveryEmailRemoveMode.value = false;
-  recoveryEmailPendingConfirm.value = false;
-  recoveryEmailNewPattern.value = "";
-  recoveryEmailPwd.value = "";
-  recoveryEmailNew.value = "";
-  recoveryEmailCode.value = "";
+  loginEmailBusy.value = false;
+  loginEmailError.value = "";
+  loginEmailMsg.value = "";
+  loginEmailChangeMode.value = false;
+  loginEmailPendingConfirm.value = false;
+  loginEmailNewPattern.value = "";
+  loginEmailNew.value = "";
+  loginEmailCode.value = "";
   showForm.value = true;
 }
 
@@ -2048,7 +1987,7 @@ function fmtSessionDate(unix: number) {
   );
 }
 
-// ── Recovery email functions ──────────────────────────────────────────────────
+// ── Login email functions ─────────────────────────────────────────────────────
 
 async function loadPasswordInfo() {
   if (!editTarget.value) return;
@@ -2092,130 +2031,81 @@ async function doDeletePasskey(pk: Passkey) {
   }
 }
 
-function openRevealEmail() {
-  recoveryEmailRevealMode.value = true;
-  recoveryEmailPwd.value = "";
-  recoveryEmailError.value = "";
+function openChangeLoginEmail() {
+  loginEmailChangeMode.value = true;
+  loginEmailNew.value = "";
+  loginEmailError.value = "";
+  loginEmailMsg.value = "";
 }
 
-function openChangeEmail() {
-  recoveryEmailChangeMode.value = true;
-  recoveryEmailPwd.value = "";
-  recoveryEmailNew.value = "";
-  recoveryEmailError.value = "";
+// Translate known Telegram refusal codes into readable messages
+function loginEmailErrorText(raw: string): string {
+  if (raw === "EMAIL_NOT_SETUP") return t("accounts.loginEmailNotSetup");
+  if (raw === "EMAIL_INVALID") return t("accounts.loginEmailInvalid");
+  if (raw === "EMAIL_NOT_ALLOWED") return t("accounts.loginEmailNotAllowed");
+  if (raw === "CODE_INVALID" || raw === "EMAIL_TOKEN_INVALID") return t("accounts.loginEmailBadCode");
+  if (raw === "EMAIL_VERIFY_EXPIRED") return t("accounts.loginEmailCodeExpired");
+  if (raw.startsWith("FLOOD")) return t("accounts.loginEmailFlood");
+  return raw;
 }
 
-function openRemoveEmail() {
-  recoveryEmailRemoveMode.value = true;
-  recoveryEmailPwd.value = "";
-  recoveryEmailError.value = "";
-}
-
-async function doRevealEmail() {
-  if (!editTarget.value || !recoveryEmailPwd.value) return;
-  recoveryEmailBusy.value = true;
-  recoveryEmailError.value = "";
+async function doSendLoginEmailCode() {
+  if (!editTarget.value || !loginEmailNew.value) return;
+  loginEmailBusy.value = true;
+  loginEmailError.value = "";
   try {
-    const r = await accountsApi.getRecoveryEmail(editTarget.value.id, recoveryEmailPwd.value);
-    recoveryEmailRevealed.value = r.email;
-    recoveryEmailRevealMode.value = false;
+    const r = await accountsApi.sendLoginEmailCode(editTarget.value.id, loginEmailNew.value);
+    loginEmailChangeMode.value = false;
+    loginEmailPendingConfirm.value = true;
+    loginEmailNewPattern.value = r.emailPattern;
+    loginEmailCode.value = "";
   } catch (err: any) {
-    recoveryEmailError.value = err.response?.data?.error ?? err.message;
+    loginEmailError.value = loginEmailErrorText(err.response?.data?.error ?? err.message);
   } finally {
-    recoveryEmailBusy.value = false;
+    loginEmailBusy.value = false;
   }
 }
 
-async function doUpdateRecoveryEmail() {
-  if (!editTarget.value || !recoveryEmailPwd.value || !recoveryEmailNew.value) return;
-  recoveryEmailBusy.value = true;
-  recoveryEmailError.value = "";
+async function doVerifyLoginEmail() {
+  if (!editTarget.value || !loginEmailCode.value) return;
+  loginEmailBusy.value = true;
+  loginEmailError.value = "";
   try {
-    const r = await accountsApi.updateRecoveryEmail(
-      editTarget.value.id,
-      recoveryEmailPwd.value,
-      recoveryEmailNew.value,
-    );
-    recoveryEmailChangeMode.value = false;
-    if (r.pendingConfirmation) {
-      recoveryEmailPendingConfirm.value = true;
-      recoveryEmailNewPattern.value = recoveryEmailNew.value.replace(/(.{2})[^@]+/, "$1***");
-      recoveryEmailCode.value = "";
-    } else {
-      recoveryEmailMsg.value = t("accounts.recoveryEmailDone");
-      await loadPasswordInfo();
-    }
-  } catch (err: any) {
-    recoveryEmailError.value = err.response?.data?.error ?? err.message;
-  } finally {
-    recoveryEmailBusy.value = false;
-  }
-}
-
-async function doRemoveRecoveryEmail() {
-  if (!editTarget.value || !recoveryEmailPwd.value) return;
-  recoveryEmailBusy.value = true;
-  recoveryEmailError.value = "";
-  try {
-    await accountsApi.updateRecoveryEmail(editTarget.value.id, recoveryEmailPwd.value, null);
-    recoveryEmailRemoveMode.value = false;
-    recoveryEmailMsg.value = t("accounts.recoveryEmailRemoved");
-    recoveryEmailRevealed.value = null;
+    await accountsApi.verifyLoginEmail(editTarget.value.id, loginEmailCode.value);
+    loginEmailPendingConfirm.value = false;
+    loginEmailNewPattern.value = "";
+    loginEmailNew.value = "";
+    loginEmailCode.value = "";
+    loginEmailMsg.value = t("accounts.loginEmailDone");
     await loadPasswordInfo();
   } catch (err: any) {
-    recoveryEmailError.value = err.response?.data?.error ?? err.message;
+    loginEmailError.value = loginEmailErrorText(err.response?.data?.error ?? err.message);
   } finally {
-    recoveryEmailBusy.value = false;
+    loginEmailBusy.value = false;
   }
 }
 
-async function doConfirmRecoveryEmail() {
-  if (!editTarget.value || !recoveryEmailCode.value) return;
-  recoveryEmailBusy.value = true;
-  recoveryEmailError.value = "";
+async function doResendLoginEmailCode() {
+  if (!editTarget.value || !loginEmailNew.value) return;
+  loginEmailBusy.value = true;
+  loginEmailError.value = "";
   try {
-    await accountsApi.confirmRecoveryEmail(editTarget.value.id, recoveryEmailCode.value);
-    recoveryEmailPendingConfirm.value = false;
-    recoveryEmailNewPattern.value = "";
-    recoveryEmailCode.value = "";
-    recoveryEmailMsg.value = t("accounts.recoveryEmailConfirmed");
-    await loadPasswordInfo();
+    const r = await accountsApi.sendLoginEmailCode(editTarget.value.id, loginEmailNew.value);
+    loginEmailNewPattern.value = r.emailPattern;
   } catch (err: any) {
-    recoveryEmailError.value = err.response?.data?.error ?? err.message;
+    loginEmailError.value = loginEmailErrorText(err.response?.data?.error ?? err.message);
   } finally {
-    recoveryEmailBusy.value = false;
+    loginEmailBusy.value = false;
   }
 }
 
-async function doResendRecoveryEmail() {
-  if (!editTarget.value) return;
-  recoveryEmailBusy.value = true;
-  recoveryEmailError.value = "";
-  try {
-    await accountsApi.resendRecoveryEmail(editTarget.value.id);
-  } catch (err: any) {
-    recoveryEmailError.value = err.response?.data?.error ?? err.message;
-  } finally {
-    recoveryEmailBusy.value = false;
-  }
-}
-
-async function doCancelRecoveryEmail() {
-  if (!editTarget.value) return;
-  recoveryEmailBusy.value = true;
-  recoveryEmailError.value = "";
-  try {
-    await accountsApi.cancelRecoveryEmail(editTarget.value.id);
-    recoveryEmailPendingConfirm.value = false;
-    recoveryEmailNewPattern.value = "";
-    recoveryEmailCode.value = "";
-    recoveryEmailMsg.value = t("accounts.recoveryEmailCancelled");
-    await loadPasswordInfo();
-  } catch (err: any) {
-    recoveryEmailError.value = err.response?.data?.error ?? err.message;
-  } finally {
-    recoveryEmailBusy.value = false;
-  }
+// Abandon the pending change locally; the emailed code simply expires
+function cancelLoginEmailChange() {
+  loginEmailPendingConfirm.value = false;
+  loginEmailNewPattern.value = "";
+  loginEmailNew.value = "";
+  loginEmailCode.value = "";
+  loginEmailError.value = "";
 }
 
 // ── Force Re-auth ─────────────────────────────────────────────────────────────

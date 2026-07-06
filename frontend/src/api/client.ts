@@ -95,6 +95,7 @@ export type PasswordInfo = {
   hasRecovery: boolean;
   hint: string | null;
   emailUnconfirmedPattern: string | null;
+  loginEmailPattern: string | null;
 };
 
 export type Passkey = {
@@ -497,23 +498,17 @@ export const accountsApi = {
     api.post<Account>(`/accounts/${id}/force-reauth`).then((r) => r.data),
   getPasswordInfo: (id: number) =>
     api.get<PasswordInfo>(`/accounts/${id}/password-info`).then((r) => r.data),
-  getRecoveryEmail: (id: number, currentPassword: string) =>
+  sendLoginEmailCode: (id: number, email: string) =>
     api
-      .post<{ email: string | null }>(`/accounts/${id}/recovery-email/get`, { currentPassword })
-      .then((r) => r.data),
-  updateRecoveryEmail: (id: number, currentPassword: string, newEmail: string | null) =>
-    api
-      .put<{ pendingConfirmation: boolean; codeLength?: number }>(
-        `/accounts/${id}/recovery-email`,
-        { currentPassword, newEmail },
+      .post<{ emailPattern: string; codeLength: number }>(
+        `/accounts/${id}/login-email/send-code`,
+        { email },
       )
       .then((r) => r.data),
-  confirmRecoveryEmail: (id: number, code: string) =>
-    api.post(`/accounts/${id}/recovery-email/confirm`, { code }).then((r) => r.data),
-  cancelRecoveryEmail: (id: number) =>
-    api.post(`/accounts/${id}/recovery-email/cancel`).then((r) => r.data),
-  resendRecoveryEmail: (id: number) =>
-    api.post(`/accounts/${id}/recovery-email/resend`).then((r) => r.data),
+  verifyLoginEmail: (id: number, code: string) =>
+    api
+      .post<{ email: string | null }>(`/accounts/${id}/login-email/verify`, { code })
+      .then((r) => r.data),
   getPasskeys: (id: number) =>
     api
       .get<{ passkeys: Passkey[] }>(`/accounts/${id}/passkeys`)
