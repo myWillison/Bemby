@@ -1154,11 +1154,21 @@ export const tgClientApi = {
       )
       .then((r) => r.data),
 
-  webviewResolve: (accountId: number, url: string, botChatId?: string | null) =>
+  webviewResolve: (
+    accountId: number,
+    url: string,
+    botChatId?: string | null,
+    peerChatId?: string | null,
+  ) =>
     api
-      .post<{ webAppUrl: string }>(`/tg-client/${accountId}/webview/resolve`, {
+      .post<{
+        webAppUrl: string;
+        resolved: boolean;
+        frameable: boolean;
+      }>(`/tg-client/${accountId}/webview/resolve`, {
         url,
         botChatId,
+        peerChatId,
       })
       .then((r) => r.data),
 };

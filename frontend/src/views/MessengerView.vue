@@ -1839,25 +1839,20 @@ async function openMiniApp(
     return;
   }
   try {
-    const { webAppUrl } = await tgClientApi.webviewResolve(
+    const { webAppUrl, frameable } = await tgClientApi.webviewResolve(
       selectedAccountId.value,
       url,
       botChatId,
+      activeChatId.value,
     );
-    if (openMiniAppInApp.value) {
+    // Sites that refuse framing would show a blank panel -- open externally
+    if (openMiniAppInApp.value && frameable) {
       webViewPanel.value = { url: webAppUrl, title };
     } else {
       window.open(webAppUrl, "_blank", "noopener");
     }
   } catch {
-    // Resolve failed — if toggle is on, still open in panel (unauthenticated fallback)
-    if (openMiniAppInApp.value) {
-      let title = url;
-      try { title = new URL(url).hostname; } catch {}
-      webViewPanel.value = { url, title };
-    } else {
-      window.open(url, "_blank", "noopener");
-    }
+    window.open(url, "_blank", "noopener");
   }
 }
 
@@ -1996,14 +1991,19 @@ async function submitGoUrl() {
     return;
   }
 
-  // Mini app URLs → resolve authenticated URL then open in messenger webview
+  // Mini app URLs → resolve authenticated URL then open in messenger webview,
+  // falling back to the external browser when the site refuses framing
   if (isMiniAppUrl(url)) {
-    let webAppUrl = url;
     try {
       const res = await tgClientApi.webviewResolve(selectedAccountId.value, url);
-      webAppUrl = res.webAppUrl;
-    } catch {}
-    webViewPanel.value = { url: webAppUrl, title: "Mini App" };
+      if (res.frameable) {
+        webViewPanel.value = { url: res.webAppUrl, title: "Mini App" };
+        return;
+      }
+      window.open(res.webAppUrl, "_blank", "noopener");
+    } catch {
+      window.open(url, "_blank", "noopener");
+    }
     return;
   }
 
@@ -2217,8 +2217,14 @@ async function clickInlineButton(
     btnLoadingKey.value = key;
     try {
       if (btn.webApp) {
-        // Open Mini App inside Bemby -- pass the sender's chatId as the bot context
-        await openMiniApp(btn.url, btn.text || "Mini App", msg.fromId);
+        // Pass the sender as the bot context; private chats omit fromId, so
+        // fall back to the chat itself (the bot we are talking to)
+        const botChatId =
+          msg.fromId ??
+          (activeChat.value?.type === "bot" || activeChat.value?.type === "user"
+            ? activeChatId.value
+            : null);
+        await openMiniApp(btn.url, btn.text || "Mini App", botChatId);
       } else {
         await handleTgUrl(btn.url);
       }

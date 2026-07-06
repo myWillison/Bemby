@@ -1455,7 +1455,8 @@ export async function resolveWebApp(
   entry: LiveEntry,
   tmeOrUrl: string,
   botChatId?: string, // for direct URLs we need to know which bot owns the app
-): Promise<string> {
+  peerChatId?: string, // chat where the webview button lives (for RequestWebView)
+): Promise<{ url: string; resolved: boolean }> {
   // t.me/BotName[/AppShortName]?startapp=HASH pattern
   const startappM = tmeOrUrl.match(
     /t(?:elegram)?\.me\/([A-Za-z]\w+)(?:\/([A-Za-z]\w+))?\?startapp=([^&\s]+)/i,
@@ -1483,7 +1484,7 @@ export async function resolveWebApp(
           writeAllowed: true,
         }),
       )) as any;
-      return result.url as string;
+      return { url: result.url as string, resolved: true };
     }
 
     const result = (await entry.client.invoke(
@@ -1494,27 +1495,50 @@ export async function resolveWebApp(
         startParam,
       }),
     )) as any;
-    return result.url as string;
+    return { url: result.url as string, resolved: true };
   }
 
   // Direct web app URL with a known bot
   if (botChatId) {
-    await ensureEntityCached(entry, botChatId);
-    const bot = entry.entityCache.get(botChatId) as Api.User | undefined;
-    if (bot instanceof Api.User) {
-      const result = (await entry.client.invoke(
-        new Api.messages.RequestSimpleWebView({
-          bot,
-          url: tmeOrUrl,
-          platform: "web",
-        } as any),
-      )) as any;
-      return result.url as string;
+    try {
+      await ensureEntityCached(entry, botChatId);
+      const bot = entry.entityCache.get(botChatId) as Api.User | undefined;
+      if (bot instanceof Api.User) {
+        // Inline webview buttons need RequestWebView; its URL carries the full
+        // signed init data (query_id included) that mini apps expect
+        let peer: any = bot;
+        if (peerChatId && peerChatId !== botChatId) {
+          await ensureEntityCached(entry, peerChatId);
+          peer = entry.entityCache.get(peerChatId) ?? bot;
+        }
+        try {
+          const result = (await entry.client.invoke(
+            new Api.messages.RequestWebView({
+              peer,
+              bot,
+              url: tmeOrUrl,
+              platform: "web",
+            } as any),
+          )) as any;
+          return { url: result.url as string, resolved: true };
+        } catch {
+          const result = (await entry.client.invoke(
+            new Api.messages.RequestSimpleWebView({
+              bot,
+              url: tmeOrUrl,
+              platform: "web",
+            } as any),
+          )) as any;
+          return { url: result.url as string, resolved: true };
+        }
+      }
+    } catch {
+      // Bot rejected the webview request; treat as unresolved
     }
   }
 
-  // Fallback: return URL unchanged (iframe will load it without TG auth)
-  return tmeOrUrl;
+  // Could not obtain an authenticated web app URL -- caller decides the fallback
+  return { url: tmeOrUrl, resolved: false };
 }
 
 // Re-fetches the channel from TG to get the latest membership state.
