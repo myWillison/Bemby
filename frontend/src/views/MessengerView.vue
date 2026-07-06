@@ -4074,6 +4074,16 @@ async function saveContactEdit() {
   background: rgba(67, 97, 238, 0.16);
 }
 
+/* Outgoing bubbles are solid blue -- use white so the file chip stays visible */
+.tgc-msg-out .tgc-msg-doc {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.tgc-msg-out .tgc-msg-doc:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
 .tgc-msg-doc-icon {
   font-size: 16px;
   flex-shrink: 0;
