@@ -39,21 +39,6 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label">{{
-              t("settings.labelLogRetention")
-            }}</label>
-            <input
-              v-model.number="form.log_retention_days"
-              class="form-input"
-              type="number"
-              min="0"
-            />
-            <p style="font-size: 12px; color: #888; margin: 4px 0 0">
-              {{ t("settings.logRetentionHint") }}
-            </p>
-          </div>
-
-          <div class="form-group">
             <label class="form-check">
               <input v-model="form.check_daily_run" type="checkbox" />
               <span>{{ t("settings.labelDailyRun") }}</span>
@@ -788,6 +773,27 @@
               {{ t("settings.accountDisplayHint") }}
             </p>
           </div>
+
+          <!-- Log retention -->
+          <div class="settings-subsection" style="margin-top: 28px">
+            {{ t("settings.logRetentionSection") }}
+          </div>
+          <div class="form-group">
+            <label class="form-label">{{
+              t("settings.labelLogRetention")
+            }}</label>
+            <input
+              v-model.number="logRetentionDays"
+              class="form-input"
+              type="number"
+              min="0"
+              style="max-width: 160px"
+              @change="saveLogRetention"
+            />
+            <p style="font-size: 12px; color: #888; margin: 4px 0 0">
+              {{ t("settings.logRetentionHint") }}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -1305,7 +1311,6 @@ const form = reactive({
   default_timezone: "Australia/Sydney",
   default_max_retry: 5,
   check_daily_run: true,
-  log_retention_days: 0,
   default_ua: "",
   default_play_duration: 300,
   default_device_name: "Mac",
@@ -1617,7 +1622,8 @@ onMounted(async () => {
     form.default_timezone = s.default_timezone;
     form.default_max_retry = Number(s.default_max_retry);
     form.check_daily_run = s.check_daily_run !== "false";
-    form.log_retention_days = Number(s.log_retention_days) || 0;
+    logRetentionDays.value = Number(s.log_retention_days) || 0;
+    logRetentionSaved = logRetentionDays.value;
     form.default_ua = s.default_ua ?? "";
     try {
       uaPresets.value = JSON.parse(s.ua_presets ?? "[]");
@@ -1671,7 +1677,6 @@ async function saveSettings() {
       default_timezone: form.default_timezone,
       default_max_retry: String(form.default_max_retry),
       check_daily_run: String(form.check_daily_run),
-      log_retention_days: String(Math.max(0, form.log_retention_days || 0)),
     });
     saveMsg.value = t("settings.saved");
   } catch (err: any) {
@@ -1837,6 +1842,21 @@ async function saveFallbackEnabled() {
   } catch {
     // revert on failure
     form.ai_fallback_enabled = !form.ai_fallback_enabled;
+  }
+}
+
+const logRetentionDays = ref(0);
+let logRetentionSaved = 0; // last persisted value, for revert on failure
+
+async function saveLogRetention() {
+  const value = Math.max(0, Math.floor(Number(logRetentionDays.value) || 0));
+  logRetentionDays.value = value;
+  if (value === logRetentionSaved) return;
+  try {
+    await settingsApi.update({ log_retention_days: String(value) });
+    logRetentionSaved = value;
+  } catch {
+    logRetentionDays.value = logRetentionSaved;
   }
 }
 

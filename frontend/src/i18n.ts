@@ -515,7 +515,8 @@ const zh = {
     labelMaxRetries: "默认最大重试次数",
     labelDailyRun: "每天仅运行一次",
     dailyRunHint: "测试时可关闭此选项，允许任务在当天重复运行。",
-    labelLogRetention: "日志保留天数",
+    logRetentionSection: "日志保留",
+    labelLogRetention: "保留天数",
     logRetentionHint: "早于该天数的任务日志将被自动删除，0 表示保留全部日志。",
     embyDefaults: "Emby 观看默认值",
     labelPlayDuration: "默认播放时长（秒）",
@@ -1190,7 +1191,8 @@ const en: typeof zh = {
     labelDailyRun: "Enforce one run per day",
     dailyRunHint:
       "Disable when testing so the scheduler re-runs even if the job already ran today.",
-    labelLogRetention: "Log Retention (days)",
+    logRetentionSection: "Log Retention",
+    labelLogRetention: "Days to keep logs",
     logRetentionHint:
       "Job logs older than this are deleted automatically. 0 keeps all logs.",
     embyDefaults: "Emby Watch Defaults",
