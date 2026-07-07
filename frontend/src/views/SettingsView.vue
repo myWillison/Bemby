@@ -39,6 +39,21 @@
           </div>
 
           <div class="form-group">
+            <label class="form-label">{{
+              t("settings.labelLogRetention")
+            }}</label>
+            <input
+              v-model.number="form.log_retention_days"
+              class="form-input"
+              type="number"
+              min="0"
+            />
+            <p style="font-size: 12px; color: #888; margin: 4px 0 0">
+              {{ t("settings.logRetentionHint") }}
+            </p>
+          </div>
+
+          <div class="form-group">
             <label class="form-check">
               <input v-model="form.check_daily_run" type="checkbox" />
               <span>{{ t("settings.labelDailyRun") }}</span>
@@ -1290,6 +1305,7 @@ const form = reactive({
   default_timezone: "Australia/Sydney",
   default_max_retry: 5,
   check_daily_run: true,
+  log_retention_days: 0,
   default_ua: "",
   default_play_duration: 300,
   default_device_name: "Mac",
@@ -1601,6 +1617,7 @@ onMounted(async () => {
     form.default_timezone = s.default_timezone;
     form.default_max_retry = Number(s.default_max_retry);
     form.check_daily_run = s.check_daily_run !== "false";
+    form.log_retention_days = Number(s.log_retention_days) || 0;
     form.default_ua = s.default_ua ?? "";
     try {
       uaPresets.value = JSON.parse(s.ua_presets ?? "[]");
@@ -1654,6 +1671,7 @@ async function saveSettings() {
       default_timezone: form.default_timezone,
       default_max_retry: String(form.default_max_retry),
       check_daily_run: String(form.check_daily_run),
+      log_retention_days: String(Math.max(0, form.log_retention_days || 0)),
     });
     saveMsg.value = t("settings.saved");
   } catch (err: any) {

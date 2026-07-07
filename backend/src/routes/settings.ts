@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "../db/database";
-import { refreshScheduler } from "../scheduler";
+import { refreshScheduler, purgeOldLogs } from "../scheduler";
 import { SocksClient } from "socks";
 import { parseTgProxy } from "../jobs/runner";
 
@@ -26,6 +26,7 @@ export const ALLOWED_KEYS = [
   "default_tg_api_id",
   "default_tg_api_hash",
   "account_display_with_tg_name",
+  "log_retention_days",
 ];
 
 /** Settings keys that must never be sent to the client. */
@@ -82,6 +83,9 @@ router.put("/", (req, res) => {
 
   // Reschedule if daily-run check toggled
   if ("check_daily_run" in updates) refreshScheduler();
+
+  // Apply a tightened retention window straight away
+  if ("log_retention_days" in updates) purgeOldLogs();
 
   res.json(getClientSettings());
 });

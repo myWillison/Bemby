@@ -656,9 +656,12 @@ tr:hover td {
 		padding: 16px;
 	}
 
-	/* let flexbox size the messenger below the mobile header instead of 100vh */
+	/* Pin the messenger to the viewport below the 52px mobile header so the
+	   chat header stays fixed and only the message list scrolls */
 	.main-flush {
-		height: auto;
+		height: calc(100vh - 52px);
+		height: calc(100dvh - 52px);
+		overflow: hidden;
 		padding: 0;
 	}
 

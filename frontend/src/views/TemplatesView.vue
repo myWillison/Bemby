@@ -724,7 +724,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue';
-import { templatesApi, settingsApi, accountsApi, tgClientApi, type JobTemplate, type Settings, type UAPreset, type Proxy, type EmbywatchConfig, type CustomConfig, type CustomAction, type AvailableAccount } from '../api/client';
+import { templatesApi, settingsApi, accountsApi, tgClientApi, jobsApi, type JobTemplate, type Settings, type UAPreset, type Proxy, type EmbywatchConfig, type CustomConfig, type CustomAction, type AvailableAccount } from '../api/client';
 import { t } from '../i18n';
 import { usePersistedRef } from '../composables/usePersistedRef';
 import { formatAccountLabel, loadAccountDisplaySetting } from '../composables/accountDisplay';
@@ -1331,6 +1331,26 @@ async function doCreateJobs() {
   createJobsError.value = '';
   createJobsCreating.value = true;
   try {
+    // Verify server reachability and each account's credentials before creating
+    if (createJobsTpl.value.jobType === 'embywatch') {
+      let tplCfg: { proxyId?: string; userAgent?: string } = {};
+      try {
+        if (createJobsTpl.value.config) tplCfg = JSON.parse(createJobsTpl.value.config);
+      } catch { /* ignore bad template config */ }
+      for (const r of selected) {
+        const test = await jobsApi.testEmby({
+          serverUrl: createJobsTpl.value.botUsername,
+          username: r.embyUsername.trim(),
+          password: r.embyPassword.trim(),
+          ...(tplCfg.userAgent ? { userAgent: tplCfg.userAgent } : {}),
+          ...(tplCfg.proxyId ? { proxyId: tplCfg.proxyId } : {}),
+        });
+        if (!test.ok) {
+          createJobsError.value = `${r.account.name}: ${t('jobs.errors.embyVerifyFailed')}${test.error ? `: ${test.error}` : ''}`;
+          return;
+        }
+      }
+    }
     const jobs = selected.map(r => ({
       accountId: r.account.id,
       name: r.name.trim() || `${createJobsTpl.value!.name} - ${r.account.name}`,

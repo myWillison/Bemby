@@ -534,6 +534,19 @@ export const jobsApi = {
     api
       .post<{ message: string; logId: number }>(`/jobs/${id}/run`)
       .then((r) => r.data),
+  testEmby: (data: {
+    serverUrl: string;
+    username: string;
+    password: string;
+    userAgent?: string;
+    proxyId?: string;
+  }) =>
+    api
+      .post<{ ok: boolean; userName?: string; error?: string }>(
+        "/jobs/test-emby",
+        data,
+      )
+      .then((r) => r.data),
 };
 
 // ── Templates ────────────────────────────────────────────────────────────────
@@ -635,6 +648,8 @@ export type Settings = {
   default_tg_api_hash?: string;
   /** "true" to show accounts as "{Bemby name} - {TG name}" throughout the app. */
   account_display_with_tg_name?: string;
+  /** Days to keep job logs; "0" keeps all logs. */
+  log_retention_days?: string;
 };
 
 export const settingsApi = {

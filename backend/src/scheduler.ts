@@ -278,11 +278,33 @@ export function refreshScheduler(): void {
   refreshJobs();
 }
 
+/** Deletes job logs older than the configured retention window. 0 keeps everything. */
+export function purgeOldLogs(): void {
+  const row = db
+    .prepare("SELECT value FROM settings WHERE key = 'log_retention_days'")
+    .get() as { value: string } | undefined;
+  const days = Number(row?.value ?? 0);
+  if (!Number.isFinite(days) || days <= 0) return;
+
+  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { changes } = db
+    .prepare("DELETE FROM job_logs WHERE ran_at < ? AND status != 'running'")
+    .run(cutoff);
+  if (changes > 0) {
+    console.log(
+      `[scheduler] Purged ${changes} job log(s) older than ${days} day(s)`,
+    );
+  }
+}
+
 export function startScheduler(): void {
   console.log("[scheduler] Starting");
   refreshJobs();
   // Re-check every 5 minutes to pick up new/changed jobs
   setInterval(refreshJobs, 5 * 60 * 1000);
+  purgeOldLogs();
+  // Retention sweep is cheap, so hourly keeps the table tidy without load
+  setInterval(purgeOldLogs, 60 * 60 * 1000);
 }
 
 export function getSchedulerStatus(): Array<{

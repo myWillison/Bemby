@@ -5506,6 +5506,14 @@ async function saveContactEdit() {
     -webkit-overflow-scrolling: touch;
   }
 
+  /* Keep the back banner visible in long chats even if an outer container
+     ends up scrolling (inert when only the message list scrolls) */
+  .tgc-chat-header {
+    position: sticky;
+    top: 0;
+    z-index: 15;
+  }
+
   /* Tap-to-show message actions on mobile (no hover available) */
   .tgc-msg-wrap.tgc-msg-active .tgc-msg-actions {
     display: flex;

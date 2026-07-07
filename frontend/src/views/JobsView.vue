@@ -1439,6 +1439,29 @@ async function saveJob() {
   }
   saving.value = true;
   try {
+    // Verify server reachability and credentials before saving the job
+    if (form.jobType === 'embywatch') {
+      let proxyId: string | undefined;
+      let userAgent: string | undefined = embyCfg.userAgent || undefined;
+      if (form.templateId && linkedTemplate.value?.config) {
+        try {
+          const c = JSON.parse(linkedTemplate.value.config) as { proxyId?: string; userAgent?: string };
+          proxyId = c.proxyId;
+          userAgent = c.userAgent || undefined;
+        } catch { /* ignore bad template config */ }
+      }
+      const test = await jobsApi.testEmby({
+        serverUrl: form.botUsername,
+        username: embyCfg.username,
+        password: embyCfg.password,
+        ...(userAgent ? { userAgent } : {}),
+        ...(proxyId ? { proxyId } : {}),
+      });
+      if (!test.ok) {
+        formError.value = `${t('jobs.errors.embyVerifyFailed')}${test.error ? `: ${test.error}` : ''}`;
+        return;
+      }
+    }
     const rawCfg = buildConfig();
     const startCommand = (cmdDropdown.value === 'custom' ? cmdCustom.value : cmdDropdown.value) || undefined;
     const resolvedAiBtn = btnAiHint.value.trim() ? `{aiBtn:${btnAiHint.value.trim()}}` : '{aiBtn}';

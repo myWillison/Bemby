@@ -332,6 +332,7 @@ const zh = {
       hostRequired: "服务器主机为必填项",
       botRequired: "机器人用户名为必填项",
       embyCredRequired: "Emby 用户名和密码为必填项",
+      embyVerifyFailed: "Emby 服务器验证失败",
       customActionsRequired: "请至少添加一个动作",
     },
     custom: {
@@ -514,6 +515,8 @@ const zh = {
     labelMaxRetries: "默认最大重试次数",
     labelDailyRun: "每天仅运行一次",
     dailyRunHint: "测试时可关闭此选项，允许任务在当天重复运行。",
+    labelLogRetention: "日志保留天数",
+    logRetentionHint: "早于该天数的任务日志将被自动删除，0 表示保留全部日志。",
     embyDefaults: "Emby 观看默认值",
     labelPlayDuration: "默认播放时长（秒）",
     labelDeviceName: "设备名称",
@@ -1000,6 +1003,7 @@ const en: typeof zh = {
       hostRequired: "Server host is required",
       botRequired: "Bot username is required",
       embyCredRequired: "Emby username and password are required",
+      embyVerifyFailed: "Emby server verification failed",
       customActionsRequired: "Add at least one action",
     },
     custom: {
@@ -1186,6 +1190,9 @@ const en: typeof zh = {
     labelDailyRun: "Enforce one run per day",
     dailyRunHint:
       "Disable when testing so the scheduler re-runs even if the job already ran today.",
+    labelLogRetention: "Log Retention (days)",
+    logRetentionHint:
+      "Job logs older than this are deleted automatically. 0 keeps all logs.",
     embyDefaults: "Emby Watch Defaults",
     labelPlayDuration: "Default Play Duration (seconds)",
     labelDeviceName: "Device Name",

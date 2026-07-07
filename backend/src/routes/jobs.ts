@@ -10,6 +10,7 @@ import {
 import { refreshScheduler } from "../scheduler";
 import type { Job, TgAccount } from "../types";
 import { registerJob, unregisterJob, registerLiveDetail, clearLiveDetail } from "../jobs/cancellation";
+import { testEmbyConnection } from "../jobs/embywatch";
 
 const router = Router();
 
@@ -86,6 +87,33 @@ router.get("/", (_req, res) => {
     )
     .all() as JobRow[];
   res.json(rows.map(rowToJob));
+});
+
+// Verify Emby server reachability and credentials without creating a job
+router.post("/test-emby", async (req, res) => {
+  const { serverUrl, username, password, userAgent, proxyId } = req.body as Record<
+    string,
+    string | undefined
+  >;
+  if (!serverUrl || !username || !password) {
+    res
+      .status(400)
+      .json({ error: "serverUrl, username and password are required" });
+    return;
+  }
+  if (!/^https?:\/\//i.test(serverUrl)) {
+    res
+      .status(400)
+      .json({ error: "serverUrl must start with http:// or https://" });
+    return;
+  }
+  const result = await testEmbyConnection(serverUrl, {
+    username,
+    password,
+    userAgent,
+    proxyId,
+  });
+  res.json(result);
 });
 
 router.post("/", (req, res) => {
