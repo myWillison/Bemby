@@ -225,6 +225,19 @@ export type CustomConfig = {
   proxyId?: string;
 };
 
+export type AutoregConfig = {
+  groupId: string;
+  codePrefix: string;
+  registerButton?: string;
+  signupUsername: string;
+  listenMinutes?: number;
+  scanHistoryCount?: number;
+  preArm?: boolean;
+  successContains?: string;
+  failContains?: string;
+  proxyId?: string;
+};
+
 export type CustomStepLog = {
   step: number;
   actionType: string;
@@ -262,7 +275,7 @@ export type Job = {
   name: string;
   accountId: number | null;
   accountName?: string;
-  jobType: "checkin" | "embywatch" | "custom";
+  jobType: "checkin" | "embywatch" | "custom" | "autoreg";
   /** checkin: Telegram bot username. embywatch: Emby server URL */
   botUsername: string;
   scheduleWindowStart: number;
@@ -283,7 +296,7 @@ export type Job = {
 export type JobTemplate = {
   id: number;
   name: string;
-  jobType: "checkin" | "embywatch" | "custom";
+  jobType: "checkin" | "embywatch" | "custom" | "autoreg";
   botUsername: string;
   timezone: string;
   replyTimeoutMs: number;

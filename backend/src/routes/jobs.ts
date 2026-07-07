@@ -136,10 +136,13 @@ router.post("/", (req, res) => {
   } = req.body as Record<string, any>;
 
   const resolvedType = jobType ?? "checkin";
-  const needsAccount = resolvedType === "checkin" || resolvedType === "custom";
+  const needsAccount =
+    resolvedType === "checkin" ||
+    resolvedType === "custom" ||
+    resolvedType === "autoreg";
   if (!name || (needsAccount && !accountId) || !botUsername) {
     res.status(400).json({
-      error: "name and botUsername are required; accountId is required for checkin and custom jobs",
+      error: "name and botUsername are required; accountId is required for checkin, custom and autoreg jobs",
     });
     return;
   }
@@ -275,7 +278,7 @@ router.post("/:id/run", async (req, res) => {
   const job = rowToJob(jobRow);
   let account: TgAccount | null = null;
 
-  if (job.jobType === "checkin" || job.jobType === "custom") {
+  if (job.jobType === "checkin" || job.jobType === "custom" || job.jobType === "autoreg") {
     const accountRow = db
       .prepare("SELECT * FROM tg_accounts WHERE id = ?")
       .get(jobRow.account_id) as AccountRow | undefined;

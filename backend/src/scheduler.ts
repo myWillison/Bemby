@@ -68,7 +68,7 @@ export function loadEligibleJobs(): Array<{
       AND j.retired IS NULL
       AND (j.account_id IS NULL OR (a.id IS NOT NULL AND a.disabled = 0))
       AND (
-        (j.job_type != 'checkin' AND j.job_type != 'custom')
+        (j.job_type NOT IN ('checkin', 'custom', 'autoreg'))
         OR (a.auth_status = 'authenticated' AND a.session_string IS NOT NULL)
       )
   `,

@@ -457,8 +457,8 @@
                 </td>
               </tr>
 
-              <!-- Detail panel — custom jobs: step-by-step timeline -->
-              <tr v-if="l.jobType === 'custom' && expandedId === l.id">
+              <!-- Detail panel — custom and autoreg jobs: step-by-step timeline -->
+              <tr v-if="(l.jobType === 'custom' || l.jobType === 'autoreg') && expandedId === l.id">
                 <td
                   colspan="5"
                   style="padding: 0; background: #f8f9fa; border-top: none"
@@ -901,7 +901,7 @@ const filteredLogs = computed(() => {
 });
 
 const expandedId = ref<number | null>(null);
-const expandedDetail = ref<CheckinAttemptLog[] | EmbywatchLog[] | null>(null);
+const expandedDetail = ref<CheckinAttemptLog[] | EmbywatchLog[] | { steps: CustomStepLog[] } | null>(null);
 const detailLoading = ref(false);
 const stopping = ref(new Set<number>());
 const rerunning = ref(new Set<number>());
@@ -974,16 +974,16 @@ async function runDebug() {
 
 // Typed accessors for the two detail formats
 const checkinDetail = computed(() => {
-  if (!expandedDetail.value?.length) return null;
-  if ("attempt" in expandedDetail.value[0])
-    return expandedDetail.value as CheckinAttemptLog[];
+  const d = expandedDetail.value;
+  if (!Array.isArray(d) || !d.length) return null;
+  if ("attempt" in d[0]) return d as CheckinAttemptLog[];
   return null;
 });
 
 const embywatchDetail = computed(() => {
-  if (!expandedDetail.value?.length) return null;
-  if ("itemType" in expandedDetail.value[0])
-    return expandedDetail.value[0] as EmbywatchLog;
+  const d = expandedDetail.value;
+  if (!Array.isArray(d) || !d.length) return null;
+  if ("itemType" in d[0]) return d[0] as EmbywatchLog;
   return null;
 });
 
