@@ -577,17 +577,17 @@
             </div>
             <div class="form-group">
               <label class="form-label">{{ t('jobs.autoreg.labelBot') }} <span style="color:#e63946">*</span></label>
-              <input v-model.trim="form.botUsername" class="form-input" placeholder="fyemby_bot" />
+              <input v-model.trim="form.botUsername" class="form-input" placeholder="SomeBotUsername" />
             </div>
           </div>
           <div class="form-group">
             <label class="form-label">{{ t('jobs.autoreg.labelGroup') }} <span style="color:#e63946">*</span></label>
-            <input v-model.trim="autoregCfg.groupId" class="form-input" placeholder="@lilililililiiilllll" />
+            <input v-model.trim="autoregCfg.groupId" class="form-input" placeholder="@groupname" />
             <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.autoreg.groupHint') }}</div>
           </div>
           <div class="form-group">
             <label class="form-label">{{ t('jobs.autoreg.labelCodePrefix') }} <span style="color:#e63946">*</span></label>
-            <input v-model.trim="autoregCfg.codePrefix" class="form-input" placeholder="NONAY-*-Register_" />
+            <input v-model.trim="autoregCfg.codePrefix" class="form-input" placeholder="ABC-*-XYZ_" />
             <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.autoreg.codePrefixHint') }}</div>
           </div>
           <div class="form-row">

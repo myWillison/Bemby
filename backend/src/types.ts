@@ -144,7 +144,7 @@ export type CheckinConfig = {
 export type AutoregConfig = {
   /** Group to watch for registration codes: @username or t.me invite link */
   groupId: string;
-  /** Line prefix identifying a registration code, e.g. NONAY-30-Register_ */
+  /** Line prefix identifying a registration code, e.g. ABC-30-Register_ */
   codePrefix: string;
   /** Button on the bot's start reply that opens registration (partial match). Blank clicks the sole button. */
   registerButton?: string;

@@ -12,53 +12,53 @@ vi.mock("../db/database", () => ({
 import { describe, it, expect, vi } from "vitest";
 import { extractCodes } from "../jobs/autoreg";
 
-const PREFIX = "NONAY-30-Register_";
+const PREFIX = "ABC-30-Register_";
 
 describe("extractCodes", () => {
   it("extracts a single code from a line", () => {
     const { codes, usedPartials } = extractCodes(
-      "NONAY-30-Register_xk3mh*puUZR",
+      "ABC-30-Register_xk3mh*puUZR",
       PREFIX,
     );
-    expect(codes).toEqual(["NONAY-30-Register_xk3mh*puUZR"]);
+    expect(codes).toEqual(["ABC-30-Register_xk3mh*puUZR"]);
     expect(usedPartials).toEqual([]);
   });
 
   it("extracts multiple codes on separate lines of one message", () => {
     const text = [
-      "🎯 fyemby_bot已为您生成了 30天 注册码 5 个",
+      "🎯 somebot已为您生成了 30天 注册码 5 个",
       "删除“*”",
-      "NONAY-30-Register_xk3mh*puUZR",
-      "NONAY-30-Register_SljWEmZa*Qd",
-      "NONAY-30-Register_MEPR*XKiE3I",
+      "ABC-30-Register_xk3mh*puUZR",
+      "ABC-30-Register_SljWEmZa*Qd",
+      "ABC-30-Register_MEPR*XKiE3I",
     ].join("\n");
     const { codes } = extractCodes(text, PREFIX);
     expect(codes).toEqual([
-      "NONAY-30-Register_xk3mh*puUZR",
-      "NONAY-30-Register_SljWEmZa*Qd",
-      "NONAY-30-Register_MEPR*XKiE3I",
+      "ABC-30-Register_xk3mh*puUZR",
+      "ABC-30-Register_SljWEmZa*Qd",
+      "ABC-30-Register_MEPR*XKiE3I",
     ]);
   });
 
   it("treats a masked code as a used-code announcement, not a fresh code", () => {
     const text =
-      "🎫 注册码使用 - Surryliu [1093371556] 使用了 NONAY-30-Register_85D▓▓▓▓▓▓▓▓";
+      "🎫 注册码使用 - SomeUser [123456789] 使用了 ABC-30-Register_85D▓▓▓▓▓▓▓▓";
     const { codes, usedPartials } = extractCodes(text, PREFIX);
     expect(codes).toEqual([]);
-    expect(usedPartials).toEqual(["NONAY-30-Register_85D"]);
+    expect(usedPartials).toEqual(["ABC-30-Register_85D"]);
   });
 
   it("ignores a bare prefix with no code after it", () => {
-    const { codes } = extractCodes("NONAY-30-Register_", PREFIX);
+    const { codes } = extractCodes("ABC-30-Register_", PREFIX);
     expect(codes).toEqual([]);
   });
 
   it("finds a code mid-line and stops at whitespace", () => {
     const { codes } = extractCodes(
-      "use NONAY-30-Register_abc123 before it expires",
+      "use ABC-30-Register_abc123 before it expires",
       PREFIX,
     );
-    expect(codes).toEqual(["NONAY-30-Register_abc123"]);
+    expect(codes).toEqual(["ABC-30-Register_abc123"]);
   });
 
   it("returns nothing when the prefix is empty or absent", () => {
@@ -68,33 +68,33 @@ describe("extractCodes", () => {
 
   it("wildcard prefix matches any duration", () => {
     const text = [
-      "NONAY-30-Register_abc123",
-      "NONAY-7-Register_def456",
-      "NONAY-365-Register_ghi789",
+      "ABC-30-Register_abc123",
+      "ABC-7-Register_def456",
+      "ABC-365-Register_ghi789",
     ].join("\n");
-    const { codes } = extractCodes(text, "NONAY-*-Register_");
+    const { codes } = extractCodes(text, "ABC-*-Register_");
     expect(codes).toEqual([
-      "NONAY-30-Register_abc123",
-      "NONAY-7-Register_def456",
-      "NONAY-365-Register_ghi789",
+      "ABC-30-Register_abc123",
+      "ABC-7-Register_def456",
+      "ABC-365-Register_ghi789",
     ]);
   });
 
   it("wildcard prefix still detects masked used-code announcements", () => {
     const { codes, usedPartials } = extractCodes(
-      "使用了 NONAY-7-Register_85D▓▓▓▓",
-      "NONAY-*-Register_",
+      "使用了 ABC-7-Register_85D▓▓▓▓",
+      "ABC-*-Register_",
     );
     expect(codes).toEqual([]);
-    expect(usedPartials).toEqual(["NONAY-7-Register_85D"]);
+    expect(usedPartials).toEqual(["ABC-7-Register_85D"]);
   });
 
   it("wildcard prefix does not cross whitespace", () => {
     const { codes } = extractCodes(
-      "NONAY- broken Register_zzz and NONAY-14-Register_ok1",
-      "NONAY-*-Register_",
+      "ABC- broken Register_zzz and ABC-14-Register_ok1",
+      "ABC-*-Register_",
     );
-    expect(codes).toEqual(["NONAY-14-Register_ok1"]);
+    expect(codes).toEqual(["ABC-14-Register_ok1"]);
   });
 
   it("regex special characters in the prefix are treated literally", () => {
@@ -107,17 +107,17 @@ describe("extractCodes", () => {
 
   it("extracts a code embedded in a ?start= deep link", () => {
     const { codes } = extractCodes(
-      "快抢 https://sfsffsf.xomsddf?start=NONAY-7-Register_85Dxxxxx",
-      "NONAY-*-Register_",
+      "快抢 https://sfsffsf.xomsddf?start=ABC-7-Register_85Dxxxxx",
+      "ABC-*-Register_",
     );
-    expect(codes).toEqual(["NONAY-7-Register_85Dxxxxx"]);
+    expect(codes).toEqual(["ABC-7-Register_85Dxxxxx"]);
   });
 
   it("stops a URL-embedded code at the next query parameter", () => {
     const { codes } = extractCodes(
-      "https://t.me/somebot?start=NONAY-30-Register_abc123&lang=zh",
-      "NONAY-*-Register_",
+      "https://t.me/somebot?start=ABC-30-Register_abc123&lang=zh",
+      "ABC-*-Register_",
     );
-    expect(codes).toEqual(["NONAY-30-Register_abc123"]);
+    expect(codes).toEqual(["ABC-30-Register_abc123"]);
   });
 });

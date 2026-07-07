@@ -22,13 +22,13 @@ export class AutoregJobError extends Error {
 }
 
 const DEFAULT_LISTEN_MINUTES = 30;
-// Bots drop the code-entry state after a short window (e.g. fyemby_bot allows 120s),
+// Bots drop the code-entry state after a short window (often only a minute or two),
 // so a pre-armed prompt is refreshed before it can expire
 const PRE_ARM_REFRESH_MS = 100_000;
 
 // Characters a registration code may contain after the prefix
 const CODE_CHAR = /[A-Za-z0-9_*\-]/;
-// Block/mask characters used when a bot announces a used code (e.g. NONAY-30-Register_85D▓▓▓)
+// Block/mask characters used when a bot announces a used code (e.g. ABC-30-Register_85D▓▓▓)
 const MASK_CHAR = /[▀-▟■-◿]/;
 
 export type ExtractedCodes = {
@@ -39,7 +39,7 @@ export type ExtractedCodes = {
 };
 
 /** Builds a matcher for the code prefix; `*` matches any non-whitespace run,
- *  e.g. NONAY-*-Register_ matches NONAY-30-Register_ and NONAY-7-Register_ */
+ *  e.g. ABC-*-Register_ matches ABC-30-Register_ and ABC-7-Register_ */
 function prefixToRegex(prefix: string): RegExp {
   const pattern = prefix
     .split("*")
