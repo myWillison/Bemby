@@ -27,10 +27,22 @@ const DEFAULT_LISTEN_MINUTES = 30;
 // so a previously armed prompt is refreshed before sending another code
 const ARM_STALE_MS = 100_000;
 
-// Characters a registration code may contain after the prefix
-const CODE_CHAR = /[A-Za-z0-9_*\-]/;
-// Block/mask characters used when a bot announces a used code (e.g. ABC-30-Register_85D▓▓▓)
-const MASK_CHAR = /[▀-▟■-◿]/;
+// Characters a registration code may contain after the prefix. Telegram /start
+// payloads only allow these, so anything else is a decoy, mask, or delimiter.
+const CODE_CHAR = /[A-Za-z0-9_\-]/;
+// Anti-bot decoy symbols some bots weave into posted codes with a "delete the
+// symbol" instruction (e.g. ABC-30-Register_C~3vLEpVAYh, 删除符号“~”).
+// Stripped from the extracted code. Deliberately excludes URL/sentence
+// delimiters (& ? # / = . , ; : quotes, brackets) which end a code instead.
+const DECOY_CHAR = /[!$%^*+~`@|\\]/;
+// Mask characters bots use when announcing a used code (e.g. ABC-30-Register_85D░░░).
+// Covers block elements, geometric shapes, misc symbols, dingbats, arrows, emoji,
+// and common single-character masks (··· … ＊ × •)
+const MASK_CHAR =
+  /[▀-◿☀-➿⬀-⯿…⋯·•＊×]|[\u{1F000}-\u{1FAFF}]/u;
+// Minimum characters after the prefix for a fresh code. Filters fragments of
+// codes quoted in chat (e.g. someone pasting a truncated or masked code)
+const MIN_CODE_SUFFIX = 4;
 
 export type ExtractedCodes = {
   /** Complete, usable codes (prefix included) */
@@ -49,8 +61,10 @@ function prefixToRegex(prefix: string): RegExp {
   return new RegExp(pattern, "g");
 }
 
-/** Pulls registration codes out of a message. A mask character straight after the
- *  code run marks a used-code announcement rather than a fresh code. */
+/** Pulls registration codes out of a message. Decoy symbols inside the run are
+ *  stripped, and a mask character marks a used-code announcement rather than a
+ *  fresh code. Suffixes shorter than MIN_CODE_SUFFIX are quoted fragments, not
+ *  codes, and are discarded. */
 export function extractCodes(text: string, prefix: string): ExtractedCodes {
   const codes: string[] = [];
   const usedPartials: string[] = [];
@@ -61,11 +75,24 @@ export function extractCodes(text: string, prefix: string): ExtractedCodes {
   while ((m = re.exec(text)) !== null) {
     const start = m.index;
     let end = start + m[0].length;
-    while (end < text.length && CODE_CHAR.test(text[end])) end++;
-    const token = text.slice(start, end);
-    if (end < text.length && MASK_CHAR.test(text[end])) {
+    let token = m[0];
+    let masked = false;
+    // Walk the run one code point at a time; emoji masks are surrogate pairs
+    while (end < text.length) {
+      const ch = String.fromCodePoint(text.codePointAt(end)!);
+      if (CODE_CHAR.test(ch)) {
+        token += ch;
+      } else if (MASK_CHAR.test(ch)) {
+        masked = true;
+        break;
+      } else if (!DECOY_CHAR.test(ch)) {
+        break; // whitespace or a delimiter ends the run
+      }
+      end += ch.length;
+    }
+    if (masked) {
       usedPartials.push(token);
-    } else if (token.length > m[0].length) {
+    } else if (token.length >= m[0].length + MIN_CODE_SUFFIX) {
       codes.push(token);
     }
     // Skip past the whole code run and never stall on a zero-length match
@@ -100,16 +127,25 @@ class CodeQueue {
   private seen = new Set<string>();
   private burnedPartials: string[] = [];
   private waiter: ((code: string | null) => void) | null = null;
+  /** Debug trail: every unique code seen and what happened to it */
+  readonly trail = new Map<string, "pending" | "tried" | "burned">();
+  /** Used-code partials observed, for debug output */
+  readonly partials: string[] = [];
 
   add(code: string): boolean {
     if (this.seen.has(code)) return false;
     this.seen.add(code);
-    if (this.burnedPartials.some((p) => code.startsWith(p))) return false;
+    if (this.burnedPartials.some((p) => code.startsWith(p))) {
+      this.trail.set(code, "burned");
+      return false;
+    }
     if (this.waiter) {
+      this.trail.set(code, "tried");
       const w = this.waiter;
       this.waiter = null;
       w(code);
     } else {
+      this.trail.set(code, "pending");
       this.queue.push(code);
     }
     return true;
@@ -117,13 +153,19 @@ class CodeQueue {
 
   /** Puts a code back at the front (e.g. bot never replied and we re-arm) */
   requeueFront(code: string): void {
+    this.trail.set(code, "pending");
     this.queue.unshift(code);
   }
 
   markUsed(partial: string): number {
     this.burnedPartials.push(partial);
+    this.partials.push(partial);
     const before = this.queue.length;
-    this.queue = this.queue.filter((c) => !c.startsWith(partial));
+    this.queue = this.queue.filter((c) => {
+      if (!c.startsWith(partial)) return true;
+      this.trail.set(c, "burned");
+      return false;
+    });
     return before - this.queue.length;
   }
 
@@ -131,10 +173,25 @@ class CodeQueue {
     return this.queue.length;
   }
 
+  stats(): { seen: number; pending: number; burned: number; tried: number } {
+    let pending = 0;
+    let burned = 0;
+    let tried = 0;
+    for (const s of this.trail.values()) {
+      if (s === "pending") pending++;
+      else if (s === "burned") burned++;
+      else tried++;
+    }
+    return { seen: this.trail.size, pending, burned, tried };
+  }
+
   /** Next code, waiting up to maxMs for one to arrive. Resolves null on timeout/abort. */
   next(maxMs: number, signal?: AbortSignal): Promise<string | null> {
-    if (this.queue.length > 0)
-      return Promise.resolve(this.queue.shift() ?? null);
+    if (this.queue.length > 0) {
+      const code = this.queue.shift() ?? null;
+      if (code) this.trail.set(code, "tried");
+      return Promise.resolve(code);
+    }
     return new Promise((resolve) => {
       if (signal?.aborted || maxMs <= 0) {
         resolve(null);
@@ -158,6 +215,16 @@ type ReplyVerdict = {
   verdict: "success" | "fail" | "timeout";
   messages: Api.Message[];
 };
+
+/** True when the text contains any of the |-separated keywords */
+export function containsAny(text: string, keywords?: string): boolean {
+  if (!keywords) return false;
+  return keywords
+    .split("|")
+    .map((k) => k.trim())
+    .filter(Boolean)
+    .some((k) => text.includes(k));
+}
 
 // Collects bot messages until success/fail text is matched or the timeout fires.
 // With no successContains, the first non-fail message counts as success.
@@ -195,12 +262,12 @@ function waitForVerdict(
       const msg = event.message as Api.Message;
       collected.push(msg);
       const text = msg.message ?? "";
-      if (failContains && text.includes(failContains)) {
+      if (containsAny(text, failContains)) {
         finish("fail");
         return;
       }
       if (successContains) {
-        if (text.includes(successContains)) finish("success");
+        if (containsAny(text, successContains)) finish("success");
         return;
       }
       finish("success");
@@ -472,13 +539,16 @@ export async function runAutoreg(
       `Listen for codes with prefix "${codePrefix}"`,
     );
     const listenStart = Date.now();
-    let codesSeen = 0;
+    const queueSummary = () => {
+      const s = queue.stats();
+      return `${s.seen} code(s) seen · ${s.pending} pending · ${s.burned} burned as used · ${s.tried} tried`;
+    };
     const onGroupMessage = async (event: NewMessageEvent) => {
       const text = messageSearchText(event.message as Api.Message);
       const { codes, usedPartials } = extractCodes(text, codePrefix);
       for (const p of usedPartials) queue.markUsed(p);
-      for (const c of codes) if (queue.add(c)) codesSeen++;
-      listenStep.result = `${codesSeen} code(s) seen`;
+      for (const c of codes) queue.add(c);
+      listenStep.result = queueSummary();
     };
     client.addEventHandler(
       onGroupMessage,
@@ -490,6 +560,11 @@ export async function runAutoreg(
       // later used-code announcements prune correctly)
       const scanCount = config.scanHistoryCount ?? 0;
       if (scanCount > 0) {
+        const scanStep = beginStep(
+          "wait_reply",
+          `Scan last ${scanCount} group message(s) for codes`,
+        );
+        const s0 = Date.now();
         const recent = (await client.getMessages(groupEntity, {
           limit: scanCount,
         })) as Api.Message[];
@@ -498,10 +573,26 @@ export async function runAutoreg(
             messageSearchText(m),
             codePrefix,
           );
-          for (const c of codes) if (queue.add(c)) codesSeen++;
+          for (const c of codes) queue.add(c);
           for (const p of usedPartials) queue.markUsed(p);
         }
-        listenStep.result = `${codesSeen} code(s) seen`;
+        scanStep.durationMs = Date.now() - s0;
+        scanStep.result = `${recent.length} message(s) scanned · ${queueSummary()}`;
+        // Debug: full list of extracted codes and used-code partials
+        const lines = [...queue.trail.entries()].map(
+          ([code, status]) => `${status === "pending" ? "✔" : "✘"} ${code}  [${status}]`,
+        );
+        if (queue.partials.length) {
+          lines.push(
+            "",
+            `Used-code announcements seen (${queue.partials.length}), queued codes matching these are burned:`,
+            ...queue.partials.map((p) => `  ${p}…`),
+          );
+        }
+        if (lines.length) {
+          scanStep.responseHtml = `<pre style="white-space:pre-wrap">${lines.join("\n")}</pre>`;
+        }
+        listenStep.result = queueSummary();
       }
 
       // Arms the bot conversation for button mode: start command, then the
@@ -590,10 +681,11 @@ export async function runAutoreg(
         checkCancelled();
         if (!code) {
           listenStep.durationMs = Date.now() - listenStart;
+          const s = queue.stats();
           throw new Error(
-            codesSeen === 0
+            s.seen === 0
               ? `No registration codes appeared within ${Math.round(listenMs / 60_000)} minute(s)`
-              : "All captured registration codes were used or rejected",
+              : `All ${s.seen} captured code(s) were exhausted (${s.burned} burned by used-code announcements, ${s.tried} tried and rejected)`,
           );
         }
 

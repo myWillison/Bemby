@@ -156,9 +156,9 @@ export type AutoregConfig = {
   scanHistoryCount?: number;
   /** How a code reaches the bot: "button" sends the start command and clicks the register button first; "command" appends the code to the start command (e.g. /start CODE). Default "button". */
   entryMode?: "button" | "command";
-  /** Reply text marking a code as accepted; blank treats any non-fail reply as accepted */
+  /** Reply text marking a code as accepted; blank treats any non-fail reply as accepted. Multiple keywords separated by | */
   successContains?: string;
-  /** Reply text marking a code as used/invalid, e.g. 已被使用 */
+  /** Reply text marking a code as used/invalid, e.g. 已被使用|错误. Multiple keywords separated by | */
   failContains?: string;
   proxyId?: string;
 };

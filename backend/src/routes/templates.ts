@@ -108,7 +108,7 @@ router.get('/', (_req, res) => {
   const rows = db.prepare(`
     SELECT t.*, COUNT(j.id) AS linked_job_count
     FROM job_templates t
-    LEFT JOIN jobs j ON j.template_id = t.id
+    LEFT JOIN jobs j ON j.template_id = t.id AND j.retired IS NULL
     GROUP BY t.id
     ORDER BY t.name COLLATE NOCASE
   `).all() as (TemplateRow & { linked_job_count: number })[];
@@ -248,7 +248,7 @@ router.get('/:id/available-accounts', (req, res) => {
     WHERE (disabled = 0 OR disabled IS NULL)
       AND id NOT IN (
         SELECT account_id FROM jobs
-        WHERE template_id = ? AND account_id IS NOT NULL
+        WHERE template_id = ? AND account_id IS NOT NULL AND retired IS NULL
       )
     ORDER BY name COLLATE NOCASE
   `).all(req.params.id) as Array<{
