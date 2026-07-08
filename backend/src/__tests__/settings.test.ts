@@ -29,6 +29,8 @@ describe("ALLOWED_KEYS", () => {
       "notify_tg_username",
       "notify_tg_events",
       "ua_presets",
+      "log_retention_days",
+      "schedule_min_gap_minutes",
     ];
     for (const key of expected) {
       expect(ALLOWED_KEYS).toContain(key);

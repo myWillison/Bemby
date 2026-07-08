@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import jwt from 'jsonwebtoken';
 import type { SignOptions } from 'jsonwebtoken';
 import type { Request, Response, NextFunction } from 'express';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, verifySessionToken } from '../middleware/auth';
 import { ALLOWED_KEYS, CLIENT_HIDDEN_KEYS } from '../routes/settings';
 
 const TEST_SECRET = 'test-only-secret-do-not-use-in-prod';
@@ -173,6 +173,38 @@ describe('requireAuth -- token validation', () => {
   });
 });
 
+// ── verifySessionToken -- shared by the WebSocket handshake ───────────────────
+
+describe('verifySessionToken (WebSocket handshake guard)', () => {
+  it('accepts a genuine session token', () => {
+    const decoded = verifySessionToken(makeToken({ sub: 'admin', typ: 'auth' }));
+    expect(decoded?.sub).toBe('admin');
+  });
+
+  it('rejects a public captcha token (regression: WS auth bypass)', () => {
+    // The unauthenticated /api/auth/captcha endpoint mints this with the same secret
+    expect(verifySessionToken(makeToken({ cap: 'abcde', typ: 'captcha' }, '5m'))).toBeNull();
+  });
+
+  it('rejects a token signed with the wrong secret', () => {
+    expect(verifySessionToken(jwt.sign({ sub: 'admin' }, 'wrong-secret', { expiresIn: '1h' }))).toBeNull();
+  });
+
+  it('rejects an expired token', () => {
+    expect(verifySessionToken(makeToken({ sub: 'admin' }, '-1s'))).toBeNull();
+  });
+
+  it('rejects a non-auth typ claim and garbage input', () => {
+    expect(verifySessionToken(makeToken({ sub: 'admin', typ: 'captcha' }))).toBeNull();
+    expect(verifySessionToken('not.a.jwt')).toBeNull();
+  });
+
+  it('surfaces requirePasswordChange so the WS handler can enforce it', () => {
+    const decoded = verifySessionToken(makeToken({ sub: 'admin', typ: 'auth', requirePasswordChange: true }));
+    expect(decoded?.requirePasswordChange).toBe(true);
+  });
+});
+
 // ── requireAuth -- requirePasswordChange flow ─────────────────────────────────
 
 describe('requireAuth -- requirePasswordChange enforcement', () => {
@@ -295,6 +327,31 @@ describe('CLIENT_HIDDEN_KEYS -- secrets excluded from GET /api/settings', () => 
 
   it('hides jwt_secret from the settings response', () => {
     expect(CLIENT_HIDDEN_KEYS.has('jwt_secret')).toBe(true);
+  });
+
+  it('hides the legacy ai_api_key from the settings response', () => {
+    expect(CLIENT_HIDDEN_KEYS.has('ai_api_key')).toBe(true);
+  });
+});
+
+// ── getJwtSecret -- refuses to boot with a known-default secret ───────────────
+
+describe('getJwtSecret -- rejects insecure secrets', () => {
+  it('exits when JWT_SECRET is a publicly known default', async () => {
+    const { getJwtSecret } = await import('../middleware/auth');
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((): never => {
+      throw new Error('process.exit called');
+    }) as never);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    for (const bad of ['change-me-in-production', 'changeme', 'secret']) {
+      process.env.JWT_SECRET = bad;
+      expect(() => getJwtSecret()).toThrow('process.exit called');
+    }
+
+    process.env.JWT_SECRET = TEST_SECRET;
+    expect(getJwtSecret()).toBe(TEST_SECRET);
+    exitSpy.mockRestore();
   });
 });
 

@@ -1,4 +1,4 @@
-import { TelegramClient, Api, Logger, errors } from "telegram";
+import { TelegramClient, Api, Logger } from "telegram";
 import { LogLevel } from "telegram/extensions/Logger";
 import { StringSession } from "telegram/sessions";
 import type { TgProxy } from "../types";
@@ -467,6 +467,7 @@ export type PasswordInfo = {
   hasRecovery: boolean;
   hint: string | null;
   emailUnconfirmedPattern: string | null;
+  loginEmailPattern: string | null;
 };
 
 function makeTgClient(
@@ -500,120 +501,68 @@ export async function getPasswordInfo(
       hasRecovery: Boolean(pwd.hasRecovery),
       hint: pwd.hint ?? null,
       emailUnconfirmedPattern: pwd.emailUnconfirmedPattern ?? null,
+      loginEmailPattern: pwd.loginEmailPattern ?? null,
     };
   } finally {
     await client.disconnect().catch(() => undefined);
   }
 }
 
-export async function getRecoveryEmail(
+// ── Login email management ────────────────────────────────────────────────────
+// The masked pattern comes from account.getPassword (loginEmailPattern).
+// Setting or replacing uses SendVerifyEmailCode + VerifyEmail with the
+// emailVerifyPurposeLoginChange purpose. Telegram provides no method to remove
+// a login email from an authorised session -- it can only be replaced.
+
+/** Send a verification code to a new login email address. */
+export async function sendLoginEmailCode(
   apiId: number,
   apiHash: string,
   sessionString: string,
-  currentPassword: string,
+  email: string,
   proxy?: TgProxy,
   deviceParams?: TgDeviceParams,
-): Promise<{ email: string | null }> {
+): Promise<{ emailPattern: string; codeLength: number }> {
   const client = makeTgClient(sessionString, apiId, apiHash, proxy, deviceParams);
   try {
     await client.connect();
-    const { computeCheck } = await import("telegram/Password");
-    const pwd = await client.invoke(new Api.account.GetPassword());
-    const srp = await computeCheck(pwd, currentPassword);
-    const settings = await client.invoke(
-      new Api.account.GetPasswordSettings({ password: srp }),
+    // GramJS bug: EntityCache.add treats any response with a numeric `length`
+    // field as array-like, and account.SentEmailCode has one (the code length),
+    // so invoke() crashes with "entities is not iterable" after a successful RPC.
+    // The response carries no entities, so disable caching on this throwaway client.
+    (client as unknown as { _entityCache: { add: (e: unknown) => void } })
+      ._entityCache.add = () => undefined;
+    const sent = await client.invoke(
+      new Api.account.SendVerifyEmailCode({
+        purpose: new Api.EmailVerifyPurposeLoginChange(),
+        email,
+      }),
     );
-    return { email: settings.email || null };
+    return { emailPattern: sent.emailPattern, codeLength: sent.length };
   } finally {
     await client.disconnect().catch(() => undefined);
   }
 }
 
-export type UpdateRecoveryEmailResult =
-  | { pendingConfirmation: false }
-  | { pendingConfirmation: true; codeLength: number };
-
-/** Set, change (newEmail = string), or remove (newEmail = null) the recovery email. */
-export async function updateRecoveryEmail(
-  apiId: number,
-  apiHash: string,
-  sessionString: string,
-  opts: { currentPassword: string; newEmail: string | null },
-  proxy?: TgProxy,
-  deviceParams?: TgDeviceParams,
-): Promise<UpdateRecoveryEmailResult> {
-  const client = makeTgClient(sessionString, apiId, apiHash, proxy, deviceParams);
-  try {
-    await client.connect();
-    const { computeCheck } = await import("telegram/Password");
-    const pwd = await client.invoke(new Api.account.GetPassword());
-    const srp = await computeCheck(pwd, opts.currentPassword);
-    try {
-      await client.invoke(
-        new Api.account.UpdatePasswordSettings({
-          password: srp,
-          newSettings: new Api.account.PasswordInputSettings({
-            // Pass empty string to clear, non-empty to set, undefined to leave unchanged
-            email: opts.newEmail === null ? "" : opts.newEmail,
-          }),
-        }),
-      );
-      return { pendingConfirmation: false };
-    } catch (e) {
-      if (e instanceof errors.EmailUnconfirmedError) {
-        return { pendingConfirmation: true, codeLength: e.codeLength };
-      }
-      throw e;
-    }
-  } finally {
-    await client.disconnect().catch(() => undefined);
-  }
-}
-
-export async function confirmRecoveryEmail(
+/** Verify the code sent by sendLoginEmailCode, committing the new login email. */
+export async function verifyLoginEmail(
   apiId: number,
   apiHash: string,
   sessionString: string,
   code: string,
   proxy?: TgProxy,
   deviceParams?: TgDeviceParams,
-): Promise<void> {
+): Promise<{ email: string | null }> {
   const client = makeTgClient(sessionString, apiId, apiHash, proxy, deviceParams);
   try {
     await client.connect();
-    await client.invoke(new Api.account.ConfirmPasswordEmail({ code }));
-  } finally {
-    await client.disconnect().catch(() => undefined);
-  }
-}
-
-export async function cancelRecoveryEmail(
-  apiId: number,
-  apiHash: string,
-  sessionString: string,
-  proxy?: TgProxy,
-  deviceParams?: TgDeviceParams,
-): Promise<void> {
-  const client = makeTgClient(sessionString, apiId, apiHash, proxy, deviceParams);
-  try {
-    await client.connect();
-    await client.invoke(new Api.account.CancelPasswordEmail());
-  } finally {
-    await client.disconnect().catch(() => undefined);
-  }
-}
-
-export async function resendRecoveryEmail(
-  apiId: number,
-  apiHash: string,
-  sessionString: string,
-  proxy?: TgProxy,
-  deviceParams?: TgDeviceParams,
-): Promise<void> {
-  const client = makeTgClient(sessionString, apiId, apiHash, proxy, deviceParams);
-  try {
-    await client.connect();
-    await client.invoke(new Api.account.ResendPasswordEmail());
+    const verified = await client.invoke(
+      new Api.account.VerifyEmail({
+        purpose: new Api.EmailVerifyPurposeLoginChange(),
+        verification: new Api.EmailVerificationCode({ code }),
+      }),
+    );
+    return { email: "email" in verified ? (verified.email ?? null) : null };
   } finally {
     await client.disconnect().catch(() => undefined);
   }

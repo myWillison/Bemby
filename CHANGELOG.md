@@ -4,6 +4,52 @@ All notable changes to Bemby are documented here.
 
 ---
 
+## v0.9.29
+
+### 中文
+
+**安全**
+- **修复 WebSocket 鉴权绕过（严重）** -- 消息 WebSocket 此前只校验令牌签名，未校验令牌类型，导致公开的验证码令牌（由无需登录的 /api/auth/captcha 签发，使用同一密钥）可用于连接并读取任意账号的实时 Telegram 消息流；现 WebSocket 与 HTTP 接口共用同一套会话令牌校验，并同样强制"必须修改默认密码"
+- **拒绝使用默认 JWT 密钥启动（严重）** -- 应用启动时若 JWT_SECRET 为空或仍为公开的占位默认值（如 change-me-in-production）将直接退出；docker-compose 与 env.example 不再提供可用的默认密钥，请用 `openssl rand -hex 32` 生成后设置（升级须知：未设置 JWT_SECRET 的部署需补上该变量方可启动）
+- **新增安全响应头与统一错误处理** -- 增加 X-Frame-Options、X-Content-Type-Options、Referrer-Policy、CSP frame-ancestors 及生产环境 HSTS；新增全局错误处理，生产环境不再向客户端泄露堆栈信息（镜像已设置 NODE_ENV=production）
+- **容器以非 root 用户运行** -- 通过 su-exec 入口脚本在修正数据目录属主后降权至 node 用户，绑定挂载的现有部署无需手动调整
+- **导出加密覆盖更多凭据** -- 当任务/模板配置中含 Emby 用户名或密码时，导出强制加密；账号导出在仅有 API Hash（无会话字符串）时也强制加密
+- **其他加固** -- 隐藏遗留的 ai_api_key 设置，不再返回给前端；对自动抢注日志中来自机器人消息的内容进行 HTML 转义；为验证码令牌校验固定 HS256 算法
+
+**调度与任务**
+- **任务错峰调度** -- 多个任务随机到同一分钟执行会因高并发导致卡顿甚至失败（#10）；现调度器会自动错开各任务的运行时间，保证彼此至少间隔可配置的分钟数（设置 → 任务错峰，默认 2 分钟，0 表示关闭）；窗口过窄无法满足间隔时自动退化为尽量分散且不重复同一分钟
+- **任务并发上限** -- 同一时刻最多并发执行 2 个任务，超出的任务自动排队依次执行，避免偶发的同时触发造成拥塞
+- **修复手动运行未回退全局 TG API 凭据** -- 依赖全局默认 API 凭据的账号此前只有定时任务能正常运行，「立即运行」会因缺少凭据而失败；现手动运行与调度器行为一致，无可用凭据时返回明确错误提示（采纳自 #9）
+- **API 凭据按整对解析** -- 账号凭据不完整（只填了 API ID 或只填了 Hash）时，此前可能将账号字段与全局默认值混搭导致认证失败；现凭据整对解析：账号凭据完整时用账号的，否则整体使用全局默认（采纳自 #9）
+- **日志查询加固与索引** -- 日志列表接口校验 jobId 并将分页上限固定为 200；为 jobs 和 job_logs 新增数据库索引，日志量大时列表页更快；移除未使用的 miniapp 代理路由（采纳自 #9）
+- **界面调整** -- 任务类型「自动注册」更名为「抢注」；设置页中「通用设置」与「Emby 观看默认值」卡片位置互换，常用设置更靠前
+
+**构建 / 发布**
+- **镜像同步发布至 GHCR** -- 发布流程在推送 Docker Hub 的同时，将同一多架构镜像（amd64/arm64）推送到 GitHub 容器仓库 `ghcr.io/liveinaus/bemby`，版本标签与频道别名（latest/beta/dev）保持一致；使用内置 `GITHUB_TOKEN` 鉴权，无需额外密钥
+
+### English
+
+**Security**
+- **Fix WebSocket authentication bypass (critical)** -- the messenger WebSocket previously verified only the token signature, not its type, so the public captcha token (minted by the unauthenticated /api/auth/captcha with the same secret) could be used to connect and read any account's live Telegram message stream; the WebSocket now shares the same session-token validation as the HTTP API and enforces the default-password-change gate
+- **Refuse to boot with a default JWT secret (critical)** -- the app now exits at startup if JWT_SECRET is empty or left at a publicly known placeholder (e.g. change-me-in-production); docker-compose and env.example no longer ship a usable default. Generate one with `openssl rand -hex 32` (upgrade note: deployments that never set JWT_SECRET must add it before the app will start)
+- **Add security response headers and a non-leaking error handler** -- X-Frame-Options, X-Content-Type-Options, Referrer-Policy, a CSP frame-ancestors directive, and HSTS in production; a global error handler now hides stack traces from clients in production (the image sets NODE_ENV=production)
+- **Run the container as a non-root user** -- an su-exec entrypoint fixes data-dir ownership as root then drops to the node user; existing bind-mount deployments need no manual change
+- **Export encryption covers more credentials** -- exports are forced to encrypt when a job/template config embeds an Emby username or password, and the account export now forces encryption when an API hash is present even without a session string
+- **Other hardening** -- the legacy ai_api_key setting is no longer returned to the client; bot-message-derived content in auto-registration logs is HTML-escaped before rendering; the captcha token verification pins the HS256 algorithm
+
+**Scheduling & jobs**
+- **Staggered job scheduling** -- jobs randomly landing on the same minute ran concurrently and often lagged or failed (#10); the scheduler now spaces jobs at least a configurable number of minutes apart (Settings → Job Staggering, default 2 minutes, 0 disables); when a window is too narrow to honour the gap it degrades gracefully, spreading jobs out without doubling up a minute
+- **Job concurrency cap** -- at most 2 jobs execute simultaneously; any extras queue and run in turn, so coincidental overlaps no longer thunder the client
+- **Fix manual runs not falling back to global TG API credentials** -- accounts relying on the global default credentials previously only worked on the schedule; "Run now" failed for lack of credentials. Manual runs now resolve credentials the same way the scheduler does, with a clear error when none are available (adopted from #9)
+- **API credentials resolve as a pair** -- an incomplete account pair (only API ID or only Hash) could previously be mixed with global defaults, producing a mismatched pair that fails authentication; credentials now resolve atomically: the account's own pair when complete, otherwise the global pair (adopted from #9)
+- **Log query hardening and indexes** -- the log list endpoint validates jobId and caps page size at 200; new database indexes on jobs and job_logs keep the log pages fast as history grows; removed the unused miniapp proxy route (adopted from #9)
+- **UI tweaks** -- the auto-registration job type's Chinese label is renamed from 自动注册 to 抢注; the General Settings and Emby Watch Defaults cards on the Settings page swapped positions so the more commonly used settings appear first
+
+**Build / release**
+- **Images also published to GHCR** -- the release workflow now pushes the same multi-arch image (amd64/arm64) to the GitHub Container Registry `ghcr.io/liveinaus/bemby` alongside Docker Hub, with matching version tags and channel aliases (latest/beta/dev); it authenticates with the built-in `GITHUB_TOKEN`, so no extra secret is required
+
+---
+
 ## v0.9.28-patch-1
 
 ### 中文

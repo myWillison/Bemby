@@ -123,4 +123,98 @@ describe("pickNextRun", () => {
     expect(min).toBeGreaterThanOrEqual(10 * 60);
     expect(min).toBeLessThan(12 * 60);
   });
+
+  // --- conflict avoidance ---
+
+  const utcMillis = (time: string) =>
+    new Date(`${BASE_DATE}T${time}Z`).getTime();
+
+  it("stays at least the gap away from every occupied slot", () => {
+    setNow("08:00:00");
+    const occupied = ["10:30:00", "11:00:00", "11:30:00"].map(utcMillis);
+
+    for (let i = 0; i < 50; i++) {
+      const result = pickNextRun(1000, 1200, TZ, 0, {
+        occupied,
+        gapMinutes: 5,
+      });
+      const min = result.hour * 60 + result.minute;
+
+      expect(min).toBeGreaterThanOrEqual(10 * 60);
+      expect(min).toBeLessThan(12 * 60);
+      for (const slot of occupied) {
+        expect(Math.abs(result.toMillis() - slot)).toBeGreaterThanOrEqual(
+          5 * 60_000,
+        );
+      }
+    }
+  });
+
+  it("ignores occupied slots when the gap is 0", () => {
+    setNow("08:00:00");
+    vi.spyOn(Math, "random").mockReturnValue(0); // always picks window start
+    const occupied = [utcMillis("10:00:00")];
+
+    const result = pickNextRun(1000, 1200, TZ, 0, { occupied, gapMinutes: 0 });
+
+    expect(result.toMillis()).toBe(occupied[0]); // collision allowed
+    vi.restoreAllMocks();
+  });
+
+  it("falls back to the clearest minute when the gap cannot be satisfied", () => {
+    setNow("08:00:00");
+    // 3-minute window with a slot at its start; a 10-minute gap is impossible
+    const occupied = [utcMillis("10:00:00")];
+
+    const result = pickNextRun(1000, 1003, TZ, 0, {
+      occupied,
+      gapMinutes: 10,
+    });
+
+    // 10:02 is the in-window minute furthest from 10:00
+    expect(result.toFormat("HH:mm")).toBe("10:02");
+  });
+
+  it("still returns an in-window time when every minute is occupied", () => {
+    setNow("08:00:00");
+    const occupied = ["10:00:00", "10:01:00", "10:02:00"].map(utcMillis);
+
+    const result = pickNextRun(1000, 1003, TZ, 0, { occupied, gapMinutes: 2 });
+    const min = result.hour * 60 + result.minute;
+
+    expect(min).toBeGreaterThanOrEqual(600);
+    expect(min).toBeLessThan(603);
+  });
+
+  it("compares occupied slots in absolute time across timezones", () => {
+    setNow("08:00:00");
+    // Window 18:00–19:00 in Shanghai is 10:00–11:00 UTC; the slot is 10:30 UTC
+    const occupied = [utcMillis("10:30:00")];
+
+    for (let i = 0; i < 50; i++) {
+      const result = pickNextRun(1800, 1900, "Asia/Shanghai", 0, {
+        occupied,
+        gapMinutes: 5,
+      });
+      expect(Math.abs(result.toMillis() - occupied[0])).toBeGreaterThanOrEqual(
+        5 * 60_000,
+      );
+    }
+  });
+
+  it("applies avoidance when scheduling for a future day", () => {
+    setNow("13:00:00"); // past today's window — rolls to tomorrow
+    const slot = new Date("2024-01-16T10:30:00Z").getTime();
+
+    for (let i = 0; i < 50; i++) {
+      const result = pickNextRun(1000, 1200, TZ, 0, {
+        occupied: [slot],
+        gapMinutes: 5,
+      });
+      expect(result.toFormat("yyyy-MM-dd")).toBe("2024-01-16");
+      expect(Math.abs(result.toMillis() - slot)).toBeGreaterThanOrEqual(
+        5 * 60_000,
+      );
+    }
+  });
 });

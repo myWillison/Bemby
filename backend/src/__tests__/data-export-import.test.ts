@@ -290,6 +290,26 @@ describe('exportRequiresEncryption -- forces encryption for any credential', () 
   it('is true when settings contain proxies', () => {
     expect(exportRequiresEncryption({ ...base, settings: { proxies: 'socks5://u:p@host:1080' } })).toBe(true);
   });
+
+  it('is true when a job config embeds an Emby password (regression: was plaintext)', () => {
+    const jobs = [{ config: JSON.stringify({ username: 'u', password: 'p' }) }] as ExportPayload['jobs'];
+    expect(exportRequiresEncryption({ ...base, jobs })).toBe(true);
+  });
+
+  it('is true when a template config embeds credentials', () => {
+    const templates = [{ config: JSON.stringify({ username: 'u', password: 'p' }) }] as ExportPayload['templates'];
+    expect(exportRequiresEncryption({ ...base, templates })).toBe(true);
+  });
+
+  it('is false for a job config with no credential fields', () => {
+    const jobs = [{ config: JSON.stringify({ markWatched: true }) }] as ExportPayload['jobs'];
+    expect(exportRequiresEncryption({ ...base, jobs })).toBe(false);
+  });
+
+  it('is false for a null or malformed job config', () => {
+    const jobs = [{ config: null }, { config: 'not json' }] as ExportPayload['jobs'];
+    expect(exportRequiresEncryption({ ...base, jobs })).toBe(false);
+  });
 });
 
 describe('export excludes instance-local secrets', () => {

@@ -164,9 +164,10 @@
               <option value="checkin">Check-in (签到)</option>
               <option value="embywatch">Emby Watch (观看)</option>
               <option value="custom">Custom (自定义)</option>
+              <option value="autoreg">Auto Registration (抢注)</option>
             </select>
           </div>
-          <div v-if="form.templateId && (form.jobType === 'checkin' || form.jobType === 'custom')" class="form-group">
+          <div v-if="form.templateId && (form.jobType === 'checkin' || form.jobType === 'custom' || form.jobType === 'autoreg')" class="form-group">
             <label class="form-label">{{ t('jobs.labelAccount') }} <span style="color:#e63946">*</span></label>
             <select v-model="form.accountId" class="form-select">
               <option :value="null" disabled>{{ t('jobs.selectAccount') }}</option>
@@ -564,6 +565,94 @@
           </div>
         </template>
 
+        <!-- Auto registration (hidden when template controls it) -->
+        <template v-if="form.jobType === 'autoreg' && !form.templateId">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">{{ t('jobs.labelAccount') }} <span style="color:#e63946">*</span></label>
+              <select v-model="form.accountId" class="form-select">
+                <option :value="null" disabled>{{ t('jobs.selectAccount') }}</option>
+                <option v-for="a in accounts" :key="a.id" :value="a.id">{{ formatAccountLabel(a) }}</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">{{ t('jobs.autoreg.labelBot') }} <span style="color:#e63946">*</span></label>
+              <input v-model.trim="form.botUsername" class="form-input" placeholder="SomeBotUsername" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">{{ t('jobs.autoreg.labelGroup') }} <span style="color:#e63946">*</span></label>
+            <input v-model.trim="autoregCfg.groupId" class="form-input" placeholder="@groupname" />
+            <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.autoreg.groupHint') }}</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">{{ t('jobs.autoreg.labelCodePrefix') }} <span style="color:#e63946">*</span></label>
+            <input v-model.trim="autoregCfg.codePrefix" class="form-input" placeholder="ABC-*-XYZ_" />
+            <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.autoreg.codePrefixHint') }}</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">{{ t('jobs.autoreg.labelEntryMode') }}</label>
+            <select v-model="autoregCfg.entryMode" class="form-select">
+              <option value="button">{{ t('jobs.autoreg.entryModeButton') }}</option>
+              <option value="command">{{ t('jobs.autoreg.entryModeCommand') }}</option>
+            </select>
+            <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.autoreg.entryModeHint') }}</div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">{{ t('jobs.labelStartCommand') }}</label>
+              <select v-model="cmdDropdown" class="form-select">
+                <option value="">({{ t('common.default') }}: /start)</option>
+                <option value="/start">/start</option>
+                <option value="custom">{{ t('common.custom') }}...</option>
+              </select>
+              <input v-if="cmdDropdown === 'custom'" v-model.trim="cmdCustom" class="form-input" style="margin-top:6px" placeholder="/mycommand" />
+            </div>
+            <div v-if="autoregCfg.entryMode === 'button'" class="form-group">
+              <label class="form-label">{{ t('jobs.autoreg.labelRegisterButton') }}</label>
+              <input v-model.trim="autoregCfg.registerButton" class="form-input" :placeholder="t('jobs.autoreg.registerButtonPlaceholder')" />
+              <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.autoreg.registerButtonHint') }}</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">{{ t('jobs.autoreg.labelSignupUsername') }} <span style="color:#e63946">*</span></label>
+            <input v-model.trim="autoregCfg.signupUsername" class="form-input" placeholder="myname{num:3}" />
+            <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.autoreg.signupUsernameHint') }}</div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">{{ t('jobs.autoreg.labelListenMinutes') }}</label>
+              <input v-model.number="autoregCfg.listenMinutes" class="form-input" type="number" min="1" max="1440" />
+              <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.autoreg.listenMinutesHint') }}</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">{{ t('jobs.autoreg.labelScanHistory') }}</label>
+              <input v-model.number="autoregCfg.scanHistoryCount" class="form-input" type="number" min="0" max="100" />
+              <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.autoreg.scanHistoryHint') }}</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">{{ t('jobs.labelSuccessContains') }}</label>
+            <input v-model.trim="autoregCfg.successContains" class="form-input" :placeholder="t('jobs.autoreg.successContainsPlaceholder')" />
+            <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.autoreg.successContainsHint') }}</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">{{ t('jobs.labelFailContains') }}</label>
+            <input v-model.trim="autoregCfg.failContains" class="form-input" :placeholder="t('jobs.autoreg.failContainsPlaceholder')" />
+            <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.autoreg.failContainsHint') }}</div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">{{ t('jobs.labelReplyTimeout') }}</label>
+              <input v-model.number="form.replyTimeoutMs" class="form-input" type="number" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">{{ t('jobs.labelMaxRetries') }}</label>
+              <input v-model.number="form.retryMax" class="form-input" type="number" min="1" max="10" />
+            </div>
+          </div>
+        </template>
+
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">{{ t('jobs.labelWindowStart') }}</label>
@@ -787,7 +876,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
-import { jobsApi, accountsApi, statusApi, settingsApi, logsApi, templatesApi, type Job, type JobTemplate, type Account, type ScheduleStatus, type Settings, type UAPreset, type EmbywatchConfig, type CustomConfig } from '../api/client';
+import { jobsApi, accountsApi, statusApi, settingsApi, logsApi, templatesApi, type Job, type JobTemplate, type Account, type ScheduleStatus, type Settings, type UAPreset, type EmbywatchConfig, type CustomConfig, type AutoregConfig } from '../api/client';
 import { t, locale } from '../i18n';
 import { usePersistedRef } from '../composables/usePersistedRef';
 import { formatAccountLabel, loadAccountDisplaySetting } from '../composables/accountDisplay';
@@ -838,6 +927,7 @@ const filterOptions = computed(() => [
   { value: 'checkin', label: t('logs.jobType.checkin') },
   { value: 'embywatch', label: t('logs.jobType.embywatch') },
   { value: 'custom', label: t('logs.jobType.custom') },
+  { value: 'autoreg', label: t('logs.jobType.autoreg') },
 ]);
 const botUrlTplOptions = computed(() => {
   const botVals = [...new Set(jobs.value.map(j => j.botUsername).filter(Boolean))].sort().map(v => ({ value: `bot:${v}`, label: v }));
@@ -911,6 +1001,7 @@ function jobTypeBadge(type: string) {
     checkin: 'badge badge-blue',
     embywatch: 'badge badge-purple',
     custom: 'badge badge-amber',
+    autoreg: 'badge badge-red',
   };
   return map[type] ?? 'badge badge-grey';
 }
@@ -924,7 +1015,7 @@ const customJobMaxRetries = ref(1);
 const form = reactive({
   name: '',
   accountId: null as number | null,
-  jobType: 'checkin' as 'checkin' | 'embywatch' | 'custom',
+  jobType: 'checkin' as 'checkin' | 'embywatch' | 'custom' | 'autoreg',
   botUsername: '',
   scheduleWindowStart: 1000,
   scheduleWindowEnd: 2200,
@@ -956,6 +1047,31 @@ const embyServer = reactive<{ protocol: 'https' | 'http'; host: string; port: nu
   host: '',
   port: 443,
 });
+type AutoregCfgForm = {
+  groupId: string;
+  codePrefix: string;
+  entryMode: 'button' | 'command';
+  registerButton: string;
+  signupUsername: string;
+  listenMinutes: number;
+  scanHistoryCount: number;
+  successContains: string;
+  failContains: string;
+};
+function defaultAutoregCfg(): AutoregCfgForm {
+  return {
+    groupId: '',
+    codePrefix: '',
+    entryMode: 'button',
+    registerButton: '',
+    signupUsername: '',
+    listenMinutes: 30,
+    scanHistoryCount: 0,
+    successContains: '',
+    failContains: '',
+  };
+}
+const autoregCfg = reactive<AutoregCfgForm>(defaultAutoregCfg());
 const formError = ref('');
 const saving = ref(false);
 const aiKeyMissing = computed(() => !settings.value?.ai_api_key);
@@ -1004,11 +1120,12 @@ function onJobTypeChange() {
   Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '', markWatched: true, verifyPlayable: true });
   Object.assign(embyServer, { protocol: 'https', host: '', port: 443 });
   embyUaDropdown.value = '';
-  form.accountId = (form.jobType === 'checkin' || form.jobType === 'custom')
+  form.accountId = (form.jobType === 'checkin' || form.jobType === 'custom' || form.jobType === 'autoreg')
     ? (accounts.value[0]?.id ?? null)
     : null;
   form.runEveryDays = 1;
   customActions.value = [];
+  Object.assign(autoregCfg, defaultAutoregCfg());
   customJobMaxRetries.value = 1;
   btnAiHint.value = '';
   checkinSuccessContains.value = '';
@@ -1125,6 +1242,28 @@ function applyTemplate(tpl: JobTemplate) {
         });
       } catch { customActions.value = []; customJobMaxRetries.value = 1; }
     }
+  } else if (tpl.jobType === 'autoreg') {
+    Object.assign(embyServer, { protocol: 'https', host: '', port: 443 });
+    Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '', markWatched: true, verifyPlayable: true });
+    customActions.value = [];
+    Object.assign(autoregCfg, defaultAutoregCfg());
+    if (tpl.config) {
+      try {
+        let c = JSON.parse(tpl.config) as AutoregConfig | string;
+        if (typeof c === 'string') c = JSON.parse(c) as AutoregConfig;
+        Object.assign(autoregCfg, {
+          groupId: c.groupId ?? '',
+          codePrefix: c.codePrefix ?? '',
+          registerButton: c.registerButton ?? '',
+          signupUsername: c.signupUsername ?? '',
+          listenMinutes: c.listenMinutes ?? 30,
+          scanHistoryCount: c.scanHistoryCount ?? 0,
+          entryMode: c.entryMode === 'command' ? 'command' : 'button',
+          successContains: c.successContains ?? '',
+          failContains: c.failContains ?? '',
+        });
+      } catch { /* ignore */ }
+    }
   } else {
     Object.assign(embyServer, { protocol: 'https', host: '', port: 443 });
     Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '', markWatched: true, verifyPlayable: true });
@@ -1178,6 +1317,7 @@ function openAdd() {
   Object.assign(embyServer, { protocol: 'https', host: '', port: 443 });
   embyUaDropdown.value = '';
   customActions.value = [];
+  Object.assign(autoregCfg, defaultAutoregCfg());
   checkinSuccessContains.value = '';
   checkinFailContains.value = '';
   setCmdState(''); setBtnState('');
@@ -1298,6 +1438,28 @@ function openEdit(j: Job) {
       customActions.value = [];
       customJobMaxRetries.value = 1;
     }
+  } else if (j.jobType === 'autoreg') {
+    Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '', markWatched: true, verifyPlayable: true });
+    Object.assign(embyServer, { protocol: 'https', host: '', port: 443 });
+    customActions.value = [];
+    Object.assign(autoregCfg, defaultAutoregCfg());
+    if (j.config) {
+      try {
+        let c = JSON.parse(j.config) as AutoregConfig | string;
+        if (typeof c === 'string') c = JSON.parse(c) as AutoregConfig;
+        Object.assign(autoregCfg, {
+          groupId: c.groupId ?? '',
+          codePrefix: c.codePrefix ?? '',
+          registerButton: c.registerButton ?? '',
+          signupUsername: c.signupUsername ?? '',
+          listenMinutes: c.listenMinutes ?? 30,
+          scanHistoryCount: c.scanHistoryCount ?? 0,
+          entryMode: c.entryMode === 'command' ? 'command' : 'button',
+          successContains: c.successContains ?? '',
+          failContains: c.failContains ?? '',
+        });
+      } catch { /* ignore */ }
+    }
   } else {
     Object.assign(embyCfg, { username: '', password: '', playDuration: '', userAgent: '', markWatched: true, verifyPlayable: true });
     Object.assign(embyServer, { protocol: 'https', host: '', port: 443 });
@@ -1328,7 +1490,23 @@ function handleEmbyHostPaste(event: ClipboardEvent) {
   if (portStr) embyServer.port = Number(portStr);
 }
 
-function buildConfig(): EmbywatchConfig | CustomConfig | Record<string, string> | null {
+function buildConfig(): EmbywatchConfig | CustomConfig | AutoregConfig | Record<string, string> | null {
+  if (form.jobType === 'autoreg') {
+    // Template-linked jobs take their whole config from the template
+    if (form.templateId) return null;
+    const cfg: AutoregConfig = {
+      groupId: autoregCfg.groupId,
+      codePrefix: autoregCfg.codePrefix,
+      signupUsername: autoregCfg.signupUsername,
+    };
+    if (autoregCfg.entryMode === 'command') cfg.entryMode = 'command';
+    else if (autoregCfg.registerButton.trim()) cfg.registerButton = autoregCfg.registerButton.trim();
+    if (autoregCfg.listenMinutes > 0 && autoregCfg.listenMinutes !== 30) cfg.listenMinutes = autoregCfg.listenMinutes;
+    if (autoregCfg.scanHistoryCount > 0) cfg.scanHistoryCount = autoregCfg.scanHistoryCount;
+    if (autoregCfg.successContains.trim()) cfg.successContains = autoregCfg.successContains.trim();
+    if (autoregCfg.failContains.trim()) cfg.failContains = autoregCfg.failContains.trim();
+    return cfg;
+  }
   if (form.jobType === 'embywatch') {
     if (form.templateId) {
       // Template provides all settings; job only stores credentials
@@ -1420,10 +1598,16 @@ function buildConfig(): EmbywatchConfig | CustomConfig | Record<string, string> 
 async function saveJob() {
   formError.value = '';
   if (!form.name) { formError.value = t('jobs.errors.nameRequired'); return; }
-  if ((form.jobType === 'checkin' || form.jobType === 'custom') && !form.accountId) { formError.value = t('jobs.errors.accountRequired'); return; }
+  if ((form.jobType === 'checkin' || form.jobType === 'custom' || form.jobType === 'autoreg') && !form.accountId) { formError.value = t('jobs.errors.accountRequired'); return; }
   if (form.jobType === 'custom') {
     if (!form.botUsername) { formError.value = t('jobs.errors.botRequired'); return; }
     if (customActions.value.length === 0) { formError.value = t('jobs.errors.customActionsRequired'); return; }
+  }
+  if (form.jobType === 'autoreg' && !form.templateId) {
+    if (!form.botUsername) { formError.value = t('jobs.errors.botRequired'); return; }
+    if (!autoregCfg.groupId) { formError.value = t('jobs.errors.autoregGroupRequired'); return; }
+    if (!autoregCfg.codePrefix) { formError.value = t('jobs.errors.autoregPrefixRequired'); return; }
+    if (!autoregCfg.signupUsername) { formError.value = t('jobs.errors.autoregUsernameRequired'); return; }
   }
   if (form.jobType === 'embywatch') {
     if (!embyServer.host) { formError.value = t('jobs.errors.hostRequired'); return; }
@@ -1432,13 +1616,36 @@ async function saveJob() {
     form.botUsername = `${embyServer.protocol}://${embyServer.host.replace(/^https?:\/\//, '')}${portPart}`;
   }
   if (!form.botUsername) { formError.value = t('jobs.errors.botRequired'); return; }
-  if (form.jobType === 'checkin') form.botUsername = form.botUsername.replace(/^@+/, '');
+  if (form.jobType === 'checkin' || form.jobType === 'autoreg') form.botUsername = form.botUsername.replace(/^@+/, '');
   if (form.jobType === 'embywatch' && (!embyCfg.username || !embyCfg.password)) {
     formError.value = t('jobs.errors.embyCredRequired');
     return;
   }
   saving.value = true;
   try {
+    // Verify server reachability and credentials before saving the job
+    if (form.jobType === 'embywatch') {
+      let proxyId: string | undefined;
+      let userAgent: string | undefined = embyCfg.userAgent || undefined;
+      if (form.templateId && linkedTemplate.value?.config) {
+        try {
+          const c = JSON.parse(linkedTemplate.value.config) as { proxyId?: string; userAgent?: string };
+          proxyId = c.proxyId;
+          userAgent = c.userAgent || undefined;
+        } catch { /* ignore bad template config */ }
+      }
+      const test = await jobsApi.testEmby({
+        serverUrl: form.botUsername,
+        username: embyCfg.username,
+        password: embyCfg.password,
+        ...(userAgent ? { userAgent } : {}),
+        ...(proxyId ? { proxyId } : {}),
+      });
+      if (!test.ok) {
+        formError.value = `${t('jobs.errors.embyVerifyFailed')}${test.error ? `: ${test.error}` : ''}`;
+        return;
+      }
+    }
     const rawCfg = buildConfig();
     const startCommand = (cmdDropdown.value === 'custom' ? cmdCustom.value : cmdDropdown.value) || undefined;
     const resolvedAiBtn = btnAiHint.value.trim() ? `{aiBtn:${btnAiHint.value.trim()}}` : '{aiBtn}';

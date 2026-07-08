@@ -4,7 +4,7 @@ export type AuthStatus =
   | "pending_2fa"
   | "authenticated"
   | "session_expired";
-export type JobType = "checkin" | "embywatch" | "custom";
+export type JobType = "checkin" | "embywatch" | "custom" | "autoreg";
 export type LogStatus = "success" | "failed" | "running";
 
 export type TgAppClient = {
@@ -137,6 +137,28 @@ export type CustomConfig = {
 
 export type CheckinConfig = {
   successContains?: string;
+  failContains?: string;
+  proxyId?: string;
+};
+
+export type AutoregConfig = {
+  /** Group to watch for registration codes: @username or t.me invite link */
+  groupId: string;
+  /** Line prefix identifying a registration code, e.g. ABC-30-Register_ */
+  codePrefix: string;
+  /** Button on the bot's start reply that opens registration (partial match). Blank clicks the sole button. */
+  registerButton?: string;
+  /** Username sent to finish signup; supports {word:N} {num:N} {alpha:N} {uuid} placeholders */
+  signupUsername: string;
+  /** How long to keep listening for codes before giving up, in minutes. Default 30. */
+  listenMinutes?: number;
+  /** Recent group messages scanned for codes at startup. Default 0 (live only). */
+  scanHistoryCount?: number;
+  /** How a code reaches the bot: "button" sends the start command and clicks the register button first; "command" appends the code to the start command (e.g. /start CODE). Default "button". */
+  entryMode?: "button" | "command";
+  /** Reply text marking a code as accepted; blank treats any non-fail reply as accepted. Multiple keywords separated by | */
+  successContains?: string;
+  /** Reply text marking a code as used/invalid, e.g. 已被使用|错误. Multiple keywords separated by | */
   failContains?: string;
   proxyId?: string;
 };

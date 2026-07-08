@@ -829,6 +829,8 @@
               HHMM 格式，如 <code>1400</code> 表示
               14:00）之间随机一个时间点运行一次。
               若当前时间已在窗口内，则在剩余窗口时间内调度；若窗口已过，则安排在次日执行。
+              多个任务会自动错峰，彼此至少间隔设置中「任务错峰」配置的分钟数（默认
+              2 分钟），避免在同一分钟并发执行。
             </p>
             <p class="help-note">
               在设置中关闭<em>每天仅运行一次</em>，可让调度器对今天已运行过的任务重新触发，便于测试。
@@ -1184,7 +1186,9 @@
               <code>1400</code> = 2:00 pm). If the current time is already
               inside the window, the job is scheduled within the remaining
               window time today. If the window has passed, it is scheduled for
-              tomorrow.
+              tomorrow. Jobs are automatically staggered at least the number of
+              minutes configured under <em>Job Staggering</em> in Settings
+              (default 2) so they never run in the same minute.
             </p>
             <p class="help-note">
               Disable <em>Enforce one run per day</em> in Settings to allow the
@@ -1424,6 +1428,14 @@
                   <td>防止任务在 24 小时内重复运行。测试时可关闭。</td>
                 </tr>
                 <tr>
+                  <td>任务错峰</td>
+                  <td>
+                    各任务执行时间自动错开的最小间隔分钟数（0–30，默认
+                    2），0 表示关闭；已排定的任务在下次调度时生效。同一时刻最多并发执行
+                    2 个任务，超出的任务自动排队依次执行。
+                  </td>
+                </tr>
+                <tr>
                   <td>默认播放时长</td>
                   <td>未在任务中单独设置时，Emby 观看会话的默认时长（秒）。</td>
                 </tr>
@@ -1528,6 +1540,16 @@
                   <td>
                     Prevents a job from running more than once in a 24-hour
                     period. Disable during testing.
+                  </td>
+                </tr>
+                <tr>
+                  <td>Job Staggering</td>
+                  <td>
+                    Minimum minutes the scheduler keeps between different jobs'
+                    run times (0–30, default 2). 0 disables;
+                    already-scheduled jobs pick it up at their next scheduling.
+                    At most 2 jobs execute at once — extras queue and run in
+                    turn.
                   </td>
                 </tr>
                 <tr>

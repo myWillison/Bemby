@@ -335,6 +335,26 @@ router.get("/:accountId/messages/:chatId", async (req, res) => {
   }
 });
 
+// GET /:accountId/messages/:chatId/search?q=term&limit=30 -- server-side search
+// within one chat (Telegram messages.Search); never served from cache
+router.get("/:accountId/messages/:chatId/search", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  const q = String(req.query.q ?? "").trim();
+  const limit = Math.min(Number(req.query.limit ?? 30), 100);
+  if (!q) {
+    res.json([]);
+    return;
+  }
+  try {
+    const entry = await getLiveClient(accountId);
+    const msgs = await getMessages(entry, chatId, limit, 0, q);
+    res.json(msgs);
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
 // GET /:accountId/chats/:chatId/pinned -- fetch the pinned message for a group/channel
 router.get("/:accountId/chats/:chatId/pinned", async (req, res) => {
   const accountId = Number(req.params.accountId);
@@ -796,19 +816,63 @@ router.get("/:accountId/bot-commands/:chatId", async (req, res) => {
   }
 });
 
-// POST /:accountId/join/:chatId -- join a public channel or supergroup
+// True when the response headers allow embedding the page in an iframe from another origin
+function headersAllowFraming(headers: Headers): boolean {
+  const xfo = (headers.get("x-frame-options") ?? "").toLowerCase();
+  if (xfo.includes("deny") || xfo.includes("sameorigin")) return false;
+  const csp = headers.get("content-security-policy") ?? "";
+  const m = csp.match(/frame-ancestors([^;]*)/i);
+  // frame-ancestors listing anything but a wildcard will not include our origin
+  if (m && !m[1].trim().toLowerCase().split(/\s+/).includes("*")) return false;
+  return true;
+}
+
+// Probes a URL to check whether it can be shown in the messenger webview iframe
+async function isFrameable(url: string): Promise<boolean> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    let resp = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: ctrl.signal,
+    });
+    if (resp.status === 405 || resp.status === 501) {
+      resp = await fetch(url, { redirect: "follow", signal: ctrl.signal });
+      resp.body?.cancel().catch(() => {});
+    }
+    return headersAllowFraming(resp.headers);
+  } catch {
+    // Unreachable from the backend; let the browser iframe try anyway
+    return true;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // POST /:accountId/webview/resolve -- resolve a mini app URL to an authenticated web app URL
 router.post("/:accountId/webview/resolve", async (req, res) => {
   const accountId = Number(req.params.accountId);
-  const { url, botChatId } = req.body as { url: string; botChatId?: string };
+  const { url, botChatId, peerChatId } = req.body as {
+    url: string;
+    botChatId?: string;
+    peerChatId?: string;
+  };
   if (!url) {
     res.status(400).json({ error: "url required" });
     return;
   }
   try {
     const entry = await getLiveClient(accountId);
-    const webAppUrl = await resolveWebApp(entry, url, botChatId);
-    res.json({ webAppUrl });
+    const { url: webAppUrl, resolved } = await resolveWebApp(
+      entry,
+      url,
+      botChatId,
+      peerChatId,
+    );
+    // TG-issued webview URLs are made to be framed; probe only unresolved ones
+    const frameable = resolved || (await isFrameable(webAppUrl));
+    res.json({ webAppUrl, resolved, frameable });
   } catch (err: any) {
     tgError(err, accountId, res);
   }
@@ -827,6 +891,7 @@ router.get("/:accountId/membership/:chatId", async (req, res) => {
   }
 });
 
+// POST /:accountId/join/:chatId -- join a public channel or supergroup
 router.post("/:accountId/join/:chatId", async (req, res) => {
   const accountId = Number(req.params.accountId);
   const chatId = decodeURIComponent(req.params.chatId);

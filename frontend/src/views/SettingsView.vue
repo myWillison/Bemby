@@ -174,96 +174,152 @@
         </div>
       </div>
 
-      <!-- Emby defaults -->
+      <!-- General settings -->
       <div class="card s-col-6">
         <div class="card-body">
-          <div class="card-section-title">{{ t("settings.embyDefaults") }}</div>
+          <div class="card-section-title">
+            {{ t("settings.generalSection") }}
+          </div>
 
-          <div v-if="embyMsg" class="success-msg">{{ embyMsg }}</div>
-          <div v-if="embyError" class="error-msg">{{ embyError }}</div>
+          <!-- Telegram API credentials -->
+          <div class="settings-subsection">
+            {{ t("settings.defaultTgApiSection") }}
+          </div>
+          <p style="font-size: 12px; color: #888; margin: 0 0 14px">
+            {{ t("settings.defaultTgApiHint") }}
+          </p>
+
+          <div v-if="defaultTgApiMsg" class="success-msg">
+            {{ defaultTgApiMsg }}
+          </div>
+          <div v-if="defaultTgApiError" class="error-msg">
+            {{ defaultTgApiError }}
+          </div>
 
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">{{
-                t("settings.labelPlayDuration")
+                t("settings.labelDefaultTgApiId")
               }}</label>
               <input
-                v-model.number="form.default_play_duration"
+                v-model.number="defaultTgApiId"
                 class="form-input"
                 type="number"
-                min="30"
+                min="1"
+                placeholder="e.g. 1234567"
               />
             </div>
             <div class="form-group">
               <label class="form-label">{{
-                t("settings.labelDeviceName")
+                t("settings.labelDefaultTgApiHash")
               }}</label>
               <input
-                v-model.trim="form.default_device_name"
+                v-model.trim="defaultTgApiHashInput"
                 class="form-input"
-                placeholder="Mac"
+                :placeholder="
+                  defaultTgApiHashMasked
+                    ? t('settings.defaultTgApiHashPlaceholder')
+                    : t('settings.defaultTgApiHashNew')
+                "
+                style="font-family: monospace"
               />
+              <p
+                v-if="defaultTgApiHashMasked"
+                style="font-size: 11px; color: #888; margin: 4px 0 0"
+              >
+                {{ t("settings.defaultTgApiHashSet") }}
+                <code style="font-size: 11px">{{
+                  defaultTgApiHashMasked
+                }}</code>
+              </p>
             </div>
           </div>
 
+          <div style="display: flex; gap: 8px; flex-wrap: wrap">
+            <button
+              class="btn btn-primary"
+              :disabled="defaultTgApiSaving"
+              @click="saveDefaultTgApi"
+            >
+              <i class="fa-solid fa-floppy-disk"></i>
+              {{
+                defaultTgApiSaving ? t("common.saving") : t("settings.saveBtn")
+              }}
+            </button>
+            <button
+              v-if="defaultTgApiId || defaultTgApiHashMasked"
+              class="btn btn-ghost"
+              :disabled="defaultTgApiClearing"
+              @click="clearDefaultTgApi"
+            >
+              {{
+                defaultTgApiClearing
+                  ? t("settings.defaultTgApiClearing")
+                  : t("settings.defaultTgApiClear")
+              }}
+            </button>
+          </div>
+
+          <!-- TG account display -->
+          <div class="settings-subsection" style="margin-top: 28px">
+            {{ t("settings.accountDisplaySection") }}
+          </div>
           <div class="form-group">
-            <label class="form-label">{{ t("settings.labelUserAgent") }}</label>
-            <select v-model="form.default_ua" class="form-select">
-              <option value="">— {{ t("jobs.uaDefault") }} —</option>
-              <option v-for="p in uaPresets" :key="p.name" :value="p.value">
-                {{ p.name }}
-              </option>
-            </select>
+            <label class="form-check">
+              <input
+                type="checkbox"
+                v-model="accountDisplayWithTgName"
+                @change="saveAccountDisplay"
+              />
+              <span>{{ t("settings.accountDisplayToggle") }}</span>
+            </label>
+            <p style="font-size: 12px; color: #888; margin: 4px 0 0 24px">
+              {{ t("settings.accountDisplayHint") }}
+            </p>
           </div>
 
-          <div style="margin-bottom: 16px">
-            <div class="card-section-title" style="margin-bottom: 10px">
-              {{ t("settings.uaPresetsSection") }}
-            </div>
-            <div v-for="(p, i) in uaPresets" :key="i" class="ua-preset-row">
-              <span class="ua-preset-name">{{ p.name }}</span>
-              <span class="ua-preset-value">{{ p.value }}</span>
-              <button
-                class="btn btn-sm btn-ghost ua-preset-del"
-                :title="t('settings.uaPresetDeleteTip')"
-                @click="removeUaPreset(i)"
-              >
-                <i class="fa-solid fa-xmark"></i>
-              </button>
-            </div>
-            <div class="ua-preset-add">
-              <input
-                v-model.trim="newPresetName"
-                class="form-input"
-                style="flex: 0 0 140px"
-                :placeholder="t('settings.uaPresetName')"
-                @keyup.enter="addUaPreset"
-              />
-              <input
-                v-model.trim="newPresetValue"
-                class="form-input"
-                style="flex: 1; min-width: 0"
-                :placeholder="t('settings.uaPresetValue')"
-                @keyup.enter="addUaPreset"
-              />
-              <button
-                class="btn btn-ghost btn-sm"
-                :disabled="!newPresetName || !newPresetValue"
-                @click="addUaPreset"
-              >
-                <i class="fa-solid fa-plus"></i> {{ t("settings.addPreset") }}
-              </button>
-            </div>
+          <!-- Log retention -->
+          <div class="settings-subsection" style="margin-top: 28px">
+            {{ t("settings.logRetentionSection") }}
+          </div>
+          <div class="form-group">
+            <label class="form-label">{{
+              t("settings.labelLogRetention")
+            }}</label>
+            <input
+              v-model.number="logRetentionDays"
+              class="form-input"
+              type="number"
+              min="0"
+              style="max-width: 160px"
+              @change="saveLogRetention"
+            />
+            <p style="font-size: 12px; color: #888; margin: 4px 0 0">
+              {{ t("settings.logRetentionHint") }}
+            </p>
           </div>
 
-          <button
-            class="btn btn-primary"
-            :disabled="embySaving"
-            @click="saveEmby"
-          >
-            <i class="fa-solid fa-floppy-disk"></i>
-            {{ embySaving ? t("common.saving") : t("settings.saveBtn") }}
-          </button>
+          <!-- Schedule staggering -->
+          <div class="settings-subsection" style="margin-top: 28px">
+            {{ t("settings.scheduleGapSection") }}
+          </div>
+          <div class="form-group">
+            <label class="form-label">{{
+              t("settings.labelScheduleGap")
+            }}</label>
+            <input
+              v-model.number="scheduleGapMinutes"
+              class="form-input"
+              type="number"
+              min="0"
+              max="30"
+              style="max-width: 160px"
+              @change="saveScheduleGap"
+            />
+            <p style="font-size: 12px; color: #888; margin: 4px 0 0">
+              {{ t("settings.scheduleGapHint") }}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -670,109 +726,96 @@
         </div>
       </div>
 
-      <!-- General settings -->
+      <!-- Emby defaults -->
       <div class="card s-col-6">
         <div class="card-body">
-          <div class="card-section-title">
-            {{ t("settings.generalSection") }}
-          </div>
+          <div class="card-section-title">{{ t("settings.embyDefaults") }}</div>
 
-          <!-- Telegram API credentials -->
-          <div class="settings-subsection">
-            {{ t("settings.defaultTgApiSection") }}
-          </div>
-          <p style="font-size: 12px; color: #888; margin: 0 0 14px">
-            {{ t("settings.defaultTgApiHint") }}
-          </p>
-
-          <div v-if="defaultTgApiMsg" class="success-msg">
-            {{ defaultTgApiMsg }}
-          </div>
-          <div v-if="defaultTgApiError" class="error-msg">
-            {{ defaultTgApiError }}
-          </div>
+          <div v-if="embyMsg" class="success-msg">{{ embyMsg }}</div>
+          <div v-if="embyError" class="error-msg">{{ embyError }}</div>
 
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">{{
-                t("settings.labelDefaultTgApiId")
+                t("settings.labelPlayDuration")
               }}</label>
               <input
-                v-model.number="defaultTgApiId"
+                v-model.number="form.default_play_duration"
                 class="form-input"
                 type="number"
-                min="1"
-                placeholder="e.g. 1234567"
+                min="30"
               />
             </div>
             <div class="form-group">
               <label class="form-label">{{
-                t("settings.labelDefaultTgApiHash")
+                t("settings.labelDeviceName")
               }}</label>
               <input
-                v-model.trim="defaultTgApiHashInput"
+                v-model.trim="form.default_device_name"
                 class="form-input"
-                :placeholder="
-                  defaultTgApiHashMasked
-                    ? t('settings.defaultTgApiHashPlaceholder')
-                    : t('settings.defaultTgApiHashNew')
-                "
-                style="font-family: monospace"
+                placeholder="Mac"
               />
-              <p
-                v-if="defaultTgApiHashMasked"
-                style="font-size: 11px; color: #888; margin: 4px 0 0"
-              >
-                {{ t("settings.defaultTgApiHashSet") }}
-                <code style="font-size: 11px">{{
-                  defaultTgApiHashMasked
-                }}</code>
-              </p>
             </div>
           </div>
 
-          <div style="display: flex; gap: 8px; flex-wrap: wrap">
-            <button
-              class="btn btn-primary"
-              :disabled="defaultTgApiSaving"
-              @click="saveDefaultTgApi"
-            >
-              <i class="fa-solid fa-floppy-disk"></i>
-              {{
-                defaultTgApiSaving ? t("common.saving") : t("settings.saveBtn")
-              }}
-            </button>
-            <button
-              v-if="defaultTgApiId || defaultTgApiHashMasked"
-              class="btn btn-ghost"
-              :disabled="defaultTgApiClearing"
-              @click="clearDefaultTgApi"
-            >
-              {{
-                defaultTgApiClearing
-                  ? t("settings.defaultTgApiClearing")
-                  : t("settings.defaultTgApiClear")
-              }}
-            </button>
+          <div class="form-group">
+            <label class="form-label">{{ t("settings.labelUserAgent") }}</label>
+            <select v-model="form.default_ua" class="form-select">
+              <option value="">— {{ t("jobs.uaDefault") }} —</option>
+              <option v-for="p in uaPresets" :key="p.name" :value="p.value">
+                {{ p.name }}
+              </option>
+            </select>
           </div>
 
-          <!-- TG account display -->
-          <div class="settings-subsection" style="margin-top: 28px">
-            {{ t("settings.accountDisplaySection") }}
-          </div>
-          <div class="form-group">
-            <label class="form-check">
+          <div style="margin-bottom: 16px">
+            <div class="card-section-title" style="margin-bottom: 10px">
+              {{ t("settings.uaPresetsSection") }}
+            </div>
+            <div v-for="(p, i) in uaPresets" :key="i" class="ua-preset-row">
+              <span class="ua-preset-name">{{ p.name }}</span>
+              <span class="ua-preset-value">{{ p.value }}</span>
+              <button
+                class="btn btn-sm btn-ghost ua-preset-del"
+                :title="t('settings.uaPresetDeleteTip')"
+                @click="removeUaPreset(i)"
+              >
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <div class="ua-preset-add">
               <input
-                type="checkbox"
-                v-model="accountDisplayWithTgName"
-                @change="saveAccountDisplay"
+                v-model.trim="newPresetName"
+                class="form-input"
+                style="flex: 0 0 140px"
+                :placeholder="t('settings.uaPresetName')"
+                @keyup.enter="addUaPreset"
               />
-              <span>{{ t("settings.accountDisplayToggle") }}</span>
-            </label>
-            <p style="font-size: 12px; color: #888; margin: 4px 0 0 24px">
-              {{ t("settings.accountDisplayHint") }}
-            </p>
+              <input
+                v-model.trim="newPresetValue"
+                class="form-input"
+                style="flex: 1; min-width: 0"
+                :placeholder="t('settings.uaPresetValue')"
+                @keyup.enter="addUaPreset"
+              />
+              <button
+                class="btn btn-ghost btn-sm"
+                :disabled="!newPresetName || !newPresetValue"
+                @click="addUaPreset"
+              >
+                <i class="fa-solid fa-plus"></i> {{ t("settings.addPreset") }}
+              </button>
+            </div>
           </div>
+
+          <button
+            class="btn btn-primary"
+            :disabled="embySaving"
+            @click="saveEmby"
+          >
+            <i class="fa-solid fa-floppy-disk"></i>
+            {{ embySaving ? t("common.saving") : t("settings.saveBtn") }}
+          </button>
         </div>
       </div>
 
@@ -1601,6 +1644,13 @@ onMounted(async () => {
     form.default_timezone = s.default_timezone;
     form.default_max_retry = Number(s.default_max_retry);
     form.check_daily_run = s.check_daily_run !== "false";
+    logRetentionDays.value = Number(s.log_retention_days) || 0;
+    logRetentionSaved = logRetentionDays.value;
+    scheduleGapMinutes.value =
+      s.schedule_min_gap_minutes != null && s.schedule_min_gap_minutes !== ""
+        ? Math.max(0, Number(s.schedule_min_gap_minutes) || 0)
+        : 2;
+    scheduleGapSaved = scheduleGapMinutes.value;
     form.default_ua = s.default_ua ?? "";
     try {
       uaPresets.value = JSON.parse(s.ua_presets ?? "[]");
@@ -1819,6 +1869,39 @@ async function saveFallbackEnabled() {
   } catch {
     // revert on failure
     form.ai_fallback_enabled = !form.ai_fallback_enabled;
+  }
+}
+
+const logRetentionDays = ref(0);
+let logRetentionSaved = 0; // last persisted value, for revert on failure
+
+async function saveLogRetention() {
+  const value = Math.max(0, Math.floor(Number(logRetentionDays.value) || 0));
+  logRetentionDays.value = value;
+  if (value === logRetentionSaved) return;
+  try {
+    await settingsApi.update({ log_retention_days: String(value) });
+    logRetentionSaved = value;
+  } catch {
+    logRetentionDays.value = logRetentionSaved;
+  }
+}
+
+const scheduleGapMinutes = ref(2);
+let scheduleGapSaved = 2; // last persisted value, for revert on failure
+
+async function saveScheduleGap() {
+  const value = Math.min(
+    30,
+    Math.max(0, Math.floor(Number(scheduleGapMinutes.value) || 0)),
+  );
+  scheduleGapMinutes.value = value;
+  if (value === scheduleGapSaved) return;
+  try {
+    await settingsApi.update({ schedule_min_gap_minutes: String(value) });
+    scheduleGapSaved = value;
+  } catch {
+    scheduleGapMinutes.value = scheduleGapSaved;
   }
 }
 

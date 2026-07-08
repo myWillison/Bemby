@@ -36,7 +36,7 @@ function buildAuthHeader(deviceName: string, token?: string): string {
 async function embyRequest<T = any>(
   baseUrl: string,
   path: string,
-  opts: { method?: string; token?: string; ua: string; deviceName: string; body?: unknown; proxyUrl?: string }
+  opts: { method?: string; token?: string; ua: string; deviceName: string; body?: unknown; proxyUrl?: string; signal?: AbortSignal }
 ): Promise<T> {
   const url = `${baseUrl.replace(/\/$/, '')}${path}`;
   const method = opts.method ?? 'GET';
@@ -54,6 +54,7 @@ async function embyRequest<T = any>(
       method,
       headers,
       body,
+      signal: opts.signal,
       dispatcher: opts.proxyUrl ? new ProxyAgent(opts.proxyUrl) : ipv4Agent,
     } as Parameters<typeof undiciFetch>[1]) as unknown as Response;
   } catch (err: any) {
@@ -74,6 +75,49 @@ async function embyRequest<T = any>(
     throw new Error(`Emby ${method} ${path} → ${res.status} ${res.statusText}: ${detail}`);
   }
   return text ? JSON.parse(text) : (null as T);
+}
+
+/** Resolves a configured proxy id to its URL from settings, if any. */
+function resolveProxyUrl(proxyId?: string): string | undefined {
+  if (!proxyId) return undefined;
+  try {
+    const raw = getSetting('proxies');
+    if (!raw) return undefined;
+    const list = JSON.parse(raw) as Array<{ id: string; name: string; url: string }>;
+    return list.find(p => p.id === proxyId)?.url;
+  } catch {
+    return undefined;
+  }
+}
+
+// Cap the connection test so the UI isn't stuck waiting on a dead host
+const TEST_TIMEOUT_MS = 12_000;
+
+/**
+ * Authenticates against the Emby server without playing anything, so the UI
+ * can confirm the server is reachable and the credentials are valid before a
+ * job is saved.
+ */
+export async function testEmbyConnection(
+  serverUrl: string,
+  opts: { username: string; password: string; userAgent?: string; proxyId?: string },
+): Promise<{ ok: boolean; userName?: string; error?: string }> {
+  const ua = opts.userAgent || getSetting('default_ua') || DEFAULT_UA;
+  const deviceName = getSetting('default_device_name') ?? 'Mac';
+  const proxyUrl = resolveProxyUrl(opts.proxyId);
+  try {
+    const auth = await embyRequest<any>(serverUrl, '/Users/AuthenticateByName', {
+      method: 'POST',
+      ua,
+      deviceName,
+      proxyUrl,
+      signal: AbortSignal.timeout(TEST_TIMEOUT_MS),
+      body: { Username: opts.username, Pw: opts.password },
+    });
+    return { ok: true, userName: auth?.User?.Name };
+  } catch (err: any) {
+    return { ok: false, error: err?.message ?? 'Connection failed' };
+  }
 }
 
 // Number of random items to try before giving up when verifying playability.
@@ -173,17 +217,7 @@ export async function runEmbywatch(serverUrl: string, config: EmbywatchConfig): 
   const playDuration = config.playDuration ?? Number(getSetting('default_play_duration') ?? 300);
   const deviceName = getSetting('default_device_name') ?? 'Yamby';
 
-  // Resolve proxy URL from settings if proxyId is configured
-  let proxyUrl: string | undefined;
-  if (config.proxyId) {
-    try {
-      const raw = getSetting('proxies');
-      if (raw) {
-        const list = JSON.parse(raw) as Array<{ id: string; name: string; url: string }>;
-        proxyUrl = list.find(p => p.id === config.proxyId)?.url;
-      }
-    } catch { /* ignore bad JSON */ }
-  }
+  const proxyUrl = resolveProxyUrl(config.proxyId);
 
   // 1. Authenticate
   const auth = await embyRequest<any>(serverUrl, '/Users/AuthenticateByName', {

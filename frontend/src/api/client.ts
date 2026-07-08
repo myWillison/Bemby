@@ -95,6 +95,7 @@ export type PasswordInfo = {
   hasRecovery: boolean;
   hint: string | null;
   emailUnconfirmedPattern: string | null;
+  loginEmailPattern: string | null;
 };
 
 export type Passkey = {
@@ -224,6 +225,19 @@ export type CustomConfig = {
   proxyId?: string;
 };
 
+export type AutoregConfig = {
+  groupId: string;
+  codePrefix: string;
+  registerButton?: string;
+  signupUsername: string;
+  listenMinutes?: number;
+  scanHistoryCount?: number;
+  entryMode?: "button" | "command";
+  successContains?: string;
+  failContains?: string;
+  proxyId?: string;
+};
+
 export type CustomStepLog = {
   step: number;
   actionType: string;
@@ -261,7 +275,7 @@ export type Job = {
   name: string;
   accountId: number | null;
   accountName?: string;
-  jobType: "checkin" | "embywatch" | "custom";
+  jobType: "checkin" | "embywatch" | "custom" | "autoreg";
   /** checkin: Telegram bot username. embywatch: Emby server URL */
   botUsername: string;
   scheduleWindowStart: number;
@@ -282,7 +296,7 @@ export type Job = {
 export type JobTemplate = {
   id: number;
   name: string;
-  jobType: "checkin" | "embywatch" | "custom";
+  jobType: "checkin" | "embywatch" | "custom" | "autoreg";
   botUsername: string;
   timezone: string;
   replyTimeoutMs: number;
@@ -497,23 +511,17 @@ export const accountsApi = {
     api.post<Account>(`/accounts/${id}/force-reauth`).then((r) => r.data),
   getPasswordInfo: (id: number) =>
     api.get<PasswordInfo>(`/accounts/${id}/password-info`).then((r) => r.data),
-  getRecoveryEmail: (id: number, currentPassword: string) =>
+  sendLoginEmailCode: (id: number, email: string) =>
     api
-      .post<{ email: string | null }>(`/accounts/${id}/recovery-email/get`, { currentPassword })
-      .then((r) => r.data),
-  updateRecoveryEmail: (id: number, currentPassword: string, newEmail: string | null) =>
-    api
-      .put<{ pendingConfirmation: boolean; codeLength?: number }>(
-        `/accounts/${id}/recovery-email`,
-        { currentPassword, newEmail },
+      .post<{ emailPattern: string; codeLength: number }>(
+        `/accounts/${id}/login-email/send-code`,
+        { email },
       )
       .then((r) => r.data),
-  confirmRecoveryEmail: (id: number, code: string) =>
-    api.post(`/accounts/${id}/recovery-email/confirm`, { code }).then((r) => r.data),
-  cancelRecoveryEmail: (id: number) =>
-    api.post(`/accounts/${id}/recovery-email/cancel`).then((r) => r.data),
-  resendRecoveryEmail: (id: number) =>
-    api.post(`/accounts/${id}/recovery-email/resend`).then((r) => r.data),
+  verifyLoginEmail: (id: number, code: string) =>
+    api
+      .post<{ email: string | null }>(`/accounts/${id}/login-email/verify`, { code })
+      .then((r) => r.data),
   getPasskeys: (id: number) =>
     api
       .get<{ passkeys: Passkey[] }>(`/accounts/${id}/passkeys`)
@@ -538,6 +546,19 @@ export const jobsApi = {
   run: (id: number) =>
     api
       .post<{ message: string; logId: number }>(`/jobs/${id}/run`)
+      .then((r) => r.data),
+  testEmby: (data: {
+    serverUrl: string;
+    username: string;
+    password: string;
+    userAgent?: string;
+    proxyId?: string;
+  }) =>
+    api
+      .post<{ ok: boolean; userName?: string; error?: string }>(
+        "/jobs/test-emby",
+        data,
+      )
       .then((r) => r.data),
 };
 
@@ -640,6 +661,8 @@ export type Settings = {
   default_tg_api_hash?: string;
   /** "true" to show accounts as "{Bemby name} - {TG name}" throughout the app. */
   account_display_with_tg_name?: string;
+  /** Days to keep job logs; "0" keeps all logs. */
+  log_retention_days?: string;
 };
 
 export const settingsApi = {
@@ -894,6 +917,20 @@ export const tgClientApi = {
       .get<TgMessage[]>(
         `/tg-client/${accountId}/messages/${encodeURIComponent(chatId)}`,
         { params, signal },
+      )
+      .then((r) => r.data),
+
+  searchMessages: (
+    accountId: number,
+    chatId: string,
+    q: string,
+    params?: { limit?: number },
+    signal?: AbortSignal,
+  ) =>
+    api
+      .get<TgMessage[]>(
+        `/tg-client/${accountId}/messages/${encodeURIComponent(chatId)}/search`,
+        { params: { q, ...params }, signal },
       )
       .then((r) => r.data),
 
@@ -1159,11 +1196,21 @@ export const tgClientApi = {
       )
       .then((r) => r.data),
 
-  webviewResolve: (accountId: number, url: string, botChatId?: string | null) =>
+  webviewResolve: (
+    accountId: number,
+    url: string,
+    botChatId?: string | null,
+    peerChatId?: string | null,
+  ) =>
     api
-      .post<{ webAppUrl: string }>(`/tg-client/${accountId}/webview/resolve`, {
+      .post<{
+        webAppUrl: string;
+        resolved: boolean;
+        frameable: boolean;
+      }>(`/tg-client/${accountId}/webview/resolve`, {
         url,
         botChatId,
+        peerChatId,
       })
       .then((r) => r.data),
 };

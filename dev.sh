@@ -16,14 +16,28 @@ cd "$SCRIPT_DIR"
 if [ ! -f backend/.env ]; then
   cp env.example backend/.env
   echo ""
-  echo "Created backend/.env from env.example -- update ADMIN_PASSWORD and JWT_SECRET before deploying."
+  echo "Created backend/.env from env.example."
   echo ""
 fi
 
-if grep -q "changeme\|change-me-in-production" backend/.env 2>/dev/null; then
+# The backend refuses to boot on an empty or publicly-known JWT_SECRET, so
+# generate a random one for local dev if the current value is missing/placeholder.
+if ! grep -q "^JWT_SECRET=." backend/.env 2>/dev/null \
+   || grep -qE "^JWT_SECRET=(change-me-in-production|changeme|secret)$" backend/.env 2>/dev/null; then
+  SECRET=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+  if grep -q "^JWT_SECRET=" backend/.env 2>/dev/null; then
+    sed "s|^JWT_SECRET=.*|JWT_SECRET=${SECRET}|" backend/.env > backend/.env.tmp && mv backend/.env.tmp backend/.env
+  else
+    printf 'JWT_SECRET=%s\n' "$SECRET" >> backend/.env
+  fi
+  echo "Generated a random JWT_SECRET in backend/.env for local development."
   echo ""
-  echo "WARNING: backend/.env still contains placeholder values."
-  echo "         Update ADMIN_PASSWORD and JWT_SECRET for real use."
+fi
+
+if grep -q "^ADMIN_PASSWORD=changeme$" backend/.env 2>/dev/null; then
+  echo ""
+  echo "NOTE: backend/.env uses the default ADMIN_PASSWORD (changeme)."
+  echo "      You'll be prompted to change it on first login; set a real one for deployment."
   echo ""
 fi
 

@@ -5,10 +5,12 @@ import type {
   EmbywatchLog,
   TgProxy,
   CheckinConfig,
+  AutoregConfig,
 } from "../types";
 import { runCheckin, CheckinError, type CheckinAttemptLog } from "./checkin";
 import { runEmbywatch } from "./embywatch";
 import { runCustom, CustomJobError, type CustomJobLog } from "./custom";
+import { runAutoreg, AutoregJobError, type AutoregJobLog } from "./autoreg";
 import { db } from "../db/database";
 import { resolveAppClientParams } from "../tg/appClient";
 
@@ -77,7 +79,11 @@ export function parseTgProxy(
   }
 }
 
-export type JobDetailLog = CheckinAttemptLog | EmbywatchLog | CustomJobLog;
+export type JobDetailLog =
+  | CheckinAttemptLog
+  | EmbywatchLog
+  | CustomJobLog
+  | AutoregJobLog;
 
 const RETRY_DELAY_MS = 5_000;
 
@@ -213,6 +219,58 @@ export async function runJob(
           detailLogs?.push(customLog);
           break;
         }
+        case "autoreg": {
+          if (!account) throw new Error("No account linked to this job");
+          if (!account.sessionString)
+            throw new Error("Account has no session -- authenticate first");
+          if (!account.apiId || !account.apiHash)
+            throw new Error("No API credentials available for this account");
+          let autoregCfg: Record<string, unknown> = {};
+          try {
+            // Template-linked jobs: template config as base, job config overlaid
+            if (job.templateId) {
+              const tplRow = db
+                .prepare("SELECT config FROM job_templates WHERE id = ?")
+                .get(job.templateId) as { config: string | null } | undefined;
+              if (tplRow?.config) {
+                let t = JSON.parse(tplRow.config);
+                if (typeof t === "string") t = JSON.parse(t);
+                autoregCfg = { ...autoregCfg, ...t };
+              }
+            }
+            if (job.config) {
+              let c = JSON.parse(job.config);
+              if (typeof c === "string") c = JSON.parse(c);
+              autoregCfg = { ...autoregCfg, ...c };
+            }
+          } catch {
+            /* ignore */
+          }
+          const autoregProxyUrl = resolveProxyUrl(
+            job.config,
+            job.templateId,
+            account.proxyId,
+          );
+          const autoregProxy = parseTgProxy(autoregProxyUrl);
+          const autoregDevice = resolveAppClientParams(
+            account.id,
+            account.appClientId,
+          );
+          const autoregLog = await runAutoreg(
+            account.apiId,
+            account.apiHash,
+            account.sessionString,
+            job.botUsername,
+            job.startCommand,
+            autoregCfg as unknown as AutoregConfig,
+            signal,
+            autoregProxy,
+            autoregDevice,
+            job.replyTimeoutMs,
+          );
+          detailLogs?.push(autoregLog);
+          break;
+        }
         default:
           throw new Error(`Unknown job type: ${job.jobType}`);
       }
@@ -220,6 +278,7 @@ export async function runJob(
     } catch (err) {
       if (err instanceof CheckinError) detailLogs?.push(err.log);
       if (err instanceof CustomJobError) detailLogs?.push(err.log);
+      if (err instanceof AutoregJobError) detailLogs?.push(err.log);
       lastError = err;
       console.error(
         `[runner] Job "${job.name}" attempt ${attempt}/${job.retryMax} failed:`,

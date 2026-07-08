@@ -25,6 +25,42 @@ type ScheduleEntry = {
 
 const schedule = new Map<number, ScheduleEntry>();
 
+export const DEFAULT_SCHEDULE_GAP_MINUTES = 2;
+const MAX_SCHEDULE_GAP_MINUTES = 30;
+
+/** Minimum minutes between scheduled runs. 0 disables staggering. */
+export function getScheduleGapMinutes(): number {
+  const row = db
+    .prepare("SELECT value FROM settings WHERE key = 'schedule_min_gap_minutes'")
+    .get() as { value: string } | undefined;
+  if (row?.value == null || row.value === "")
+    return DEFAULT_SCHEDULE_GAP_MINUTES;
+  const n = Number(row.value);
+  if (!Number.isFinite(n)) return DEFAULT_SCHEDULE_GAP_MINUTES;
+  return Math.min(MAX_SCHEDULE_GAP_MINUTES, Math.max(0, Math.floor(n)));
+}
+
+// Cap on simultaneous job executions -- colliding timers queue instead of
+// thundering the Telegram client all at once.
+const MAX_CONCURRENT_JOBS = 2;
+let runningJobs = 0;
+const waitingJobs: Array<() => void> = [];
+
+async function acquireRunSlot(): Promise<void> {
+  if (runningJobs < MAX_CONCURRENT_JOBS) {
+    runningJobs++;
+    return;
+  }
+  // Slot is handed over directly by releaseRunSlot, so no counter change here
+  await new Promise<void>((resolve) => waitingJobs.push(resolve));
+}
+
+function releaseRunSlot(): void {
+  const next = waitingJobs.shift();
+  if (next) next();
+  else runningJobs--;
+}
+
 function checkDailyRunEnabled(): boolean {
   const row = db
     .prepare("SELECT value FROM settings WHERE key = 'check_daily_run'")
@@ -68,7 +104,7 @@ export function loadEligibleJobs(): Array<{
       AND j.retired IS NULL
       AND (j.account_id IS NULL OR (a.id IS NOT NULL AND a.disabled = 0))
       AND (
-        (j.job_type != 'checkin' AND j.job_type != 'custom')
+        (j.job_type NOT IN ('checkin', 'custom', 'autoreg'))
         OR (a.auth_status = 'authenticated' AND a.session_string IS NOT NULL)
       )
   `,
@@ -97,16 +133,19 @@ export function loadEligibleJobs(): Array<{
     account:
       row.account_id != null
         ? (() => {
-            const defaults =
-              !row.api_id || !row.api_hash
-                ? getDefaultTgApiCredentials()
+            // Credentials resolve as a pair: the account's own if complete, else global defaults
+            const ownCredentials =
+              row.api_id && row.api_hash
+                ? { apiId: row.api_id, apiHash: row.api_hash }
                 : null;
+            const credentials =
+              ownCredentials ?? getDefaultTgApiCredentials();
             return {
               id: row.account_id,
               name: row.account_name,
               phoneNumber: row.phone_number,
-              apiId: row.api_id ?? defaults?.apiId ?? null,
-              apiHash: row.api_hash ?? defaults?.apiHash ?? null,
+              apiId: credentials?.apiId ?? null,
+              apiHash: credentials?.apiHash ?? null,
               sessionString: row.session_string,
               authStatus: row.auth_status,
               proxyId: row.account_proxy_id ?? null,
@@ -123,6 +162,7 @@ export async function executeJob(
   job: Job,
   account: TgAccount | null,
 ): Promise<void> {
+  await acquireRunSlot();
   // Re-fetch job settings so changes made after scheduling take effect
   const freshJob = db
     .prepare("SELECT * FROM jobs WHERE id = ?")
@@ -204,6 +244,7 @@ export async function executeJob(
       }
     }
   } finally {
+    releaseRunSlot();
     unregisterJob(Number(logId));
     clearLiveDetail(Number(logId));
     scheduleOne(job, account, job.runEveryDays ?? 1);
@@ -214,11 +255,18 @@ function scheduleOne(job: Job, account: TgAccount | null, daysAhead = 0): void {
   const existing = schedule.get(job.id);
   if (existing) clearTimeout(existing.timer);
 
+  // Stagger away from every other job's slot so runs don't pile into the
+  // same minute (issue #10)
+  const occupied = Array.from(schedule.values())
+    .filter((entry) => entry.job.id !== job.id)
+    .map((entry) => entry.nextRun.getTime());
+
   const nextRun = pickNextRun(
     job.scheduleWindowStart,
     job.scheduleWindowEnd,
     job.timezone,
     daysAhead,
+    { occupied, gapMinutes: getScheduleGapMinutes() },
   );
   const delayMs = Math.max(0, nextRun.toMillis() - Date.now());
 
@@ -278,11 +326,33 @@ export function refreshScheduler(): void {
   refreshJobs();
 }
 
+/** Deletes job logs older than the configured retention window. 0 keeps everything. */
+export function purgeOldLogs(): void {
+  const row = db
+    .prepare("SELECT value FROM settings WHERE key = 'log_retention_days'")
+    .get() as { value: string } | undefined;
+  const days = Number(row?.value ?? 0);
+  if (!Number.isFinite(days) || days <= 0) return;
+
+  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { changes } = db
+    .prepare("DELETE FROM job_logs WHERE ran_at < ? AND status != 'running'")
+    .run(cutoff);
+  if (changes > 0) {
+    console.log(
+      `[scheduler] Purged ${changes} job log(s) older than ${days} day(s)`,
+    );
+  }
+}
+
 export function startScheduler(): void {
   console.log("[scheduler] Starting");
   refreshJobs();
   // Re-check every 5 minutes to pick up new/changed jobs
   setInterval(refreshJobs, 5 * 60 * 1000);
+  purgeOldLogs();
+  // Retention sweep is cheap, so hourly keeps the table tidy without load
+  setInterval(purgeOldLogs, 60 * 60 * 1000);
 }
 
 export function getSchedulerStatus(): Array<{

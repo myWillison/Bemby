@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db } from "../db/database";
+import { db, getDefaultTgApiCredentials } from "../db/database";
 import { runJob, type JobDetailLog } from "../jobs/runner";
 import {
   sendTgNotify,
@@ -10,6 +10,7 @@ import {
 import { refreshScheduler } from "../scheduler";
 import type { Job, TgAccount } from "../types";
 import { registerJob, unregisterJob, registerLiveDetail, clearLiveDetail } from "../jobs/cancellation";
+import { testEmbyConnection } from "../jobs/embywatch";
 
 const router = Router();
 
@@ -39,8 +40,8 @@ type AccountRow = {
   id: number;
   name: string;
   phone_number: string;
-  api_id: number;
-  api_hash: string;
+  api_id: number | null;
+  api_hash: string | null;
   session_string: string | null;
   auth_status: string;
   proxy_id: string | null;
@@ -48,6 +49,28 @@ type AccountRow = {
   app_client_id: string | null;
   created_at: string;
 };
+
+/** Credentials are resolved as a pair: the account's own if complete, else the global defaults. */
+function rowToAccount(row: AccountRow): TgAccount {
+  const ownCredentials =
+    row.api_id && row.api_hash
+      ? { apiId: row.api_id, apiHash: row.api_hash }
+      : null;
+  const credentials = ownCredentials ?? getDefaultTgApiCredentials();
+  return {
+    id: row.id,
+    name: row.name,
+    phoneNumber: row.phone_number,
+    apiId: credentials?.apiId ?? null,
+    apiHash: credentials?.apiHash ?? null,
+    sessionString: row.session_string,
+    authStatus: row.auth_status as TgAccount["authStatus"],
+    proxyId: row.proxy_id ?? null,
+    disabled: Boolean(row.disabled),
+    appClientId: row.app_client_id ?? null,
+    createdAt: row.created_at,
+  };
+}
 
 function rowToJob(row: JobRow): Job & { accountName?: string } {
   return {
@@ -88,6 +111,33 @@ router.get("/", (_req, res) => {
   res.json(rows.map(rowToJob));
 });
 
+// Verify Emby server reachability and credentials without creating a job
+router.post("/test-emby", async (req, res) => {
+  const { serverUrl, username, password, userAgent, proxyId } = req.body as Record<
+    string,
+    string | undefined
+  >;
+  if (!serverUrl || !username || !password) {
+    res
+      .status(400)
+      .json({ error: "serverUrl, username and password are required" });
+    return;
+  }
+  if (!/^https?:\/\//i.test(serverUrl)) {
+    res
+      .status(400)
+      .json({ error: "serverUrl must start with http:// or https://" });
+    return;
+  }
+  const result = await testEmbyConnection(serverUrl, {
+    username,
+    password,
+    userAgent,
+    proxyId,
+  });
+  res.json(result);
+});
+
 router.post("/", (req, res) => {
   const {
     name,
@@ -108,10 +158,13 @@ router.post("/", (req, res) => {
   } = req.body as Record<string, any>;
 
   const resolvedType = jobType ?? "checkin";
-  const needsAccount = resolvedType === "checkin" || resolvedType === "custom";
+  const needsAccount =
+    resolvedType === "checkin" ||
+    resolvedType === "custom" ||
+    resolvedType === "autoreg";
   if (!name || (needsAccount && !accountId) || !botUsername) {
     res.status(400).json({
-      error: "name and botUsername are required; accountId is required for checkin and custom jobs",
+      error: "name and botUsername are required; accountId is required for checkin, custom and autoreg jobs",
     });
     return;
   }
@@ -247,7 +300,7 @@ router.post("/:id/run", async (req, res) => {
   const job = rowToJob(jobRow);
   let account: TgAccount | null = null;
 
-  if (job.jobType === "checkin" || job.jobType === "custom") {
+  if (job.jobType === "checkin" || job.jobType === "custom" || job.jobType === "autoreg") {
     const accountRow = db
       .prepare("SELECT * FROM tg_accounts WHERE id = ?")
       .get(jobRow.account_id) as AccountRow | undefined;
@@ -255,38 +308,21 @@ router.post("/:id/run", async (req, res) => {
       res.status(400).json({ error: "Account is not authenticated" });
       return;
     }
-    account = {
-      id: accountRow.id,
-      name: accountRow.name,
-      phoneNumber: accountRow.phone_number,
-      apiId: accountRow.api_id,
-      apiHash: accountRow.api_hash,
-      sessionString: accountRow.session_string,
-      authStatus: accountRow.auth_status as TgAccount["authStatus"],
-      proxyId: accountRow.proxy_id ?? null,
-      disabled: Boolean(accountRow.disabled),
-      appClientId: accountRow.app_client_id ?? null,
-      createdAt: accountRow.created_at,
-    };
+    account = rowToAccount(accountRow);
+    if (!account.apiId || !account.apiHash) {
+      res.status(400).json({
+        error:
+          "No API credentials available for this account. Add credentials to the account or configure global defaults in Settings.",
+      });
+      return;
+    }
   } else if (job.accountId) {
     // Optional linked account (e.g. embywatch) — used for notifications only; don't block if not authenticated
     const accountRow = db
       .prepare("SELECT * FROM tg_accounts WHERE id = ?")
       .get(job.accountId) as AccountRow | undefined;
     if (accountRow?.session_string) {
-      account = {
-        id: accountRow.id,
-        name: accountRow.name,
-        phoneNumber: accountRow.phone_number,
-        apiId: accountRow.api_id,
-        apiHash: accountRow.api_hash,
-        sessionString: accountRow.session_string,
-        authStatus: accountRow.auth_status as TgAccount["authStatus"],
-        proxyId: accountRow.proxy_id ?? null,
-        disabled: Boolean(accountRow.disabled),
-        appClientId: accountRow.app_client_id ?? null,
-        createdAt: accountRow.created_at,
-      };
+      account = rowToAccount(accountRow);
     }
   }
 

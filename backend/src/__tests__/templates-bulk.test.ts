@@ -64,7 +64,8 @@ const SCHEMA = `
     config                TEXT,
     start_command         TEXT    NOT NULL DEFAULT '/start',
     checkin_button        TEXT    NOT NULL DEFAULT '签到',
-    template_id           INTEGER REFERENCES job_templates(id) ON DELETE SET NULL
+    template_id           INTEGER REFERENCES job_templates(id) ON DELETE SET NULL,
+    retired               TEXT
   );
 `;
 
@@ -104,11 +105,11 @@ function insertTemplate(fields: Partial<{
 
 function insertJob(fields: Partial<{
   name: string; templateId: number | null; accountId: number | null;
-  jobType: string; enabled: number; config: unknown;
+  jobType: string; enabled: number; config: unknown; retired: string | null;
 }> = {}) {
   const { lastInsertRowid } = testDb.prepare(`
-    INSERT INTO jobs (name, template_id, account_id, job_type, enabled, config)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO jobs (name, template_id, account_id, job_type, enabled, config, retired)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(
     fields.name ?? 'Job',
     fields.templateId ?? null,
@@ -116,6 +117,7 @@ function insertJob(fields: Partial<{
     fields.jobType ?? 'checkin',
     fields.enabled ?? 1,
     fields.config != null ? JSON.stringify(fields.config) : null,
+    fields.retired ?? null,
   );
   return testDb.prepare('SELECT * FROM jobs WHERE id = ?').get(lastInsertRowid) as any;
 }
@@ -155,7 +157,7 @@ function getAvailableAccounts(templateId: number) {
     WHERE (disabled = 0 OR disabled IS NULL)
       AND id NOT IN (
         SELECT account_id FROM jobs
-        WHERE template_id = ? AND account_id IS NOT NULL
+        WHERE template_id = ? AND account_id IS NOT NULL AND retired IS NULL
       )
     ORDER BY name COLLATE NOCASE
   `).all(templateId) as any[];
@@ -287,6 +289,29 @@ describe('getAvailableAccounts', () => {
     const ids = result.map((r: any) => r.id);
     expect(ids).not.toContain(a1.id);
     expect(ids).toContain(a2.id);
+  });
+
+  it('does not exclude an account whose only job for this template is retired', () => {
+    const t  = insertTemplate();
+    const a1 = insertAccount({ name: 'Alice' });
+    const a2 = insertAccount({ name: 'Bob' });
+    insertJob({ templateId: t.id, accountId: a1.id, retired: '2026-07-08 00:00:00' });
+    insertJob({ templateId: t.id, accountId: a2.id });
+
+    const result = getAvailableAccounts(t.id);
+
+    const ids = result.map((r: any) => r.id);
+    expect(ids).toContain(a1.id);
+    expect(ids).not.toContain(a2.id);
+  });
+
+  it('still excludes an account with both a retired and an active job for this template', () => {
+    const t = insertTemplate();
+    const a = insertAccount({ name: 'Alice' });
+    insertJob({ templateId: t.id, accountId: a.id, retired: '2026-07-08 00:00:00' });
+    insertJob({ templateId: t.id, accountId: a.id });
+
+    expect(getAvailableAccounts(t.id).map((r: any) => r.id)).not.toContain(a.id);
   });
 
   it('does not exclude an account linked to a different template', () => {

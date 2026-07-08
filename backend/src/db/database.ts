@@ -68,6 +68,7 @@ db.exec(`
     ('ai_timeout_ms',        '25000'),
     ('ai_fallback_enabled',  'true'),
     ('account_display_with_tg_name','false'),
+    ('log_retention_days',   '0'),
     ('ua_presets',           '[{"name":"SenPlayer (Mac)","value":"SenPlayer/6.1.2 CFNetwork/1490.0.4 Darwin/23.2.0"},{"name":"Yamby (Android TV)","value":"Yamby/2.0.3.4(Android)"},{"name":"Hills (Windows)","value":"Hills/0.2.1"},{"name":"Lenna (iOS)","value":"Lenna/1.0.15 CFNetwork/1494.0.7 Darwin/23.4.0"},{"name":"VidHub (iOS)","value":"VidHub/2.2.4"}]');
 `);
 
@@ -392,6 +393,24 @@ try {
   db.exec(
     `CREATE INDEX IF NOT EXISTS idx_tgmc ON tg_message_cache(account_id, chat_id, msg_id DESC)`,
   );
+} catch {}
+
+// Indexes for the job list and log queries, which sort by name / ran_at on every page view
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_jobs_retired_enabled_name
+      ON jobs(retired, enabled, name COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_jobs_template_id
+      ON jobs(template_id);
+    CREATE INDEX IF NOT EXISTS idx_jobs_account_id
+      ON jobs(account_id);
+    CREATE INDEX IF NOT EXISTS idx_job_logs_ran_at
+      ON job_logs(ran_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_job_logs_job_ran_at
+      ON job_logs(job_id, ran_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_job_logs_retired_ran_at
+      ON job_logs(retired, ran_at DESC);
+  `);
 } catch {}
 
 try {
