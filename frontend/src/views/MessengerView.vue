@@ -221,6 +221,14 @@
               </div>
               <button
                 class="tgc-icon-btn"
+                :class="{ 'tgc-icon-btn--active': msgSearchOpen }"
+                @click="toggleMsgSearch"
+                :title="t('tgc.searchMessages')"
+              >
+                <i class="fa-solid fa-magnifying-glass"></i>
+              </button>
+              <button
+                class="tgc-icon-btn"
                 @click="clearChatCache"
                 title="Clear cache and reload messages"
               >
@@ -248,6 +256,54 @@
               >
                 <i class="fa-solid fa-xmark"></i>
               </button>
+            </div>
+
+            <!-- In-chat message search -->
+            <div v-if="msgSearchOpen" class="tgc-msg-search">
+              <div class="tgc-msg-search-bar">
+                <i class="fa-solid fa-magnifying-glass tgc-msg-search-icon"></i>
+                <input
+                  ref="msgSearchInputEl"
+                  v-model="msgSearchQuery"
+                  class="tgc-msg-search-input"
+                  :placeholder="t('tgc.searchPlaceholder')"
+                  @keydown.enter="runMsgSearch"
+                  @keydown.esc="closeMsgSearch"
+                />
+                <button
+                  class="tgc-icon-btn"
+                  :disabled="msgSearchLoading || !msgSearchQuery.trim()"
+                  @click="runMsgSearch"
+                  :title="t('tgc.searchMessages')"
+                >
+                  <span v-if="msgSearchLoading" class="tgc-spinner"></span>
+                  <i v-else class="fa-solid fa-arrow-right"></i>
+                </button>
+                <button class="tgc-icon-btn" @click="closeMsgSearch" title="Close">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+              <div
+                v-if="msgSearchDone && msgSearchResults.length === 0"
+                class="tgc-msg-search-empty"
+              >
+                {{ t('tgc.searchNoResults') }}
+              </div>
+              <div v-else-if="msgSearchResults.length" class="tgc-msg-search-results">
+                <div
+                  v-for="r in msgSearchResults"
+                  :key="r.id"
+                  class="tgc-msg-search-row"
+                  role="button"
+                  tabindex="0"
+                  @click="openMsgSearchResult(r)"
+                  @keydown.enter="openMsgSearchResult(r)"
+                >
+                  <span class="tgc-msg-search-from">{{ r.fromMe ? t('tgc.searchYou') : (r.fromName || activeChat.name) }}</span>
+                  <span class="tgc-msg-search-text">{{ r.text }}</span>
+                  <span class="tgc-msg-search-date">{{ fmtTime(r.date) }}</span>
+                </div>
+              </div>
             </div>
 
             <!-- Pinned message banner -->
@@ -1235,6 +1291,13 @@ const activeChatId = ref<string | null>(null);
 const activeChat = ref<TgDialog | null>(null);
 const messages = ref<TgMessage[]>([]);
 const pinnedMsg = ref<TgMessage | null>(null);
+// In-chat message search
+const msgSearchOpen = ref(false);
+const msgSearchQuery = ref('');
+const msgSearchResults = ref<TgMessage[]>([]);
+const msgSearchLoading = ref(false);
+const msgSearchDone = ref(false);
+const msgSearchInputEl = ref<HTMLInputElement | null>(null);
 const firstUnreadId = ref<number | null>(null);
 const loadingMessages = ref(false);
 const loadingOlder = ref(false);
@@ -2818,6 +2881,7 @@ async function openChat(dialog: TgDialog, addToHistory = false) {
   stopBotMsgWatch();
   pinnedMsg.value = null;
   webViewPanel.value = null;
+  closeMsgSearch();
   await fetchMessages();
   markChatRead(dlg.chatId);
   if (dlg.type === "bot") loadBotCommands(dlg.chatId);
@@ -2885,8 +2949,58 @@ async function loadPinnedMessage() {
 }
 
 async function jumpToPinned() {
-  if (!pinnedMsg.value || !selectedAccountId.value || !activeChatId.value) return;
-  const id = pinnedMsg.value.id;
+  if (!pinnedMsg.value) return;
+  await jumpToMessage(pinnedMsg.value.id);
+}
+
+async function toggleMsgSearch() {
+  if (msgSearchOpen.value) {
+    closeMsgSearch();
+    return;
+  }
+  msgSearchOpen.value = true;
+  await nextTick();
+  msgSearchInputEl.value?.focus();
+}
+
+function closeMsgSearch() {
+  msgSearchOpen.value = false;
+  msgSearchQuery.value = '';
+  msgSearchResults.value = [];
+  msgSearchDone.value = false;
+  msgSearchLoading.value = false;
+}
+
+async function runMsgSearch() {
+  const q = msgSearchQuery.value.trim();
+  if (!q || !selectedAccountId.value || !activeChatId.value) return;
+  msgSearchLoading.value = true;
+  msgSearchDone.value = false;
+  try {
+    const results = await tgClientApi.searchMessages(
+      selectedAccountId.value,
+      activeChatId.value,
+      q,
+      { limit: 30 },
+    );
+    // Newest first, as Telegram returns them
+    msgSearchResults.value = results.sort((a, b) => b.id - a.id);
+    msgSearchDone.value = true;
+  } catch {
+    msgSearchResults.value = [];
+    msgSearchDone.value = true;
+  } finally {
+    msgSearchLoading.value = false;
+  }
+}
+
+async function openMsgSearchResult(msg: TgMessage) {
+  await jumpToMessage(msg.id);
+}
+
+// Scrolls a message into view, loading context around it if it is not loaded
+async function jumpToMessage(id: number) {
+  if (!selectedAccountId.value || !activeChatId.value) return;
   const inView = messages.value.find((m) => m.id === id);
   if (inView) {
     await nextTick();
@@ -3873,6 +3987,83 @@ async function saveContactEdit() {
 .tgc-chat-sub {
   font-size: 12px;
   color: #999;
+}
+
+/* ── In-chat message search ─────────────────────────────────────────────────── */
+.tgc-msg-search {
+  background: #f0f4ff;
+  border-bottom: 1px solid #dce3f5;
+  flex-shrink: 0;
+}
+.tgc-msg-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+}
+.tgc-msg-search-icon {
+  color: #5c7cfa;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.tgc-msg-search-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #dce3f5;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: #fff;
+  outline: none;
+}
+.tgc-msg-search-input:focus {
+  border-color: #5c7cfa;
+}
+.tgc-msg-search-empty {
+  padding: 10px 16px;
+  font-size: 13px;
+  color: #888;
+}
+.tgc-msg-search-results {
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  border-top: 1px solid #dce3f5;
+}
+.tgc-msg-search-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.tgc-msg-search-row:hover {
+  background: #e4ecff;
+}
+.tgc-msg-search-from {
+  font-size: 12px;
+  font-weight: 600;
+  color: #5c7cfa;
+  flex-shrink: 0;
+  max-width: 130px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tgc-msg-search-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: #444;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tgc-msg-search-date {
+  font-size: 11px;
+  color: #999;
+  flex-shrink: 0;
 }
 
 .tgc-pinned-bar {

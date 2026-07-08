@@ -546,6 +546,7 @@ export async function getMessages(
   chatId: string,
   limit: number,
   offsetId: number,
+  search?: string,
 ): Promise<TgMsgPayload[]> {
   await ensureEntityCached(entry, chatId);
   const entity = entry.entityCache.get(chatId);
@@ -554,6 +555,7 @@ export async function getMessages(
   const all = await entry.client.getMessages(entity, {
     limit,
     ...(offsetId ? { offsetId } : {}),
+    ...(search ? { search } : {}),
   });
   // Drop service messages (join/leave/pin announcements) and empty placeholders
   const msgs = all.filter((m) => m instanceof Api.Message);

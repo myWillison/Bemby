@@ -335,6 +335,26 @@ router.get("/:accountId/messages/:chatId", async (req, res) => {
   }
 });
 
+// GET /:accountId/messages/:chatId/search?q=term&limit=30 -- server-side search
+// within one chat (Telegram messages.Search); never served from cache
+router.get("/:accountId/messages/:chatId/search", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  const q = String(req.query.q ?? "").trim();
+  const limit = Math.min(Number(req.query.limit ?? 30), 100);
+  if (!q) {
+    res.json([]);
+    return;
+  }
+  try {
+    const entry = await getLiveClient(accountId);
+    const msgs = await getMessages(entry, chatId, limit, 0, q);
+    res.json(msgs);
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
 // GET /:accountId/chats/:chatId/pinned -- fetch the pinned message for a group/channel
 router.get("/:accountId/chats/:chatId/pinned", async (req, res) => {
   const accountId = Number(req.params.accountId);

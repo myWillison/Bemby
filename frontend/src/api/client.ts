@@ -920,6 +920,20 @@ export const tgClientApi = {
       )
       .then((r) => r.data),
 
+  searchMessages: (
+    accountId: number,
+    chatId: string,
+    q: string,
+    params?: { limit?: number },
+    signal?: AbortSignal,
+  ) =>
+    api
+      .get<TgMessage[]>(
+        `/tg-client/${accountId}/messages/${encodeURIComponent(chatId)}/search`,
+        { params: { q, ...params }, signal },
+      )
+      .then((r) => r.data),
+
   send: (
     accountId: number,
     chatId: string,

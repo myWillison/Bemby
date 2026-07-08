@@ -688,6 +688,10 @@ const zh = {
   tgc: {
     miniAppInApp: "Mini App 在 Bemby 内打开（点击切换关闭）",
     miniAppInBrowser: "Mini App 在浏览器打开（点击切换为在 Bemby 内打开）",
+    searchMessages: "搜索消息",
+    searchPlaceholder: "在此聊天中搜索…",
+    searchNoResults: "未找到相关消息",
+    searchYou: "我",
   },
 };
 
@@ -1402,6 +1406,10 @@ const en: typeof zh = {
   tgc: {
     miniAppInApp: "Mini apps open inside Bemby (click to toggle off)",
     miniAppInBrowser: "Mini apps open in browser (click to open inside Bemby)",
+    searchMessages: "Search messages",
+    searchPlaceholder: "Search in this chat…",
+    searchNoResults: "No messages found",
+    searchYou: "You",
   },
 };
 
