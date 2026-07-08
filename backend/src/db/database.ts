@@ -395,6 +395,24 @@ try {
   );
 } catch {}
 
+// Indexes for the job list and log queries, which sort by name / ran_at on every page view
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_jobs_retired_enabled_name
+      ON jobs(retired, enabled, name COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_jobs_template_id
+      ON jobs(template_id);
+    CREATE INDEX IF NOT EXISTS idx_jobs_account_id
+      ON jobs(account_id);
+    CREATE INDEX IF NOT EXISTS idx_job_logs_ran_at
+      ON job_logs(ran_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_job_logs_job_ran_at
+      ON job_logs(job_id, ran_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_job_logs_retired_ran_at
+      ON job_logs(retired, ran_at DESC);
+  `);
+} catch {}
+
 try {
   db.exec(`
     CREATE TABLE IF NOT EXISTS tg_dialog_cache (

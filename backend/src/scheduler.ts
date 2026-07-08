@@ -133,16 +133,19 @@ export function loadEligibleJobs(): Array<{
     account:
       row.account_id != null
         ? (() => {
-            const defaults =
-              !row.api_id || !row.api_hash
-                ? getDefaultTgApiCredentials()
+            // Credentials resolve as a pair: the account's own if complete, else global defaults
+            const ownCredentials =
+              row.api_id && row.api_hash
+                ? { apiId: row.api_id, apiHash: row.api_hash }
                 : null;
+            const credentials =
+              ownCredentials ?? getDefaultTgApiCredentials();
             return {
               id: row.account_id,
               name: row.account_name,
               phoneNumber: row.phone_number,
-              apiId: row.api_id ?? defaults?.apiId ?? null,
-              apiHash: row.api_hash ?? defaults?.apiHash ?? null,
+              apiId: credentials?.apiId ?? null,
+              apiHash: credentials?.apiHash ?? null,
               sessionString: row.session_string,
               authStatus: row.auth_status,
               proxyId: row.account_proxy_id ?? null,
