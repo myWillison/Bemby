@@ -2,6 +2,7 @@ import { TelegramClient, Api, Logger } from "telegram";
 import { LogLevel } from "telegram/extensions/Logger";
 import { StringSession } from "telegram/sessions";
 import { NewMessage, NewMessageEvent } from "telegram/events";
+import { EditedMessage } from "telegram/events/EditedMessage";
 import type { TgProxy, AutoregConfig, CustomStepLog } from "../types";
 import type { TgDeviceParams } from "../auth/tgAuth";
 import { expandCommand, parseMessages } from "./checkin";
@@ -160,9 +161,12 @@ type ReplyVerdict = {
 
 // Collects bot messages until success/fail text is matched or the timeout fires.
 // With no successContains, the first non-fail message counts as success.
+// Listens for both new messages and edits: some bots respond by editing
+// their previous message rather than replying.
 function waitForVerdict(
   client: TelegramClient,
   botUsername: string,
+  botPeerId: string,
   maxMs: number,
   successContains?: string,
   failContains?: string,
@@ -173,6 +177,7 @@ function waitForVerdict(
     const finish = (verdict: ReplyVerdict["verdict"]) => {
       clearTimeout(timer);
       client.removeEventHandler(handler, new NewMessage({}));
+      client.removeEventHandler(handler, new EditedMessage({}));
       signal?.removeEventListener("abort", onAbort);
       resolve({ verdict, messages: collected });
     };
@@ -200,37 +205,141 @@ function waitForVerdict(
       }
       finish("success");
     };
-    client.addEventHandler(handler, new NewMessage({ fromUsers: [botUsername] }));
+    // Scoped to the direct chat so group posts by the same bot are ignored.
+    // Pre-resolved numeric IDs only: gramjs stringifies chats/fromUsers and
+    // resolves them during update dispatch, where a failed lookup crashes.
+    client.addEventHandler(
+      handler,
+      new NewMessage({ fromUsers: [botPeerId], chats: [botPeerId] }),
+    );
+    client.addEventHandler(
+      handler,
+      new EditedMessage({ fromUsers: [botPeerId], chats: [botPeerId] }),
+    );
   });
 }
 
-// Waits for a bot message carrying inline buttons.
-function waitForButtons(
+function hasInlineButtons(msg: Api.Message): boolean {
+  return (msg as any).replyMarkup instanceof Api.ReplyInlineMarkup;
+}
+
+// Fallback poll cadence while waiting for the button prompt
+const BUTTON_POLL_MS = 3_000;
+
+export type ButtonWaitResult = {
+  message: Api.Message;
+  /** How the prompt arrived: a fresh reply, an edit of an existing message,
+   *  or an unchanged existing message (bot ignored the repeated /start) */
+  via: "reply" | "edit" | "existing";
+};
+
+/** Arms a wait for the bot to present inline buttons. Handles bots that reply
+ *  with a new message AND bots that edit an existing one. Must be called
+ *  BEFORE sending the trigger command so the chat baseline predates the reply.
+ *  A polling fallback covers missed updates, and on timeout an unchanged
+ *  existing prompt is accepted as a last resort. */
+async function beginButtonWait(
   client: TelegramClient,
   botUsername: string,
+  botPeerId: string,
   maxMs: number,
   signal?: AbortSignal,
-): Promise<Api.Message | null> {
-  return new Promise((resolve) => {
-    const finish = (msg: Api.Message | null) => {
+): Promise<{ result: Promise<ButtonWaitResult | null> }> {
+  // Snapshot recent messages so edits and new arrivals can be told apart
+  // from what was already in the chat
+  const baseline = new Map<number, number>();
+  try {
+    const recent = (await client.getMessages(botUsername, {
+      limit: 10,
+    })) as Api.Message[];
+    for (const m of recent) baseline.set(m.id, m.editDate ?? 0);
+  } catch {
+    /* chat may not exist yet; everything counts as new */
+  }
+
+  const result = new Promise<ButtonWaitResult | null>((resolve) => {
+    let done = false;
+    let poll: NodeJS.Timeout | null = null;
+    const finish = (found: ButtonWaitResult | null) => {
+      if (done) return;
+      done = true;
       clearTimeout(timer);
-      client.removeEventHandler(handler, new NewMessage({}));
+      if (poll) clearInterval(poll);
+      client.removeEventHandler(onNew, new NewMessage({}));
+      client.removeEventHandler(onEdit, new EditedMessage({}));
       signal?.removeEventListener("abort", onAbort);
-      resolve(msg);
+      resolve(found);
     };
-    const timer = setTimeout(() => finish(null), maxMs);
+    const onTimeout = async () => {
+      // Last resort: the bot may have ignored a repeated /start because its
+      // prompt (with buttons) is already the latest state of the chat
+      try {
+        const recent = (await client.getMessages(botUsername, {
+          limit: 5,
+        })) as Api.Message[];
+        const existing = recent.find(hasInlineButtons);
+        if (existing) {
+          finish({ message: existing, via: "existing" });
+          return;
+        }
+      } catch {
+        /* fall through to null */
+      }
+      finish(null);
+    };
+    const timer = setTimeout(onTimeout, maxMs);
     const onAbort = () => finish(null);
     if (signal?.aborted) {
       onAbort();
       return;
     }
     signal?.addEventListener("abort", onAbort, { once: true });
-    const handler = async (event: NewMessageEvent) => {
+    const onNew = async (event: NewMessageEvent) => {
       const msg = event.message as Api.Message;
-      if ((msg as any).replyMarkup instanceof Api.ReplyInlineMarkup) finish(msg);
+      if (hasInlineButtons(msg)) finish({ message: msg, via: "reply" });
     };
-    client.addEventHandler(handler, new NewMessage({ fromUsers: [botUsername] }));
+    const onEdit = async (event: NewMessageEvent) => {
+      const msg = event.message as Api.Message;
+      if (hasInlineButtons(msg)) finish({ message: msg, via: "edit" });
+    };
+    // Scoped to the direct chat (pre-resolved ID; see waitForVerdict note)
+    client.addEventHandler(
+      onNew,
+      new NewMessage({ fromUsers: [botPeerId], chats: [botPeerId] }),
+    );
+    client.addEventHandler(
+      onEdit,
+      new EditedMessage({ fromUsers: [botPeerId], chats: [botPeerId] }),
+    );
+    // Poll as a safety net in case an update never reaches the event loop
+    let polling = false;
+    poll = setInterval(async () => {
+      if (polling || done) return;
+      polling = true;
+      try {
+        const recent = (await client.getMessages(botUsername, {
+          limit: 5,
+        })) as Api.Message[];
+        for (const m of recent) {
+          if (!hasInlineButtons(m)) continue;
+          const seenEdit = baseline.get(m.id);
+          if (seenEdit === undefined) {
+            finish({ message: m, via: "reply" });
+            return;
+          }
+          if ((m.editDate ?? 0) > seenEdit) {
+            finish({ message: m, via: "edit" });
+            return;
+          }
+        }
+      } catch {
+        /* transient; next tick retries */
+      } finally {
+        polling = false;
+      }
+    }, BUTTON_POLL_MS);
   });
+  return { result };
 }
 
 function findButton(
@@ -241,7 +350,8 @@ function findButton(
   if (!markup) return null;
   const flat = markup.rows.flatMap((r) => r.buttons);
   const clickable = flat.filter(
-    (b): b is Api.KeyboardButtonCallback => b instanceof Api.KeyboardButtonCallback,
+    (b): b is Api.KeyboardButtonCallback =>
+      b instanceof Api.KeyboardButtonCallback,
   );
   const wanted = match.trim();
   if (wanted) {
@@ -349,6 +459,11 @@ export async function runAutoreg(
     const groupEntity = await client.getEntity(
       groupId.match(/t\.me/) ? groupId : groupId.replace(/^@/, ""),
     );
+    // Event filters need pre-resolved numeric IDs: gramjs stringifies whatever
+    // is passed (an entity object becomes "[object Object]") and resolves it
+    // during update dispatch, where a failed lookup crashes the update loop
+    const groupPeerId = String(await client.getPeerId(groupEntity));
+    const botPeerId = String(await client.getPeerId(botUsername));
 
     // 2. Start listening for codes immediately, before anything slower
     const queue = new CodeQueue();
@@ -367,7 +482,7 @@ export async function runAutoreg(
     };
     client.addEventHandler(
       onGroupMessage,
-      new NewMessage({ chats: [groupEntity] }),
+      new NewMessage({ chats: [groupPeerId] }),
     );
 
     try {
@@ -401,9 +516,11 @@ export async function runAutoreg(
           `${refresh ? "Refresh prompt, send" : "Send"}: "${startCommand}"`,
         );
         let t0 = Date.now();
-        const buttonsPromise = waitForButtons(
+        // Armed before /start so the baseline predates the bot's reply/edit
+        const buttonWait = await beginButtonWait(
           client,
           botUsername,
+          botPeerId,
           replyTimeoutMs,
           signal,
         );
@@ -417,12 +534,13 @@ export async function runAutoreg(
         );
         t0 = Date.now();
         try {
-          const buttonsMsg = await buttonsPromise;
+          const found = await buttonWait.result;
           checkCancelled();
-          if (!buttonsMsg)
+          if (!found)
             throw new Error(
-              `No message with buttons received within ${replyTimeoutMs}ms`,
+              `No new, edited, or existing message with buttons found within ${replyTimeoutMs}ms`,
             );
+          const buttonsMsg = found.message;
           const parsed = await parseMessages([buttonsMsg], client, signal);
           if (parsed.html) clickStep.preClickHtml = parsed.html;
           if (parsed.buttons.length) clickStep.preClickButtons = parsed.buttons;
@@ -446,7 +564,13 @@ export async function runAutoreg(
             if (!err?.message?.includes("BOT_RESPONSE_TIMEOUT")) throw err;
           }
           clickStep.clickedButton = target.text;
-          clickStep.result = `Clicked "${target.text}"`;
+          const viaNote =
+            found.via === "edit"
+              ? " (bot edited its message)"
+              : found.via === "existing"
+                ? " (existing prompt)"
+                : "";
+          clickStep.result = `Clicked "${target.text}"${viaNote}`;
           armed = true;
           armedAt = Date.now();
         } finally {
@@ -500,6 +624,7 @@ export async function runAutoreg(
         const verdictPromise = waitForVerdict(
           client,
           botUsername,
+          botPeerId,
           replyTimeoutMs,
           config.successContains,
           config.failContains,
@@ -542,6 +667,7 @@ export async function runAutoreg(
         const finalPromise = waitForVerdict(
           client,
           botUsername,
+          botPeerId,
           replyTimeoutMs,
           undefined,
           config.failContains,
