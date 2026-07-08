@@ -154,8 +154,8 @@ export type AutoregConfig = {
   listenMinutes?: number;
   /** Recent group messages scanned for codes at startup. Default 0 (live only). */
   scanHistoryCount?: number;
-  /** Send the start command and click the register button before any code appears, so only the code send remains. Default true. */
-  preArm?: boolean;
+  /** How a code reaches the bot: "button" sends the start command and clicks the register button first; "command" appends the code to the start command (e.g. /start CODE). Default "button". */
+  entryMode?: "button" | "command";
   /** Reply text marking a code as accepted; blank treats any non-fail reply as accepted */
   successContains?: string;
   /** Reply text marking a code as used/invalid, e.g. 已被使用 */

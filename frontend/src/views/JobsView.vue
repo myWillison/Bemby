@@ -590,6 +590,14 @@
             <input v-model.trim="autoregCfg.codePrefix" class="form-input" placeholder="ABC-*-XYZ_" />
             <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.autoreg.codePrefixHint') }}</div>
           </div>
+          <div class="form-group">
+            <label class="form-label">{{ t('jobs.autoreg.labelEntryMode') }}</label>
+            <select v-model="autoregCfg.entryMode" class="form-select">
+              <option value="button">{{ t('jobs.autoreg.entryModeButton') }}</option>
+              <option value="command">{{ t('jobs.autoreg.entryModeCommand') }}</option>
+            </select>
+            <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.autoreg.entryModeHint') }}</div>
+          </div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">{{ t('jobs.labelStartCommand') }}</label>
@@ -600,7 +608,7 @@
               </select>
               <input v-if="cmdDropdown === 'custom'" v-model.trim="cmdCustom" class="form-input" style="margin-top:6px" placeholder="/mycommand" />
             </div>
-            <div class="form-group">
+            <div v-if="autoregCfg.entryMode === 'button'" class="form-group">
               <label class="form-label">{{ t('jobs.autoreg.labelRegisterButton') }}</label>
               <input v-model.trim="autoregCfg.registerButton" class="form-input" :placeholder="t('jobs.autoreg.registerButtonPlaceholder')" />
               <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.autoreg.registerButtonHint') }}</div>
@@ -622,13 +630,6 @@
               <input v-model.number="autoregCfg.scanHistoryCount" class="form-input" type="number" min="0" max="100" />
               <div style="font-size:11px;color:#aaa;margin-top:3px">{{ t('jobs.autoreg.scanHistoryHint') }}</div>
             </div>
-          </div>
-          <div class="form-group">
-            <label class="form-check">
-              <input v-model="autoregCfg.preArm" type="checkbox" />
-              <span>{{ t('jobs.autoreg.labelPreArm') }}</span>
-            </label>
-            <div style="font-size:11px;color:#aaa;margin-top:4px;padding-left:24px">{{ t('jobs.autoreg.preArmHint') }}</div>
           </div>
           <div class="form-group">
             <label class="form-label">{{ t('jobs.labelSuccessContains') }}</label>
@@ -1049,11 +1050,11 @@ const embyServer = reactive<{ protocol: 'https' | 'http'; host: string; port: nu
 type AutoregCfgForm = {
   groupId: string;
   codePrefix: string;
+  entryMode: 'button' | 'command';
   registerButton: string;
   signupUsername: string;
   listenMinutes: number;
   scanHistoryCount: number;
-  preArm: boolean;
   successContains: string;
   failContains: string;
 };
@@ -1061,11 +1062,11 @@ function defaultAutoregCfg(): AutoregCfgForm {
   return {
     groupId: '',
     codePrefix: '',
+    entryMode: 'button',
     registerButton: '',
     signupUsername: '',
     listenMinutes: 30,
     scanHistoryCount: 0,
-    preArm: true,
     successContains: '',
     failContains: '',
   };
@@ -1257,7 +1258,7 @@ function applyTemplate(tpl: JobTemplate) {
           signupUsername: c.signupUsername ?? '',
           listenMinutes: c.listenMinutes ?? 30,
           scanHistoryCount: c.scanHistoryCount ?? 0,
-          preArm: c.preArm !== false,
+          entryMode: c.entryMode === 'command' ? 'command' : 'button',
           successContains: c.successContains ?? '',
           failContains: c.failContains ?? '',
         });
@@ -1453,7 +1454,7 @@ function openEdit(j: Job) {
           signupUsername: c.signupUsername ?? '',
           listenMinutes: c.listenMinutes ?? 30,
           scanHistoryCount: c.scanHistoryCount ?? 0,
-          preArm: c.preArm !== false,
+          entryMode: c.entryMode === 'command' ? 'command' : 'button',
           successContains: c.successContains ?? '',
           failContains: c.failContains ?? '',
         });
@@ -1498,10 +1499,10 @@ function buildConfig(): EmbywatchConfig | CustomConfig | AutoregConfig | Record<
       codePrefix: autoregCfg.codePrefix,
       signupUsername: autoregCfg.signupUsername,
     };
-    if (autoregCfg.registerButton.trim()) cfg.registerButton = autoregCfg.registerButton.trim();
+    if (autoregCfg.entryMode === 'command') cfg.entryMode = 'command';
+    else if (autoregCfg.registerButton.trim()) cfg.registerButton = autoregCfg.registerButton.trim();
     if (autoregCfg.listenMinutes > 0 && autoregCfg.listenMinutes !== 30) cfg.listenMinutes = autoregCfg.listenMinutes;
     if (autoregCfg.scanHistoryCount > 0) cfg.scanHistoryCount = autoregCfg.scanHistoryCount;
-    if (!autoregCfg.preArm) cfg.preArm = false;
     if (autoregCfg.successContains.trim()) cfg.successContains = autoregCfg.successContains.trim();
     if (autoregCfg.failContains.trim()) cfg.failContains = autoregCfg.failContains.trim();
     return cfg;

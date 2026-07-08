@@ -24,8 +24,8 @@ export class AutoregJobError extends Error {
 
 const DEFAULT_LISTEN_MINUTES = 30;
 // Bots drop the code-entry state after a short window (often only a minute or two),
-// so a pre-armed prompt is refreshed before it can expire
-const PRE_ARM_REFRESH_MS = 100_000;
+// so a previously armed prompt is refreshed before sending another code
+const ARM_STALE_MS = 100_000;
 
 // Characters a registration code may contain after the prefix
 const CODE_CHAR = /[A-Za-z0-9_*\-]/;
@@ -392,7 +392,7 @@ export async function runAutoreg(
 
   const listenMs =
     Math.max(1, config.listenMinutes ?? DEFAULT_LISTEN_MINUTES) * 60_000;
-  const preArm = config.preArm !== false;
+  const entryMode = config.entryMode === "command" ? "command" : "button";
 
   const client = new TelegramClient(
     new StringSession(sessionString),
@@ -504,8 +504,8 @@ export async function runAutoreg(
         listenStep.result = `${codesSeen} code(s) seen`;
       }
 
-      // Pre-arms the bot conversation: start command, then the register button,
-      // leaving the bot waiting for a code so only the code send remains.
+      // Arms the bot conversation for button mode: start command, then the
+      // register button, leaving the bot waiting for a code.
       let armed = false;
       let armedAt = 0;
       const arm = async (refresh = false) => {
@@ -578,8 +578,6 @@ export async function runAutoreg(
         }
       };
 
-      if (preArm) await arm();
-
       // 4. Race: try each code as soon as it is available
       const deadline = listenStart + listenMs;
       const retriedCodes = new Set<string>();
@@ -587,27 +585,9 @@ export async function runAutoreg(
       while (true) {
         checkCancelled();
 
-        // Wait for a code, refreshing the pre-armed prompt before it expires
-        let code: string | null = null;
-        while (!code) {
-          const remaining = deadline - Date.now();
-          if (remaining <= 0) break;
-          const slice =
-            preArm && armed
-              ? Math.min(
-                  remaining,
-                  Math.max(1_000, armedAt + PRE_ARM_REFRESH_MS - Date.now()),
-                )
-              : remaining;
-          code = await queue.next(slice, signal);
-          checkCancelled();
-          if (!code && preArm && Date.now() < deadline) {
-            // A failed refresh is not fatal while idle; arm again on demand
-            await arm(true).catch(() => {
-              armed = false;
-            });
-          }
-        }
+        const remaining = deadline - Date.now();
+        const code = remaining > 0 ? await queue.next(remaining, signal) : null;
+        checkCancelled();
         if (!code) {
           listenStep.durationMs = Date.now() - listenStart;
           throw new Error(
@@ -617,9 +597,20 @@ export async function runAutoreg(
           );
         }
 
-        if (!armed) await arm();
+        // Button mode arms the prompt only once a code is in hand; a prompt
+        // left over from a previous attempt is refreshed once stale
+        if (
+          entryMode === "button" &&
+          (!armed || Date.now() - armedAt > ARM_STALE_MS)
+        ) {
+          await arm(armed);
+        }
 
-        const codeStep = beginStep("send_command", `Send code: "${code}"`);
+        // Command mode skips the button entirely: the code rides along with
+        // the start command, e.g. /start ABC-30-Register_XYZ
+        const payload =
+          entryMode === "command" ? `${startCommand} ${code}` : code;
+        const codeStep = beginStep("send_command", `Send code: "${payload}"`);
         const t0 = Date.now();
         const verdictPromise = waitForVerdict(
           client,
@@ -630,7 +621,7 @@ export async function runAutoreg(
           config.failContains,
           signal,
         );
-        await client.sendMessage(botUsername, { message: code });
+        await client.sendMessage(botUsername, { message: payload });
         const { verdict, messages } = await verdictPromise;
         codeStep.durationMs = Date.now() - t0;
         if (messages.length) {

@@ -232,7 +232,7 @@ export type AutoregConfig = {
   signupUsername: string;
   listenMinutes?: number;
   scanHistoryCount?: number;
-  preArm?: boolean;
+  entryMode?: "button" | "command";
   successContains?: string;
   failContains?: string;
   proxyId?: string;
