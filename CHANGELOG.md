@@ -10,11 +10,13 @@ All notable changes to Bemby are documented here.
 
 - **任务错峰调度** -- 多个任务随机到同一分钟执行会因高并发导致卡顿甚至失败（#10）；现调度器会自动错开各任务的运行时间，保证彼此至少间隔可配置的分钟数（设置 → 任务错峰，默认 2 分钟，0 表示关闭）；窗口过窄无法满足间隔时自动退化为尽量分散且不重复同一分钟
 - **任务并发上限** -- 同一时刻最多并发执行 2 个任务，超出的任务自动排队依次执行，避免偶发的同时触发造成拥塞
+- **界面调整** -- 任务类型「自动注册」更名为「抢注」；设置页中「通用设置」与「Emby 观看默认值」卡片位置互换，常用设置更靠前
 
 ### English
 
 - **Staggered job scheduling** -- jobs randomly landing on the same minute ran concurrently and often lagged or failed (#10); the scheduler now spaces jobs at least a configurable number of minutes apart (Settings → Job Staggering, default 2 minutes, 0 disables); when a window is too narrow to honour the gap it degrades gracefully, spreading jobs out without doubling up a minute
 - **Job concurrency cap** -- at most 2 jobs execute simultaneously; any extras queue and run in turn, so coincidental overlaps no longer thunder the client
+- **UI tweaks** -- the auto-registration job type's Chinese label is renamed from 自动注册 to 抢注; the General Settings and Emby Watch Defaults cards on the Settings page swapped positions so the more commonly used settings appear first
 
 ---
 
