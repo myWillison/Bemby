@@ -478,7 +478,7 @@ const zh = {
     noLogs: "暂无日志",
     filterPlaceholder: "搜索日志...",
     status: { success: "成功", failed: "失败", running: "运行中" },
-    jobType: { checkin: "签到", embywatch: "观看", custom: "自定义", autoreg: "自动注册" },
+    jobType: { checkin: "签到", embywatch: "观看", custom: "自定义", autoreg: "抢注" },
     showDevLogs: "显示开发者日志",
     devLogsLabel: "开发者",
     retire: "移除",
@@ -545,6 +545,10 @@ const zh = {
     logRetentionSection: "日志保留",
     labelLogRetention: "保留天数",
     logRetentionHint: "早于该天数的任务日志将被自动删除，0 表示保留全部日志。",
+    scheduleGapSection: "任务错峰",
+    labelScheduleGap: "最小间隔（分钟）",
+    scheduleGapHint:
+      "自动错开各任务的运行时间，至少间隔该分钟数，避免多个任务在同一分钟并发执行。0 表示关闭，已排定的任务在下次调度时生效。",
     embyDefaults: "Emby 观看默认值",
     labelPlayDuration: "默认播放时长（秒）",
     labelDeviceName: "设备名称",
@@ -1253,6 +1257,10 @@ const en: typeof zh = {
     labelLogRetention: "Days to keep logs",
     logRetentionHint:
       "Job logs older than this are deleted automatically. 0 keeps all logs.",
+    scheduleGapSection: "Job Staggering",
+    labelScheduleGap: "Minimum gap (minutes)",
+    scheduleGapHint:
+      "Automatically spaces scheduled jobs at least this many minutes apart so they don't run in the same minute. 0 disables; already-scheduled jobs pick it up at their next scheduling.",
     embyDefaults: "Emby Watch Defaults",
     labelPlayDuration: "Default Play Duration (seconds)",
     labelDeviceName: "Device Name",

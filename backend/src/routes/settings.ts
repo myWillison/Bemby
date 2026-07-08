@@ -27,6 +27,7 @@ export const ALLOWED_KEYS = [
   "default_tg_api_hash",
   "account_display_with_tg_name",
   "log_retention_days",
+  "schedule_min_gap_minutes",
 ];
 
 /** Settings keys that must never be sent to the client. */

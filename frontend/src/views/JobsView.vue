@@ -164,7 +164,7 @@
               <option value="checkin">Check-in (签到)</option>
               <option value="embywatch">Emby Watch (观看)</option>
               <option value="custom">Custom (自定义)</option>
-              <option value="autoreg">Auto Registration (自动注册)</option>
+              <option value="autoreg">Auto Registration (抢注)</option>
             </select>
           </div>
           <div v-if="form.templateId && (form.jobType === 'checkin' || form.jobType === 'custom' || form.jobType === 'autoreg')" class="form-group">

@@ -25,6 +25,42 @@ type ScheduleEntry = {
 
 const schedule = new Map<number, ScheduleEntry>();
 
+export const DEFAULT_SCHEDULE_GAP_MINUTES = 2;
+const MAX_SCHEDULE_GAP_MINUTES = 30;
+
+/** Minimum minutes between scheduled runs. 0 disables staggering. */
+export function getScheduleGapMinutes(): number {
+  const row = db
+    .prepare("SELECT value FROM settings WHERE key = 'schedule_min_gap_minutes'")
+    .get() as { value: string } | undefined;
+  if (row?.value == null || row.value === "")
+    return DEFAULT_SCHEDULE_GAP_MINUTES;
+  const n = Number(row.value);
+  if (!Number.isFinite(n)) return DEFAULT_SCHEDULE_GAP_MINUTES;
+  return Math.min(MAX_SCHEDULE_GAP_MINUTES, Math.max(0, Math.floor(n)));
+}
+
+// Cap on simultaneous job executions -- colliding timers queue instead of
+// thundering the Telegram client all at once.
+const MAX_CONCURRENT_JOBS = 2;
+let runningJobs = 0;
+const waitingJobs: Array<() => void> = [];
+
+async function acquireRunSlot(): Promise<void> {
+  if (runningJobs < MAX_CONCURRENT_JOBS) {
+    runningJobs++;
+    return;
+  }
+  // Slot is handed over directly by releaseRunSlot, so no counter change here
+  await new Promise<void>((resolve) => waitingJobs.push(resolve));
+}
+
+function releaseRunSlot(): void {
+  const next = waitingJobs.shift();
+  if (next) next();
+  else runningJobs--;
+}
+
 function checkDailyRunEnabled(): boolean {
   const row = db
     .prepare("SELECT value FROM settings WHERE key = 'check_daily_run'")
@@ -123,6 +159,7 @@ export async function executeJob(
   job: Job,
   account: TgAccount | null,
 ): Promise<void> {
+  await acquireRunSlot();
   // Re-fetch job settings so changes made after scheduling take effect
   const freshJob = db
     .prepare("SELECT * FROM jobs WHERE id = ?")
@@ -204,6 +241,7 @@ export async function executeJob(
       }
     }
   } finally {
+    releaseRunSlot();
     unregisterJob(Number(logId));
     clearLiveDetail(Number(logId));
     scheduleOne(job, account, job.runEveryDays ?? 1);
@@ -214,11 +252,18 @@ function scheduleOne(job: Job, account: TgAccount | null, daysAhead = 0): void {
   const existing = schedule.get(job.id);
   if (existing) clearTimeout(existing.timer);
 
+  // Stagger away from every other job's slot so runs don't pile into the
+  // same minute (issue #10)
+  const occupied = Array.from(schedule.values())
+    .filter((entry) => entry.job.id !== job.id)
+    .map((entry) => entry.nextRun.getTime());
+
   const nextRun = pickNextRun(
     job.scheduleWindowStart,
     job.scheduleWindowEnd,
     job.timezone,
     daysAhead,
+    { occupied, gapMinutes: getScheduleGapMinutes() },
   );
   const delayMs = Math.max(0, nextRun.toMillis() - Date.now());
 
