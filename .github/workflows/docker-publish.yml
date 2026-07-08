@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Image tag override (e.g. v0.9.6, dev-v0.9.28-1, or v0.9.28-beta.1)'
+        description: 'Image tag override (e.g. v0.9.29, dev-v0.9.29-1, or v0.9.29-beta.1)'
         required: false
 
 jobs:
