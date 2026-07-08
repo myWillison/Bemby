@@ -51,7 +51,23 @@ const allowedOrigins = corsOrigins.length
   ? corsOrigins
   : ["http://localhost:5173", "http://127.0.0.1:5173"];
 app.use(cors({ origin: allowedOrigins }));
-app.use(express.json());
+app.use(express.json({ limit: "5mb" }));
+
+// Baseline security headers. Kept dependency-free and conservative so the SPA
+// and the mini-app iframe keep working; the mini-app proxy strips these itself.
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader(
+      "Strict-Transport-Security",
+      "max-age=31536000; includeSubDomains",
+    );
+  }
+  next();
+});
 
 // Health check -- no auth required
 app.get("/api/health", (_req: express.Request, res: express.Response) =>
@@ -79,6 +95,20 @@ app.use(express.static(publicDir));
 app.get("*", (req, res) => {
   res.sendFile(path.join(publicDir, "index.html"));
 });
+
+// Final error handler -- log the detail server-side, never leak stack traces to the client
+app.use(
+  (
+    err: Error,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    console.error("[server] Unhandled error:", err);
+    if (res.headersSent) return;
+    res.status(500).json({ error: "Internal server error" });
+  },
+);
 
 const server = createServer(app);
 attachWebSocket(server);

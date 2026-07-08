@@ -35,6 +35,9 @@ export const CLIENT_HIDDEN_KEYS = new Set([
   "admin_password_hash",
   "admin_username",
   "jwt_secret",
+  // Legacy single-key AI credential (superseded by the ai_suppliers table);
+  // never echo it back to the client on upgraded installs.
+  "ai_api_key",
 ]);
 
 /** Returns first 4 chars + **** + last 4 chars, or **** for short values. */

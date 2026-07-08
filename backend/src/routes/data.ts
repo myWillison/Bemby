@@ -19,15 +19,33 @@ export const EXPORT_EXCLUDED_SETTINGS = new Set([
 // Settings whose presence forces the export to be encrypted.
 export const SENSITIVE_SETTING_KEYS = ['default_tg_api_hash', 'proxies'];
 
+// Config keys that carry a credential (e.g. Emby login) inside a job/template config blob.
+const SENSITIVE_CONFIG_KEYS = ['password', 'username'];
+
+/** True if a job/template config JSON string carries a credential field. */
+function configHasSecret(config: string | null | undefined): boolean {
+  if (!config) return false;
+  try {
+    const parsed = JSON.parse(config) as Record<string, unknown>;
+    return SENSITIVE_CONFIG_KEYS.some((k) => Boolean(parsed?.[k]));
+  } catch {
+    return false;
+  }
+}
+
 // Encryption is mandatory when the payload carries any credential-bearing field:
-// session strings, API keys, per-account API hashes, or sensitive settings.
+// session strings, API keys, per-account API hashes, sensitive settings, or an
+// Emby username/password embedded in a job/template config.
 export function exportRequiresEncryption(
-  payload: Pick<ExportPayload, 'accounts' | 'aiSuppliers' | 'settings'>,
+  payload: Pick<ExportPayload, 'accounts' | 'aiSuppliers' | 'settings'> &
+    Partial<Pick<ExportPayload, 'jobs' | 'templates'>>,
 ): boolean {
   return (
     payload.accounts.some((a) => a.sessionString || a.apiHash) ||
     (payload.aiSuppliers ?? []).some((s) => s.apiKey) ||
-    SENSITIVE_SETTING_KEYS.some((k) => Boolean(payload.settings?.[k]))
+    SENSITIVE_SETTING_KEYS.some((k) => Boolean(payload.settings?.[k])) ||
+    (payload.jobs ?? []).some((j) => configHasSecret(j.config)) ||
+    (payload.templates ?? []).some((t) => configHasSecret(t.config))
   );
 }
 

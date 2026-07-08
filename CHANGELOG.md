@@ -8,6 +8,24 @@ All notable changes to Bemby are documented here.
 
 ### 中文
 
+**安全**
+- **修复 WebSocket 鉴权绕过（严重）** -- 消息 WebSocket 此前只校验令牌签名，未校验令牌类型，导致公开的验证码令牌（由无需登录的 /api/auth/captcha 签发，使用同一密钥）可用于连接并读取任意账号的实时 Telegram 消息流；现 WebSocket 与 HTTP 接口共用同一套会话令牌校验，并同样强制"必须修改默认密码"
+- **拒绝使用默认 JWT 密钥启动（严重）** -- 应用启动时若 JWT_SECRET 为空或仍为公开的占位默认值（如 change-me-in-production）将直接退出；docker-compose 与 env.example 不再提供可用的默认密钥，请用 `openssl rand -hex 32` 生成后设置（升级须知：未设置 JWT_SECRET 的部署需补上该变量方可启动）
+- **新增安全响应头与统一错误处理** -- 增加 X-Frame-Options、X-Content-Type-Options、Referrer-Policy、CSP frame-ancestors 及生产环境 HSTS；新增全局错误处理，生产环境不再向客户端泄露堆栈信息（镜像已设置 NODE_ENV=production）
+- **容器以非 root 用户运行** -- 通过 su-exec 入口脚本在修正数据目录属主后降权至 node 用户，绑定挂载的现有部署无需手动调整
+- **导出加密覆盖更多凭据** -- 当任务/模板配置中含 Emby 用户名或密码时，导出强制加密；账号导出在仅有 API Hash（无会话字符串）时也强制加密
+- **其他加固** -- 隐藏遗留的 ai_api_key 设置，不再返回给前端；对自动抢注日志中来自机器人消息的内容进行 HTML 转义；为验证码令牌校验固定 HS256 算法
+
+### English
+
+**Security**
+- **Fix WebSocket authentication bypass (critical)** -- the messenger WebSocket previously verified only the token signature, not its type, so the public captcha token (minted by the unauthenticated /api/auth/captcha with the same secret) could be used to connect and read any account's live Telegram message stream; the WebSocket now shares the same session-token validation as the HTTP API and enforces the default-password-change gate
+- **Refuse to boot with a default JWT secret (critical)** -- the app now exits at startup if JWT_SECRET is empty or left at a publicly known placeholder (e.g. change-me-in-production); docker-compose and env.example no longer ship a usable default. Generate one with `openssl rand -hex 32` (upgrade note: deployments that never set JWT_SECRET must add it before the app will start)
+- **Add security response headers and a non-leaking error handler** -- X-Frame-Options, X-Content-Type-Options, Referrer-Policy, a CSP frame-ancestors directive, and HSTS in production; a global error handler now hides stack traces from clients in production (the image sets NODE_ENV=production)
+- **Run the container as a non-root user** -- an su-exec entrypoint fixes data-dir ownership as root then drops to the node user; existing bind-mount deployments need no manual change
+- **Export encryption covers more credentials** -- exports are forced to encrypt when a job/template config embeds an Emby username or password, and the account export now forces encryption when an API hash is present even without a session string
+- **Other hardening** -- the legacy ai_api_key setting is no longer returned to the client; bot-message-derived content in auto-registration logs is HTML-escaped before rendering; the captcha token verification pins the HS256 algorithm
+
 - **任务错峰调度** -- 多个任务随机到同一分钟执行会因高并发导致卡顿甚至失败（#10）；现调度器会自动错开各任务的运行时间，保证彼此至少间隔可配置的分钟数（设置 → 任务错峰，默认 2 分钟，0 表示关闭）；窗口过窄无法满足间隔时自动退化为尽量分散且不重复同一分钟
 - **任务并发上限** -- 同一时刻最多并发执行 2 个任务，超出的任务自动排队依次执行，避免偶发的同时触发造成拥塞
 - **界面调整** -- 任务类型「自动注册」更名为「抢注」；设置页中「通用设置」与「Emby 观看默认值」卡片位置互换，常用设置更靠前

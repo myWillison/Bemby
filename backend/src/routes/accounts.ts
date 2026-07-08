@@ -313,10 +313,10 @@ router.post("/export", (req, res) => {
       disabled: Boolean(a.disabled),
     })),
   };
-  const hasSessionStrings = payload.accounts.some(a => a.sessionString != null);
-  if (hasSessionStrings && !secret) {
+  const hasSecrets = payload.accounts.some(a => a.sessionString != null || a.apiHash);
+  if (hasSecrets && !secret) {
     res.status(400).json({
-      error: 'This export contains session strings. Provide an encryption secret.',
+      error: 'This export contains session strings or API credentials. Provide an encryption secret.',
       code: 'SECRET_REQUIRED',
     });
     return;

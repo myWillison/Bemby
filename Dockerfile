@@ -20,17 +20,24 @@ RUN npm run build && npm prune --omit=dev
 FROM node:22-alpine AS production
 WORKDIR /app
 
+ENV NODE_ENV=production
+
+# su-exec lets the entrypoint fix data-dir ownership as root, then drop to `node`
+RUN apk add --no-cache su-exec
+
 COPY --from=backend-builder /app/node_modules ./node_modules
 COPY --from=backend-builder /app/dist        ./dist
 COPY --from=backend-builder /app/package.json ./package.json
 COPY --from=frontend-builder /frontend/dist  ./public
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget -qO /dev/null http://127.0.0.1:${PORT:-3000}/api/health || exit 1
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 # Prefer IPv4 to avoid IPv6 routing issues in container environments
 CMD ["node", "--dns-result-order=ipv4first", "dist/server.js"]

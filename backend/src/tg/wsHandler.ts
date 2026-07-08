@@ -1,8 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import type { IncomingMessage } from "http";
-import jwt from "jsonwebtoken";
-import { getJwtSecret } from "../middleware/auth";
+import { verifySessionToken } from "../middleware/auth";
 import {
   getLiveClient,
   subscribeToMessages,
@@ -46,9 +45,10 @@ export function attachWebSocket(server: Server): void {
         return;
       }
 
-      try {
-        jwt.verify(msg.token, getJwtSecret());
-      } catch {
+      // Same validation as the HTTP guard: reject captcha/non-session tokens,
+      // and block access while a default-password change is still pending
+      const decoded = verifySessionToken(msg.token);
+      if (!decoded || decoded.requirePasswordChange) {
         ws.close(1008, "Unauthorised");
         return;
       }

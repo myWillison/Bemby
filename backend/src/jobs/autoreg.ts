@@ -5,7 +5,7 @@ import { NewMessage, NewMessageEvent } from "telegram/events";
 import { EditedMessage } from "telegram/events/EditedMessage";
 import type { TgProxy, AutoregConfig, CustomStepLog } from "../types";
 import type { TgDeviceParams } from "../auth/tgAuth";
-import { expandCommand, parseMessages } from "./checkin";
+import { expandCommand, parseMessages, escapeHtml } from "./checkin";
 
 // Reuses the custom-job step log shape so LogsView renders the same timeline.
 export type AutoregJobLog = {
@@ -590,7 +590,8 @@ export async function runAutoreg(
           );
         }
         if (lines.length) {
-          scanStep.responseHtml = `<pre style="white-space:pre-wrap">${lines.join("\n")}</pre>`;
+          // Codes derive from bot messages -- escape before rendering via v-html
+          scanStep.responseHtml = `<pre style="white-space:pre-wrap">${escapeHtml(lines.join("\n"))}</pre>`;
         }
         listenStep.result = queueSummary();
       }

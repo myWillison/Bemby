@@ -56,7 +56,7 @@ router.post('/login', loginLimiter, async (req, res) => {
 
   let captchaPayload: { cap?: string };
   try {
-    captchaPayload = jwt.verify(captchaToken, getJwtSecret()) as { cap?: string };
+    captchaPayload = jwt.verify(captchaToken, getJwtSecret(), { algorithms: ['HS256'] }) as { cap?: string };
   } catch {
     res.status(400).json({ error: 'Captcha expired, please refresh' });
     return;
