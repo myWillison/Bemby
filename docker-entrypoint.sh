@@ -5,7 +5,11 @@ set -e
 
 if [ "$(id -u)" = "0" ]; then
   mkdir -p /app/data
-  chown -R node:node /app/data
+  # Best-effort: some volume types (e.g. NFS root_squash) reject chown. Don't let
+  # that block startup -- if perms are genuinely wrong the app surfaces a clear
+  # DB error rather than us aborting the boot here. Data is never modified.
+  chown -R node:node /app/data 2>/dev/null || \
+    echo "docker-entrypoint: could not chown /app/data (continuing as node)"
   exec su-exec node "$@"
 fi
 
