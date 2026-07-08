@@ -84,9 +84,13 @@ docker run -d \
   -v /docker/bemby-data:/app/data \
   -e ADMIN_USERNAME=admin \
   -e ADMIN_PASSWORD=changeme \
-  -e JWT_SECRET=change-me-in-production \
+  -e JWT_SECRET="$(openssl rand -hex 32)" \
   liveinaus/bemby:latest
 ```
+
+镜像同时发布到 Docker Hub 与 GitHub 容器仓库（GHCR），二者内容一致，可任选其一：`liveinaus/bemby:latest` 或 `ghcr.io/liveinaus/bemby:latest`。
+
+> `JWT_SECRET` 为必填项，且不能使用公开的占位值（如 `change-me-in-production`），否则应用将拒绝启动。请用 `openssl rand -hex 32` 生成。
 
 默认值：端口 `3000`，数据库 `/app/data/bemby.db`，时区 UTC。如需指定时区，追加 `-e TZ=Asia/Shanghai`。
 
@@ -391,9 +395,13 @@ docker run -d \
   -v /docker/bemby-data:/app/data \
   -e ADMIN_USERNAME=admin \
   -e ADMIN_PASSWORD=changeme \
-  -e JWT_SECRET=change-me-in-production \
+  -e JWT_SECRET="$(openssl rand -hex 32)" \
   liveinaus/bemby:latest
 ```
+
+Images are published to both Docker Hub and the GitHub Container Registry (GHCR) with identical contents; use either `liveinaus/bemby:latest` or `ghcr.io/liveinaus/bemby:latest`.
+
+> `JWT_SECRET` is required and must not be a publicly known placeholder (e.g. `change-me-in-production`), or the app refuses to start. Generate one with `openssl rand -hex 32`.
 
 Defaults: port `3000`, database at `/app/data/bemby.db`, timezone UTC. To set a timezone add `-e TZ=Australia/Sydney`.
 

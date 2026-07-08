@@ -16,6 +16,9 @@ All notable changes to Bemby are documented here.
 - **导出加密覆盖更多凭据** -- 当任务/模板配置中含 Emby 用户名或密码时，导出强制加密；账号导出在仅有 API Hash（无会话字符串）时也强制加密
 - **其他加固** -- 隐藏遗留的 ai_api_key 设置，不再返回给前端；对自动抢注日志中来自机器人消息的内容进行 HTML 转义；为验证码令牌校验固定 HS256 算法
 
+**构建 / 发布**
+- **镜像同步发布至 GHCR** -- 发布流程在推送 Docker Hub 的同时，将同一多架构镜像（amd64/arm64）推送到 GitHub 容器仓库 `ghcr.io/liveinaus/bemby`，版本标签与频道别名（latest/beta/dev）保持一致；使用内置 `GITHUB_TOKEN` 鉴权，无需额外密钥
+
 ### English
 
 **Security**
@@ -25,6 +28,9 @@ All notable changes to Bemby are documented here.
 - **Run the container as a non-root user** -- an su-exec entrypoint fixes data-dir ownership as root then drops to the node user; existing bind-mount deployments need no manual change
 - **Export encryption covers more credentials** -- exports are forced to encrypt when a job/template config embeds an Emby username or password, and the account export now forces encryption when an API hash is present even without a session string
 - **Other hardening** -- the legacy ai_api_key setting is no longer returned to the client; bot-message-derived content in auto-registration logs is HTML-escaped before rendering; the captcha token verification pins the HS256 algorithm
+
+**Build / release**
+- **Images also published to GHCR** -- the release workflow now pushes the same multi-arch image (amd64/arm64) to the GitHub Container Registry `ghcr.io/liveinaus/bemby` alongside Docker Hub, with matching version tags and channel aliases (latest/beta/dev); it authenticates with the built-in `GITHUB_TOKEN`, so no extra secret is required
 
 - **任务错峰调度** -- 多个任务随机到同一分钟执行会因高并发导致卡顿甚至失败（#10）；现调度器会自动错开各任务的运行时间，保证彼此至少间隔可配置的分钟数（设置 → 任务错峰，默认 2 分钟，0 表示关闭）；窗口过窄无法满足间隔时自动退化为尽量分散且不重复同一分钟
 - **任务并发上限** -- 同一时刻最多并发执行 2 个任务，超出的任务自动排队依次执行，避免偶发的同时触发造成拥塞
