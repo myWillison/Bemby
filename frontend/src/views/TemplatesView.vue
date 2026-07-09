@@ -841,7 +841,7 @@ const uaPresets = computed<UAPreset[]>(() => {
 const proxiesList = computed<Proxy[]>(() => {
   try { return JSON.parse(settings.value?.proxies ?? '[]'); } catch { return []; }
 });
-const aiKeyMissing = computed(() => !settings.value?.ai_api_key);
+const aiKeyMissing = computed(() => settings.value?.ai_key_configured !== 'true');
 
 const showForm = ref(false);
 const editTarget = ref<JobTemplate | null>(null);

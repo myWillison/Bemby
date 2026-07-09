@@ -40,6 +40,18 @@ export const CLIENT_HIDDEN_KEYS = new Set([
   "ai_api_key",
 ]);
 
+/** True when an AI key exists anywhere the runtime looks: a supplier, the legacy setting or the env. */
+function aiKeyConfigured(): boolean {
+  const suppliers = db
+    .prepare("SELECT COUNT(*) AS n FROM ai_suppliers WHERE api_key != ''")
+    .get() as { n: number };
+  if (suppliers.n > 0) return true;
+  const legacy = db
+    .prepare("SELECT value FROM settings WHERE key = 'ai_api_key'")
+    .get() as { value: string } | undefined;
+  return Boolean(legacy?.value || process.env.AI_API_KEY);
+}
+
 /** Returns first 4 chars + **** + last 4 chars, or **** for short values. */
 function maskApiHash(hash: string): string {
   if (!hash) return "";
@@ -59,6 +71,8 @@ function getClientSettings(): Record<string, string> {
   if (result.default_tg_api_hash) {
     result.default_tg_api_hash = maskApiHash(result.default_tg_api_hash);
   }
+  // Synthetic flag so the client can gate AI features without seeing the key
+  result.ai_key_configured = aiKeyConfigured() ? "true" : "false";
   return result;
 }
 

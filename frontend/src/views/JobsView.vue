@@ -1074,7 +1074,7 @@ function defaultAutoregCfg(): AutoregCfgForm {
 const autoregCfg = reactive<AutoregCfgForm>(defaultAutoregCfg());
 const formError = ref('');
 const saving = ref(false);
-const aiKeyMissing = computed(() => !settings.value?.ai_api_key);
+const aiKeyMissing = computed(() => settings.value?.ai_key_configured !== 'true');
 
 const CMD_PRESETS = new Set(['', '/start', '/checkin'])
 const ACTION_CMD_PRESETS = new Set(['/start', '/checkin'])

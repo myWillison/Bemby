@@ -648,7 +648,8 @@ export type Settings = {
   default_ua: string;
   default_play_duration: string;
   default_device_name: string;
-  ai_api_key: string;
+  /** Server-computed: "true" when any AI supplier, legacy setting or env provides a key. */
+  ai_key_configured?: string;
   ai_model: string;
   notify_tg_username: string;
   notify_tg_events: string;

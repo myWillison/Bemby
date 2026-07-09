@@ -141,7 +141,9 @@ function resolveAICreds(modelId?: string): AICreds {
   `).get(model) as SupplierRow | undefined;
   return {
     modelId: model,
-    apiKey: row?.api_key ?? getAiSetting('ai_api_key', 'AI_API_KEY', ''),
+    // `||` not `??`: upgraded installs can have a seeded supplier with an empty
+    // key while the real key lives in the legacy setting or AI_API_KEY env
+    apiKey: row?.api_key || getAiSetting('ai_api_key', 'AI_API_KEY', ''),
     baseUrl: (row?.base_url ?? getAiSetting('ai_base_url', 'AI_BASE_URL', 'https://openrouter.ai/api/v1')).replace(/\/$/, ''),
     timeoutMs: row ? row.timeout_ms : Number(getAiSetting('ai_timeout_ms', 'AI_TIMEOUT_MS', '25000')),
   };
