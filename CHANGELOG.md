@@ -4,6 +4,20 @@ All notable changes to Bemby are documented here.
 
 ---
 
+## v0.9.29-patch-1
+
+### 中文
+
+- **修复 AI 功能在界面中被错误禁用** -- 任务与模板编辑器中的「{aiBtn}（AI 识别）」「{aiInput}」及「输入验证码」选项在密钥已配置的情况下仍显示"未配置密钥"并被禁用；原因是 AI 密钥已迁移至「AI 服务商」，且 v0.9.29 起旧版 `ai_api_key` 设置不再返回给前端，而界面仍依据该旧设置判断密钥是否存在；现设置接口返回服务端计算的 `ai_key_configured` 标志（依次检查 AI 服务商、旧版设置及 `AI_API_KEY` 环境变量），界面据此判断
+- **修复升级安装中 AI 密钥回退失效** -- 从旧版本升级时会以旧版设置的内容播种默认 AI 服务商；若密钥当时仅通过 `AI_API_KEY` 环境变量提供，播种出的服务商密钥为空，且运行时不再回退到环境变量，导致 AI 调用报"密钥未配置"；现服务商密钥为空时会正确回退到旧版设置或环境变量
+
+### English
+
+- **Fix AI features wrongly disabled in the UI** -- the "{aiBtn} (AI recognition)", "{aiInput}" and "enter captcha" options in the job and template editors showed "no API key" and stayed disabled even when a key was configured; the AI key moved to AI Suppliers, and since v0.9.29 the legacy `ai_api_key` setting is no longer sent to the client, yet the UI still read that legacy setting to decide whether a key exists; the settings endpoint now returns a server-computed `ai_key_configured` flag (checking AI suppliers, then the legacy setting, then the `AI_API_KEY` env var) which the UI uses instead
+- **Fix AI key fallback on upgraded installs** -- upgrading seeds the default AI supplier from the legacy setting; when the key was only ever provided via the `AI_API_KEY` env var, the seeded supplier ended up with an empty key and the runtime no longer fell back to the env var, so AI calls failed with "key not configured"; an empty supplier key now correctly falls back to the legacy setting or the env var
+
+---
+
 ## v0.9.29
 
 ### 中文
