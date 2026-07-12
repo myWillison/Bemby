@@ -11,6 +11,7 @@ import { refreshScheduler } from "../scheduler";
 import type { Job, TgAccount } from "../types";
 import { registerJob, unregisterJob, registerLiveDetail, clearLiveDetail } from "../jobs/cancellation";
 import { testEmbyConnection } from "../jobs/embywatch";
+import { parsePaging, parseSort, textParam, escapeLike } from "./list-query";
 
 const router = Router();
 
@@ -96,19 +97,120 @@ function rowToJob(row: JobRow): Job & { accountName?: string } {
   };
 }
 
-router.get("/", (_req, res) => {
-  const rows = db
-    .prepare(
-      `
-    SELECT j.*, a.name AS account_name
+const JOB_SORTS: Record<string, string> = {
+  name: "j.name COLLATE NOCASE",
+  account: "account_name COLLATE NOCASE",
+  type: "j.job_type",
+  botUrl: "j.bot_username COLLATE NOCASE",
+  window: "j.schedule_window_start",
+  // asc shows enabled jobs first, matching the previous client-side sort
+  enabled: "CASE WHEN j.enabled = 1 THEN 0 ELSE 1 END",
+};
+
+router.get("/", (req, res) => {
+  const query = req.query as Record<string, unknown>;
+  const paging = parsePaging(query);
+  const search = textParam(query.search);
+  const jobType = textParam(query.jobType);
+  const accountId = textParam(query.accountId);
+  const botUsername = textParam(query.botUsername);
+  const templateId = textParam(query.templateId);
+  const enabled = textParam(query.enabled);
+
+  const conditions: string[] = ["j.retired IS NULL"];
+  const params: (string | number)[] = [];
+
+  if (search) {
+    conditions.push("j.name LIKE ? ESCAPE '\\'");
+    params.push(`%${escapeLike(search)}%`);
+  }
+  if (jobType) {
+    conditions.push("j.job_type = ?");
+    params.push(jobType);
+  }
+  if (accountId) {
+    const parsed = Number(accountId);
+    if (!Number.isInteger(parsed)) {
+      res.status(400).json({ error: "Invalid accountId" });
+      return;
+    }
+    conditions.push("j.account_id = ?");
+    params.push(parsed);
+  }
+  if (botUsername) {
+    conditions.push("j.bot_username = ?");
+    params.push(botUsername);
+  }
+  if (templateId) {
+    const parsed = Number(templateId);
+    if (!Number.isInteger(parsed)) {
+      res.status(400).json({ error: "Invalid templateId" });
+      return;
+    }
+    conditions.push("j.template_id = ?");
+    params.push(parsed);
+  }
+  if (enabled === "1" || enabled === "0") {
+    conditions.push("j.enabled = ?");
+    params.push(Number(enabled));
+  }
+
+  const where = `WHERE ${conditions.join(" AND ")}`;
+  const orderClause = parseSort(query, JOB_SORTS, JOB_SORTS.name);
+  const baseSql = `
     FROM jobs j
     LEFT JOIN tg_accounts a ON j.account_id = a.id
-    WHERE j.retired IS NULL
-    ORDER BY j.name COLLATE NOCASE
-  `,
-    )
-    .all() as JobRow[];
-  res.json(rows.map(rowToJob));
+    ${where}
+  `;
+
+  if (!paging) {
+    const rows = db
+      .prepare(`SELECT j.*, a.name AS account_name ${baseSql} ORDER BY ${orderClause}`)
+      .all(...params) as JobRow[];
+    res.json(rows.map(rowToJob));
+    return;
+  }
+
+  const totalRow = db
+    .prepare(`SELECT COUNT(*) AS total ${baseSql}`)
+    .get(...params) as { total: number };
+
+  const rows = db
+    .prepare(`
+      SELECT j.*, a.name AS account_name
+      ${baseSql}
+      ORDER BY ${orderClause}
+      LIMIT ? OFFSET ?
+    `)
+    .all(...params, paging.limit, paging.offset) as JobRow[];
+
+  // Facets let the client build filter dropdowns without loading every row
+  const botUsernames = db
+    .prepare(`
+      SELECT DISTINCT bot_username FROM jobs
+      WHERE retired IS NULL AND template_id IS NULL AND bot_username != ''
+      ORDER BY bot_username COLLATE NOCASE
+    `)
+    .all() as Array<{ bot_username: string }>;
+  const templatesInUse = db
+    .prepare(`
+      SELECT DISTINCT t.id, t.name FROM jobs j
+      JOIN job_templates t ON j.template_id = t.id
+      WHERE j.retired IS NULL
+      ORDER BY t.name COLLATE NOCASE
+    `)
+    .all() as Array<{ id: number; name: string }>;
+
+  res.json({
+    items: rows.map(rowToJob),
+    total: totalRow.total,
+    page: paging.page,
+    pageSize: paging.pageSize,
+    facets: {
+      botUsernames: botUsernames.map((r) => r.bot_username),
+      templates: templatesInUse,
+    },
+  });
 });
 
 // Verify Emby server reachability and credentials without creating a job

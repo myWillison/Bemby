@@ -65,6 +65,30 @@ export type TgAppClient = {
   isDefault: boolean;
 };
 
+// ── Server-side list paging ──────────────────────────────────────────────────
+
+export type Paged<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+export type ListParams = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sortKey?: string;
+  sortDir?: "asc" | "desc";
+};
+
+// Drops empty/undefined values so query strings stay clean
+function cleanParams(params: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""),
+  );
+}
+
 export type Account = {
   id: number;
   name: string;
@@ -408,6 +432,12 @@ export const authApi = {
 
 export const accountsApi = {
   list: () => api.get<Account[]>("/accounts").then((r) => r.data),
+  listPaged: (
+    params: ListParams & { authStatus?: string; disabled?: "0" | "1" | "" },
+  ) =>
+    api
+      .get<Paged<Account>>("/accounts", { params: cleanParams(params) })
+      .then((r) => r.data),
   create: (
     data: Omit<
       Account,
@@ -536,8 +566,27 @@ export const accountsApi = {
 
 // ── Jobs ─────────────────────────────────────────────────────────────────────
 
+export type JobFacets = {
+  botUsernames: string[];
+  templates: Array<{ id: number; name: string }>;
+};
+
 export const jobsApi = {
   list: () => api.get<Job[]>("/jobs").then((r) => r.data),
+  listPaged: (
+    params: ListParams & {
+      jobType?: string;
+      accountId?: number | "";
+      botUsername?: string;
+      templateId?: number | "";
+      enabled?: "0" | "1" | "";
+    },
+  ) =>
+    api
+      .get<Paged<Job> & { facets: JobFacets }>("/jobs", {
+        params: cleanParams(params),
+      })
+      .then((r) => r.data),
   create: (data: Partial<Job>) =>
     api.post<Job>("/jobs", data).then((r) => r.data),
   update: (id: number, data: Partial<Job>) =>
@@ -574,6 +623,13 @@ export type AvailableAccount = {
 
 export const templatesApi = {
   list: () => api.get<JobTemplate[]>("/templates").then((r) => r.data),
+  // search is fuzzy-matched server side against template name and bot username
+  listPaged: (
+    params: ListParams & { jobType?: string; enabled?: "0" | "1" | "" },
+  ) =>
+    api
+      .get<Paged<JobTemplate>>("/templates", { params: cleanParams(params) })
+      .then((r) => r.data),
   create: (data: Partial<JobTemplate>) =>
     api.post<JobTemplate>("/templates", data).then((r) => r.data),
   update: (id: number, data: Partial<JobTemplate>) =>
@@ -619,6 +675,22 @@ export const logsApi = {
     api
       .get<Log[]>("/logs", {
         params: { ...params, showRetired: params?.showRetired ? "1" : "0" },
+      })
+      .then((r) => r.data),
+  listPaged: (params: {
+    page: number;
+    pageSize: number;
+    jobId?: number | "";
+    showRetired?: boolean;
+    status?: string;
+    search?: string;
+  }) =>
+    api
+      .get<Paged<Log>>("/logs", {
+        params: cleanParams({
+          ...params,
+          showRetired: params.showRetired ? "1" : "0",
+        }),
       })
       .then((r) => r.data),
   getOne: (id: number) => api.get<Log>(`/logs/${id}`).then((r) => r.data),

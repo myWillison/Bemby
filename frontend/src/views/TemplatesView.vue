@@ -3,6 +3,12 @@
     <div class="page-header">
       <h2 class="page-title">{{ t('templates.title') }}</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input
+          v-model="searchText"
+          class="form-input"
+          style="width:200px"
+          :placeholder="t('common.search')"
+        />
         <template v-if="selectedIds.length">
           <button class="btn btn-secondary" @click="shareSelected">
             <i :class="sharedMulti ? 'fa-solid fa-check' : 'fa-solid fa-share-nodes'"></i>
@@ -13,7 +19,7 @@
           <button class="btn btn-secondary" @click="confirmBulkDisableTpls = true"><i class="fa-solid fa-ban"></i> {{ t('templates.bulkDisable').replace('{n}', String(selectedIds.length)) }}</button>
           <button class="btn btn-danger" @click="confirmBulkDeleteTpls = true"><i class="fa-solid fa-trash"></i> {{ t('templates.bulkDelete').replace('{n}', String(selectedIds.length)) }}</button>
         </template>
-        <button v-if="sortedTemplates.length" class="btn btn-secondary" @click="toggleAll">
+        <button v-if="templates.length" class="btn btn-secondary" @click="toggleAll">
           {{ allSelected ? t('common.deselectAll') : t('common.selectAll') }}
         </button>
         <button class="btn btn-secondary" @click="openImport"><i class="fa-solid fa-file-import"></i> {{ t('templates.importBtn') }}</button>
@@ -35,11 +41,11 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-if="!sortedTemplates.length">
+            <tr v-if="!templates.length">
               <td colspan="6" class="empty">{{ t('templates.noTemplates') }}</td>
             </tr>
             <tr
-              v-for="tpl in sortedTemplates"
+              v-for="tpl in templates"
               :key="tpl.id"
               style="cursor:pointer"
               :class="selectedIds.includes(tpl.id) ? 'row-selected' : ''"
@@ -91,6 +97,13 @@
           </tbody>
         </table>
       </div>
+      <PaginationBar
+        :page="page"
+        :page-size="pageSize"
+        :total="total"
+        @update:page="onPageChange"
+        @update:page-size="onPageSizeChange"
+      />
     </div>
 
     <!-- Add / Edit modal -->
@@ -803,11 +816,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted, watch } from 'vue';
 import { templatesApi, settingsApi, accountsApi, tgClientApi, jobsApi, type JobTemplate, type Settings, type UAPreset, type Proxy, type EmbywatchConfig, type CustomConfig, type CustomAction, type AutoregConfig, type AvailableAccount } from '../api/client';
 import { t } from '../i18n';
 import { usePersistedRef } from '../composables/usePersistedRef';
+import { debounce } from '../composables/useDebounce';
 import { formatAccountLabel, loadAccountDisplaySetting } from '../composables/accountDisplay';
+import PaginationBar from '../components/PaginationBar.vue';
 
 type CustomActionForm = {
   type: 'send_command' | 'send_contact_message' | 'wait_reply' | 'delay' | 'click_button' | 'click_message_button' | 'enter_captcha' | 'join_group' | 'subscribe_channel';
@@ -876,10 +891,14 @@ const createJobsRows = ref<CreateJobRow[]>([]);
 
 const selectedIds = ref<number[]>([]);
 const sharedMulti = ref(false);
-const allSelected = computed(() => sortedTemplates.value.length > 0 && sortedTemplates.value.every(t => selectedIds.value.includes(t.id)));
+const allSelected = computed(() => templates.value.length > 0 && templates.value.every(t => selectedIds.value.includes(t.id)));
 
 const sortKey = usePersistedRef<string>('bemby:templates:sortKey', 'name');
 const sortDir = usePersistedRef<'asc' | 'desc'>('bemby:templates:sortDir', 'asc');
+const page = ref(1);
+const total = ref(0);
+const pageSize = usePersistedRef<number>('bemby:templates:pageSize', 25);
+const searchText = usePersistedRef<string>('bemby:templates:search', '');
 
 function setSort(key: string) {
   if (sortKey.value === key) {
@@ -888,6 +907,8 @@ function setSort(key: string) {
     sortKey.value = key;
     sortDir.value = 'asc';
   }
+  page.value = 1;
+  void loadTemplates();
 }
 
 function sortIcon(key: string): string {
@@ -895,29 +916,26 @@ function sortIcon(key: string): string {
   return sortDir.value === 'asc' ? '↑' : '↓';
 }
 
-const sortedTemplates = computed(() => {
-  if (!sortKey.value) return templates.value;
-  return [...templates.value].sort((a, b) => {
-    let av: string | number, bv: string | number;
-    switch (sortKey.value) {
-      case 'name':       av = a.name.toLowerCase();    bv = b.name.toLowerCase(); break;
-      case 'type':       av = a.jobType;               bv = b.jobType; break;
-      case 'enabled':    av = a.enabled ? 0 : 1;       bv = b.enabled ? 0 : 1; break;
-      case 'botUrl':     av = a.botUsername.toLowerCase(); bv = b.botUsername.toLowerCase(); break;
-      case 'linkedJobs': av = a.linkedJobCount ?? 0;   bv = b.linkedJobCount ?? 0; break;
-      default: return 0;
-    }
-    if (av < bv) return sortDir.value === 'asc' ? -1 : 1;
-    if (av > bv) return sortDir.value === 'asc' ? 1 : -1;
-    return 0;
-  });
-});
+const searchReload = debounce(() => {
+  page.value = 1;
+  void loadTemplates();
+}, 300);
+watch(searchText, () => searchReload());
+
+function onPageChange(p: number) {
+  page.value = p;
+  void loadTemplates();
+}
+function onPageSizeChange(size: number) {
+  // PaginationBar also emits update:page 1, which triggers the reload
+  pageSize.value = size;
+}
 const confirmDeleteTplId = ref<number | null>(null);
 const confirmBulkDisableTpls = ref(false);
 const confirmBulkDeleteTpls = ref(false);
 
 function toggleAll() {
-  selectedIds.value = allSelected.value ? [] : sortedTemplates.value.map(t => t.id);
+  selectedIds.value = allSelected.value ? [] : templates.value.map(t => t.id);
 }
 function toggleSelect(id: number) {
   const idx = selectedIds.value.indexOf(id);
@@ -1195,8 +1213,27 @@ onMounted(async () => {
   await Promise.all([loadTemplates(), loadSettings()]);
 });
 
-async function loadTemplates() {
-  templates.value = await templatesApi.list();
+async function loadTemplates(): Promise<void> {
+  const search = searchText.value.trim();
+  // While searching on the default sort, let the server rank by fuzzy relevance
+  const defaultSort = sortKey.value === 'name' && sortDir.value === 'asc';
+  const res = await templatesApi.listPaged({
+    page: page.value,
+    pageSize: pageSize.value,
+    search: search || undefined,
+    sortKey: search && defaultSort ? undefined : sortKey.value || undefined,
+    sortDir: search && defaultSort ? undefined : sortDir.value,
+  });
+  // Step back a page when the current one empties out (e.g. after bulk delete)
+  if (!res.items.length && page.value > 1) {
+    page.value -= 1;
+    return loadTemplates();
+  }
+  templates.value = res.items;
+  total.value = res.total;
+  // Prune selections that are no longer on the visible page
+  const visible = new Set(res.items.map(t => t.id));
+  selectedIds.value = selectedIds.value.filter(id => visible.has(id));
 }
 
 async function loadSettings() {

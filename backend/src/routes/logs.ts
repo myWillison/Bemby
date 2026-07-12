@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db/database';
 import { cancelJob, isJobRunning, getLiveDetail } from '../jobs/cancellation';
+import { parsePaging, textParam, escapeLike } from './list-query';
 
 const router = Router();
 
@@ -45,8 +46,10 @@ router.get('/:id', (req, res) => {
 
 router.get('/', (req, res) => {
   const { jobId, limit, offset, showRetired = '0' } = req.query as Record<string, string>;
-  const parsedLimit = parsePositiveInt(limit, 50, 200);
-  const parsedOffset = parseNonNegativeInt(offset, 0);
+  const query = req.query as Record<string, unknown>;
+  const paging = parsePaging(query);
+  const search = textParam(query.search);
+  const status = textParam(query.status);
 
   const conditions: string[] = [];
   const params: (string | number)[] = [];
@@ -61,23 +64,36 @@ router.get('/', (req, res) => {
     params.push(parsedJobId);
   }
   if (showRetired !== '1') { conditions.push('l.retired = 0'); }
+  if (status) {
+    conditions.push('l.status = ?');
+    params.push(status);
+  }
+  if (search) {
+    conditions.push(`(
+      COALESCE(j.name, '') LIKE ? ESCAPE '\\'
+      OR COALESCE(a.name, '') LIKE ? ESCAPE '\\'
+      OR COALESCE(l.message, '') LIKE ? ESCAPE '\\'
+    )`);
+    const like = `%${escapeLike(search)}%`;
+    params.push(like, like, like);
+  }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  params.push(parsedLimit, parsedOffset);
-
-  const rows = db.prepare(`
-    SELECT l.id, l.job_id, l.ran_at, l.status, l.message, l.retired,
-           j.name AS job_name, j.job_type,
-           a.name AS account_name
+  const baseSql = `
     FROM job_logs l
     LEFT JOIN jobs j ON l.job_id = j.id
     LEFT JOIN tg_accounts a ON j.account_id = a.id
     ${where}
+  `;
+  const selectSql = `
+    SELECT l.id, l.job_id, l.ran_at, l.status, l.message, l.retired,
+           j.name AS job_name, j.job_type,
+           a.name AS account_name
+    ${baseSql}
     ORDER BY l.ran_at DESC
     LIMIT ? OFFSET ?
-  `).all(...params) as any[];
-
-  res.json(rows.map(r => ({
+  `;
+  const toJson = (r: any) => ({
     id: r.id,
     jobId: r.job_id,
     jobName: r.job_name,
@@ -87,7 +103,26 @@ router.get('/', (req, res) => {
     status: r.status,
     message: r.message,
     retired: r.retired === 1,
-  })));
+  });
+
+  if (!paging) {
+    // Legacy limit/offset shape
+    const parsedLimit = parsePositiveInt(limit, 50, 200);
+    const parsedOffset = parseNonNegativeInt(offset, 0);
+    const rows = db.prepare(selectSql).all(...params, parsedLimit, parsedOffset) as any[];
+    res.json(rows.map(toJson));
+    return;
+  }
+
+  const totalRow = db.prepare(`SELECT COUNT(*) AS total ${baseSql}`).get(...params) as { total: number };
+  const rows = db.prepare(selectSql).all(...params, paging.limit, paging.offset) as any[];
+
+  res.json({
+    items: rows.map(toJson),
+    total: totalRow.total,
+    page: paging.page,
+    pageSize: paging.pageSize,
+  });
 });
 
 router.patch('/:id/retire', (req, res) => {

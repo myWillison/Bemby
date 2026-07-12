@@ -44,6 +44,10 @@ const zh = {
     selectAll: "全选",
     deselectAll: "取消全选",
     loading: "加载中...",
+    search: "搜索...",
+    paginationTotal: "共 {n} 条",
+    perPage: "每页 {n}",
+    statusFilterAll: "全部状态",
   },
   login: {
     subtitle: "登录管理面板",
@@ -741,6 +745,10 @@ const en: typeof zh = {
     selectAll: "Select all",
     deselectAll: "Deselect all",
     loading: "Loading...",
+    search: "Search...",
+    paginationTotal: "{n} total",
+    perPage: "{n} / page",
+    statusFilterAll: "All statuses",
   },
   login: {
     subtitle: "Sign in to access the admin panel",

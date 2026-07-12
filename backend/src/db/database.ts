@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
+import { fuzzyScore } from "./fuzzy";
 
 const DB_PATH =
   process.env.DB_PATH ?? path.resolve(process.cwd(), "data/bemby.db");
@@ -13,6 +14,11 @@ if (!fs.existsSync(dir)) {
 export const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
+
+// Custom function used by list endpoints for fuzzy text search (see db/fuzzy.ts)
+db.function("fuzzy_score", { deterministic: true }, (needle, haystack) =>
+  fuzzyScore(needle, haystack),
+);
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS tg_accounts (
