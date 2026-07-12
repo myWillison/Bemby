@@ -1,4 +1,4 @@
-import { TelegramClient, Api, Logger } from 'telegram';
+import { TelegramClient, Api, Logger, utils } from 'telegram';
 import { db } from '../db/database';
 import { LogLevel } from 'telegram/extensions/Logger';
 import { StringSession } from 'telegram/sessions';
@@ -488,6 +488,7 @@ export function waitForBotMessageEdit(
   originalMsgId: number,
   maxMs: number,
   signal?: AbortSignal,
+  peerId?: string,
 ): Promise<Api.Message | null> {
   return new Promise((resolve) => {
     if (signal?.aborted) { resolve(null); return; }
@@ -511,7 +512,10 @@ export function waitForBotMessageEdit(
         const msg = update.message as Api.Message;
         // Catch any inbound edit from the bot (not our own outgoing messages).
         // Some bots edit a different message than the one that had the buttons.
-        if (msg && !msg.out) finish(msg);
+        if (!msg || msg.out) return;
+        // When a peer filter is given, ignore edits from unrelated chats
+        if (peerId && (!msg.peerId || utils.getPeerId(msg.peerId) !== peerId)) return;
+        finish(msg);
       }
     };
 
@@ -719,6 +723,7 @@ export async function runCheckin(
     }
 
     const peer = await client.getInputEntity(botUsername);
+    const botPeerId = await client.getPeerId(botUsername);
     let clicked = false;
 
     for (const row of allBtnRows) {
@@ -735,7 +740,7 @@ export async function runCheckin(
 
           // Start watching BEFORE invoking to avoid missing a fast response.
           // Edit listener catches any inbound bot edit (not just the buttons message).
-          const editPromise = waitForBotMessageEdit(client, buttonsMsg.id, replyTimeoutMs, signal);
+          const editPromise = waitForBotMessageEdit(client, buttonsMsg.id, replyTimeoutMs, signal, botPeerId);
           const newMsgPromise = waitForNewBotMessage(client, botUsername, replyTimeoutMs, signal);
 
           const t_click = Date.now();
