@@ -142,7 +142,12 @@
                     }}</span>
                   </div>
                   <div class="tgc-dialog-row">
-                    <span class="tgc-dialog-preview">{{
+                    <span
+                      v-if="isTyping(d.chatId)"
+                      class="tgc-dialog-preview tgc-typing"
+                      >{{ typingLabel(d.chatId) }}</span
+                    >
+                    <span v-else class="tgc-dialog-preview">{{
                       d.lastMessage?.text || ""
                     }}</span>
                     <i v-if="d.pinned && !d.unreadCount" class="fa-solid fa-thumbtack tgc-pin-icon"></i>
@@ -215,7 +220,13 @@
                 @click="openProfile"
               >
                 <div class="tgc-chat-name">{{ activeChat.name }}</div>
-                <div class="tgc-chat-sub" v-if="activeChat.username">
+                <div
+                  class="tgc-chat-sub tgc-typing"
+                  v-if="isTyping(activeChat.chatId)"
+                >
+                  {{ typingLabel(activeChat.chatId) }}
+                </div>
+                <div class="tgc-chat-sub" v-else-if="activeChat.username">
                   @{{ activeChat.username }}
                 </div>
               </div>
@@ -377,8 +388,14 @@
                     class="tgc-msg-wrap"
                     :class="[
                       msg.fromMe ? 'tgc-msg-out' : 'tgc-msg-in',
-                      { 'tgc-msg-active': activeMsgId === msg.id },
+                      {
+                        'tgc-msg-active': activeMsgId === msg.id,
+                        'tgc-msg-selectable': selectMode,
+                        'tgc-msg-selected':
+                          selectMode && selectedMsgIds.has(msg.id),
+                      },
                     ]"
+                    @click="selectMode && toggleSelectMsg(msg)"
                   >
                     <!-- Sender avatar (groups with known senders only) -->
                     <template
@@ -404,8 +421,17 @@
                       <div v-else class="tgc-sender-av-ph"></div>
                     </template>
 
+                    <!-- Selection tick -->
+                    <div
+                      v-if="selectMode"
+                      class="tgc-msg-select-tick"
+                      :class="{ checked: selectedMsgIds.has(msg.id) }"
+                    >
+                      <i class="fa-solid fa-check"></i>
+                    </div>
+
                     <!-- Hover action bar -->
-                    <div class="tgc-msg-actions">
+                    <div v-if="!selectMode" class="tgc-msg-actions">
                       <button
                         class="tgc-msg-action"
                         title="Reply"
@@ -428,13 +454,40 @@
                       >
                         <i class="fa-regular fa-comment"></i>
                       </button>
+                      <button
+                        class="tgc-msg-action"
+                        title="Forward"
+                        @click.stop="openForward(msg)"
+                      >
+                        <i class="fa-solid fa-share"></i>
+                      </button>
+                      <button
+                        v-if="msg.fromMe && msg.text && !msg.hasPhoto && !msg.hasDocument && !msg.hasSticker"
+                        class="tgc-msg-action"
+                        title="Edit"
+                        @click.stop="startEditMessage(msg)"
+                      >
+                        <i class="fa-solid fa-pen"></i>
+                      </button>
+                      <button
+                        class="tgc-msg-action"
+                        title="Delete"
+                        @click.stop="openDeleteMsg(msg)"
+                      >
+                        <i class="fa-solid fa-trash-can"></i>
+                      </button>
+                      <button
+                        class="tgc-msg-action"
+                        title="Select"
+                        @click.stop="enterSelectMode(msg)"
+                      >
+                        <i class="fa-regular fa-square-check"></i>
+                      </button>
                     </div>
 
                     <div
                       class="tgc-msg-bubble"
-                      @click.stop="
-                        activeMsgId = activeMsgId === msg.id ? null : msg.id
-                      "
+                      @click.stop="onBubbleClick(msg)"
                     >
                       <div
                         v-if="
@@ -600,8 +653,38 @@
               </div>
             </div>
 
+            <!-- Multi-select action bar (replaces composer while selecting) -->
+            <div v-if="selectMode" class="tgc-select-bar">
+              <button
+                class="tgc-icon-btn"
+                title="Cancel selection"
+                @click="exitSelectMode"
+              >
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+              <span class="tgc-select-count">
+                {{ selectedMsgIds.size }} selected
+              </span>
+              <div class="tgc-select-actions">
+                <button
+                  class="tgc-select-btn"
+                  :disabled="!selectedMsgIds.size"
+                  @click="openForwardSelected"
+                >
+                  <i class="fa-solid fa-share"></i> Forward
+                </button>
+                <button
+                  class="tgc-select-btn tgc-select-danger"
+                  :disabled="!selectedMsgIds.size"
+                  @click="openDeleteSelected"
+                >
+                  <i class="fa-solid fa-trash-can"></i> Delete
+                </button>
+              </div>
+            </div>
+
             <!-- Join bar shown when the user is not a member -->
-            <div v-if="activeChat?.left" class="tgc-join-bar">
+            <div v-else-if="activeChat?.left" class="tgc-join-bar">
               <template v-if="joinRequestSent">
                 <div class="tgc-join-pending">
                   <i class="fa-solid fa-clock"></i>
@@ -633,8 +716,25 @@
             </div>
 
             <div v-else class="tgc-compose">
+              <!-- Edit strip -->
+              <div v-if="editingMsg" class="tgc-reply-strip">
+                <i class="fa-solid fa-pen tgc-reply-strip-icon"></i>
+                <div class="tgc-reply-strip-body">
+                  <div class="tgc-reply-strip-name">Edit message</div>
+                  <div class="tgc-reply-strip-text">
+                    {{ editingMsg.text || "..." }}
+                  </div>
+                </div>
+                <button
+                  class="tgc-icon-btn"
+                  @click="cancelEditMessage"
+                  title="Cancel edit"
+                >
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
               <!-- Reply strip -->
-              <div v-if="replyingTo" class="tgc-reply-strip">
+              <div v-if="replyingTo && !editingMsg" class="tgc-reply-strip">
                 <i class="fa-solid fa-reply tgc-reply-strip-icon"></i>
                 <div class="tgc-reply-strip-body">
                   <div class="tgc-reply-strip-name">
@@ -708,7 +808,7 @@
                   @paste="onPaste"
                   @compositionstart="composing = true"
                   @compositionend="composing = false"
-                  @input="autoResize"
+                  @input="onComposeInput"
                   ref="inputEl"
                 ></textarea>
                 <button
@@ -857,6 +957,24 @@
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <div class="tgc-profile-actions">
+                <button
+                  v-if="profileDetails.type === 'user' || profileDetails.type === 'bot'"
+                  class="tgc-profile-action-btn tgc-profile-action-danger"
+                  :disabled="blockToggling"
+                  @click="toggleBlockFromProfile"
+                >
+                  <i class="fa-solid fa-ban"></i>
+                  {{ profileDetails.blocked ? "Unblock user" : "Block user" }}
+                </button>
+                <button
+                  class="tgc-profile-action-btn"
+                  @click="openReportFromProfile"
+                >
+                  <i class="fa-solid fa-flag"></i> Report
+                </button>
               </div>
             </div>
           </div>
@@ -1043,10 +1161,24 @@
           </button>
         </template>
       </template>
+      <div class="tgc-ctx-divider"></div>
+      <button class="tgc-ctx-item" @click="ctxReport">
+        <i class="fa-solid fa-flag"></i> Report
+      </button>
+      <template
+        v-if="ctxMenu?.dialog.type === 'user' || ctxMenu?.dialog.type === 'bot'"
+      >
+        <button class="tgc-ctx-item tgc-ctx-danger" @click.stop="ctxBlock">
+          <i class="fa-solid fa-ban"></i>
+          {{ ctxConfirmBlock ? "Confirm block user" : "Block user" }}
+        </button>
+        <button class="tgc-ctx-item tgc-ctx-danger" @click="ctxDeleteChat">
+          <i class="fa-solid fa-trash-can"></i> Delete chat
+        </button>
+      </template>
       <template
         v-if="ctxMenu?.dialog.type === 'group' || ctxMenu?.dialog.type === 'channel'"
       >
-        <div class="tgc-ctx-divider"></div>
         <button class="tgc-ctx-item tgc-ctx-danger" @click.stop="ctxLeave">
           <i class="fa-solid fa-arrow-right-from-bracket"></i>
           <template v-if="ctxConfirmLeave">
@@ -1255,6 +1387,165 @@
       </div>
     </div>
   </div>
+  <!-- Report dialog -->
+  <div
+    v-if="reportTarget"
+    class="tgc-invite-overlay"
+    @click.self="reportTarget = null"
+  >
+    <div class="tgc-invite-card tgc-report-card">
+      <div class="tgc-invite-icon"><i class="fa-solid fa-flag"></i></div>
+      <div class="tgc-invite-title">Report {{ reportTarget.name }}</div>
+      <div class="tgc-report-reasons">
+        <label
+          v-for="r in REPORT_REASONS"
+          :key="r.value"
+          class="tgc-report-reason"
+        >
+          <input type="radio" :value="r.value" v-model="reportReason" />
+          {{ r.label }}
+        </label>
+      </div>
+      <textarea
+        v-model="reportComment"
+        class="tgc-gourl-input tgc-report-comment"
+        rows="2"
+        placeholder="Add a comment (optional)"
+      ></textarea>
+      <div class="tgc-invite-actions">
+        <button class="tgc-invite-cancel" @click="reportTarget = null">
+          Cancel
+        </button>
+        <button
+          class="tgc-invite-join tgc-danger-btn"
+          :disabled="reportSending"
+          @click="submitReport"
+        >
+          {{ reportSending ? "Reporting..." : "Report" }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete message confirmation -->
+  <div
+    v-if="deleteMsgIds"
+    class="tgc-invite-overlay"
+    @click.self="deleteMsgIds = null"
+  >
+    <div class="tgc-invite-card">
+      <div class="tgc-invite-icon"><i class="fa-solid fa-trash-can"></i></div>
+      <div class="tgc-invite-title">
+        {{ deleteMsgIds.length > 1 ? `Delete ${deleteMsgIds.length} messages` : "Delete message" }}
+      </div>
+      <div class="tgc-invite-meta">
+        {{ deleteMsgIds.length > 1
+          ? "Are you sure you want to delete these messages?"
+          : "Are you sure you want to delete this message?" }}
+      </div>
+      <label
+        v-if="activeChat && activeChat.type !== 'channel'"
+        class="tgc-revoke-check"
+      >
+        <input type="checkbox" v-model="deleteMsgRevoke" />
+        Also delete for {{ activeChat.type === "group" ? "everyone" : activeChat.name }}
+      </label>
+      <div class="tgc-invite-actions">
+        <button class="tgc-invite-cancel" @click="deleteMsgIds = null">
+          Cancel
+        </button>
+        <button
+          class="tgc-invite-join tgc-danger-btn"
+          :disabled="deletingMsg"
+          @click="confirmDeleteMsg"
+        >
+          {{ deletingMsg ? "Deleting..." : "Delete" }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete chat confirmation -->
+  <div
+    v-if="deleteChatTarget"
+    class="tgc-invite-overlay"
+    @click.self="deleteChatTarget = null"
+  >
+    <div class="tgc-invite-card">
+      <div class="tgc-invite-icon"><i class="fa-solid fa-trash-can"></i></div>
+      <div class="tgc-invite-title">Delete chat</div>
+      <div class="tgc-invite-meta">
+        Permanently delete the chat with {{ deleteChatTarget.name }}?
+      </div>
+      <label class="tgc-revoke-check">
+        <input type="checkbox" v-model="deleteChatRevoke" />
+        Also delete for {{ deleteChatTarget.name }}
+      </label>
+      <div class="tgc-invite-actions">
+        <button class="tgc-invite-cancel" @click="deleteChatTarget = null">
+          Cancel
+        </button>
+        <button
+          class="tgc-invite-join tgc-danger-btn"
+          :disabled="deletingChat"
+          @click="confirmDeleteChat"
+        >
+          {{ deletingChat ? "Deleting..." : "Delete chat" }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Forward message picker -->
+  <div
+    v-if="forwardIds"
+    class="tgc-invite-overlay"
+    @click.self="closeForward"
+  >
+    <div class="tgc-invite-card tgc-forward-card">
+      <div class="tgc-invite-title">
+        {{ forwardIds.length > 1 ? `Forward ${forwardIds.length} messages` : "Forward message" }}
+      </div>
+      <input
+        v-model="forwardFilter"
+        class="tgc-gourl-input"
+        type="text"
+        placeholder="Search chats..."
+        @keydown.esc="closeForward"
+      />
+      <div class="tgc-forward-list">
+        <button
+          v-for="d in forwardTargets"
+          :key="d.chatId"
+          class="tgc-forward-item"
+          :disabled="forwardSending"
+          @click="doForward(d)"
+        >
+          <div
+            class="tgc-avatar tgc-forward-avatar"
+            :class="`tgc-avatar-${d.type}`"
+            v-avatar-load="d.chatId"
+          >
+            <img
+              v-if="avatarSrc(d.chatId)"
+              :src="avatarSrc(d.chatId)"
+              class="tgc-avatar-photo"
+              alt=""
+            />
+            <template v-else>{{ avatarLetter(d.name) }}</template>
+          </div>
+          <span class="tgc-forward-name">{{ d.name }}</span>
+        </button>
+        <div v-if="!forwardTargets.length" class="tgc-empty-list">
+          No chats found
+        </div>
+      </div>
+      <div class="tgc-invite-actions">
+        <button class="tgc-invite-cancel" @click="closeForward">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Image lightbox -->
   <div v-if="lightboxUrl" class="tgc-lightbox" @click="lightboxUrl = null">
     <button class="tgc-lightbox-close" title="Close" @click.stop="lightboxUrl = null">
@@ -1287,6 +1578,7 @@ import {
   type TgFolder,
   type TgProfile,
   type TgInvitePreview,
+  type TgReportReason,
 } from "../api/client";
 import { avatarCache, avatarQueue, avatarQueued, avatarFetching, avatarConcurrencyState, persistAvatarCache } from "../composables/avatarCache";
 import { t } from "../i18n";
@@ -1474,6 +1766,59 @@ const threadEl = ref<HTMLElement | null>(null);
 const ctxMenu = ref<{ dialog: TgDialog; x: number; y: number } | null>(null);
 const ctxFolderExpanded = ref(false);
 const ctxConfirmLeave = ref(false);
+const ctxConfirmBlock = ref(false);
+
+// Block / report / delete chat
+const blockToggling = ref(false);
+const reportTarget = ref<{ chatId: string; name: string } | null>(null);
+const reportReason = ref<TgReportReason>("spam");
+const reportComment = ref("");
+const reportSending = ref(false);
+const deleteChatTarget = ref<TgDialog | null>(null);
+const deleteChatRevoke = ref(true);
+const deletingChat = ref(false);
+
+const REPORT_REASONS: { value: TgReportReason; label: string }[] = [
+  { value: "spam", label: "Spam" },
+  { value: "violence", label: "Violence" },
+  { value: "pornography", label: "Pornography" },
+  { value: "childAbuse", label: "Child abuse" },
+  { value: "illegalDrugs", label: "Illegal drugs" },
+  { value: "personalDetails", label: "Personal details" },
+  { value: "fake", label: "Fake account" },
+  { value: "copyright", label: "Copyright" },
+  { value: "other", label: "Other" },
+];
+
+// Message edit / delete / forward
+const editingMsg = ref<TgMessage | null>(null);
+const deleteMsgIds = ref<number[] | null>(null);
+const deleteMsgRevoke = ref(true);
+const deletingMsg = ref(false);
+const forwardIds = ref<number[] | null>(null);
+const forwardFilter = ref("");
+const forwardSending = ref(false);
+
+// Multi-select mode
+const selectMode = ref(false);
+const selectedMsgIds = ref<Set<number>>(new Set());
+
+// Typing indicators: chatId -> name of who is typing (null in private chats)
+const typingChats = ref<Record<string, string | null>>({});
+const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+let lastTypingSent = 0;
+
+const forwardTargets = computed(() => {
+  const q = forwardFilter.value.trim().toLowerCase();
+  return dialogs.value.filter((d) => {
+    if (d.left) return false;
+    if (!q) return true;
+    return (
+      d.name.toLowerCase().includes(q) ||
+      (d.username ?? "").toLowerCase().includes(q)
+    );
+  });
+});
 // ── Priority request management ───────────────────────────────────────────────
 // bgDialogCtrl: the in-flight background 200-dialog fetch -- aborted when the
 // user initiates any action so their request gets the connection immediately.
@@ -1645,6 +1990,7 @@ function closeCtx() {
   ctxMenu.value = null;
   ctxFolderExpanded.value = false;
   ctxConfirmLeave.value = false;
+  ctxConfirmBlock.value = false;
 }
 
 async function ctxMute(secs: number) {
@@ -1740,6 +2086,311 @@ async function ctxAddToFolder(folder: TgFolder) {
   } catch {
     /* silent */
   }
+}
+
+// ── Block / report / delete chat ─────────────────────────────────────────────
+
+async function ctxBlock() {
+  if (!ctxMenu.value || !selectedAccountId.value) return;
+  // First click arms the confirmation; second click blocks
+  if (!ctxConfirmBlock.value) {
+    ctxConfirmBlock.value = true;
+    return;
+  }
+  const { dialog } = ctxMenu.value;
+  closeCtx();
+  try {
+    await tgClientApi.setBlocked(selectedAccountId.value, dialog.chatId, true);
+    if (profileDetails.value?.chatId === dialog.chatId) {
+      profileDetails.value = { ...profileDetails.value, blocked: true };
+    }
+    showToast(`Blocked ${dialog.name}`);
+  } catch (e: any) {
+    showToast(e?.response?.data?.error ?? e?.message ?? "Failed to block");
+  }
+}
+
+function ctxReport() {
+  if (!ctxMenu.value) return;
+  const { dialog } = ctxMenu.value;
+  closeCtx();
+  reportReason.value = "spam";
+  reportComment.value = "";
+  reportTarget.value = { chatId: dialog.chatId, name: dialog.name };
+}
+
+function ctxDeleteChat() {
+  if (!ctxMenu.value) return;
+  const { dialog } = ctxMenu.value;
+  closeCtx();
+  deleteChatRevoke.value = true;
+  deleteChatTarget.value = dialog;
+}
+
+async function confirmDeleteChat() {
+  if (!deleteChatTarget.value || !selectedAccountId.value) return;
+  const dialog = deleteChatTarget.value;
+  deletingChat.value = true;
+  try {
+    await tgClientApi.deleteHistory(
+      selectedAccountId.value,
+      dialog.chatId,
+      deleteChatRevoke.value,
+    );
+    deleteChatTarget.value = null;
+    const idx = dialogs.value.findIndex((d) => d.chatId === dialog.chatId);
+    if (idx !== -1) dialogs.value.splice(idx, 1);
+    if (activeChatId.value === dialog.chatId) {
+      chatNavStack.value = [];
+      closeChat();
+    }
+    showToast("Chat deleted");
+  } catch (e: any) {
+    showToast(e?.response?.data?.error ?? e?.message ?? "Failed to delete chat");
+  } finally {
+    deletingChat.value = false;
+  }
+}
+
+async function toggleBlockFromProfile() {
+  if (!profileDetails.value || !selectedAccountId.value) return;
+  const profile = profileDetails.value;
+  const next = !profile.blocked;
+  blockToggling.value = true;
+  try {
+    await tgClientApi.setBlocked(selectedAccountId.value, profile.chatId, next);
+    profileDetails.value = { ...profile, blocked: next };
+    showToast(next ? `Blocked ${profile.name}` : `Unblocked ${profile.name}`);
+  } catch (e: any) {
+    showToast(e?.response?.data?.error ?? e?.message ?? "Failed to update block");
+  } finally {
+    blockToggling.value = false;
+  }
+}
+
+function openReportFromProfile() {
+  if (!profileDetails.value) return;
+  reportReason.value = "spam";
+  reportComment.value = "";
+  reportTarget.value = {
+    chatId: profileDetails.value.chatId,
+    name: profileDetails.value.name,
+  };
+}
+
+async function submitReport() {
+  if (!reportTarget.value || !selectedAccountId.value) return;
+  reportSending.value = true;
+  try {
+    await tgClientApi.report(
+      selectedAccountId.value,
+      reportTarget.value.chatId,
+      reportReason.value,
+      reportComment.value.trim() || undefined,
+    );
+    reportTarget.value = null;
+    showToast("Report sent");
+  } catch (e: any) {
+    showToast(e?.response?.data?.error ?? e?.message ?? "Failed to report");
+  } finally {
+    reportSending.value = false;
+  }
+}
+
+// ── Message edit / delete / forward ──────────────────────────────────────────
+
+function startEditMessage(msg: TgMessage) {
+  editingMsg.value = msg;
+  replyingTo.value = null;
+  inputText.value = msg.text;
+  nextTick(() => {
+    inputEl.value?.focus();
+    autoResize();
+  });
+}
+
+function cancelEditMessage() {
+  editingMsg.value = null;
+  inputText.value = "";
+  if (inputEl.value) inputEl.value.style.height = "auto";
+}
+
+async function submitEditMessage() {
+  const msg = editingMsg.value;
+  const text = inputText.value.trim();
+  if (!msg || !text || !selectedAccountId.value || !activeChatId.value) return;
+  sending.value = true;
+  try {
+    await tgClientApi.editMessage(
+      selectedAccountId.value,
+      activeChatId.value,
+      msg.id,
+      text,
+    );
+    const local = messages.value.find((m) => m.id === msg.id);
+    if (local) {
+      local.text = text;
+      local.html = null;
+    }
+    cancelEditMessage();
+  } catch (e: any) {
+    showToast(e?.response?.data?.error ?? e?.message ?? "Failed to edit");
+  } finally {
+    sending.value = false;
+    await nextTick();
+    inputEl.value?.focus();
+  }
+}
+
+function openDeleteMsg(msg: TgMessage) {
+  deleteMsgRevoke.value = true;
+  deleteMsgIds.value = [msg.id];
+}
+
+function openDeleteSelected() {
+  if (!selectedMsgIds.value.size) return;
+  deleteMsgRevoke.value = true;
+  deleteMsgIds.value = [...selectedMsgIds.value];
+}
+
+async function confirmDeleteMsg() {
+  if (!deleteMsgIds.value?.length || !selectedAccountId.value || !activeChatId.value)
+    return;
+  const ids = deleteMsgIds.value;
+  deletingMsg.value = true;
+  try {
+    await tgClientApi.deleteMessages(
+      selectedAccountId.value,
+      activeChatId.value,
+      ids,
+      deleteMsgRevoke.value,
+    );
+    deleteMsgIds.value = null;
+    messages.value = messages.value.filter((m) => !ids.includes(m.id));
+    if (editingMsg.value && ids.includes(editingMsg.value.id))
+      cancelEditMessage();
+    exitSelectMode();
+    showToast(ids.length > 1 ? `${ids.length} messages deleted` : "Message deleted");
+  } catch (e: any) {
+    showToast(e?.response?.data?.error ?? e?.message ?? "Failed to delete");
+  } finally {
+    deletingMsg.value = false;
+  }
+}
+
+function openForward(msg: TgMessage) {
+  forwardFilter.value = "";
+  forwardIds.value = [msg.id];
+}
+
+function openForwardSelected() {
+  if (!selectedMsgIds.value.size) return;
+  forwardFilter.value = "";
+  forwardIds.value = [...selectedMsgIds.value].sort((a, b) => a - b);
+}
+
+function closeForward() {
+  forwardIds.value = null;
+  forwardFilter.value = "";
+}
+
+async function doForward(target: TgDialog) {
+  if (!forwardIds.value?.length || !selectedAccountId.value || !activeChatId.value)
+    return;
+  const ids = forwardIds.value;
+  forwardSending.value = true;
+  try {
+    await tgClientApi.forwardMessages(
+      selectedAccountId.value,
+      activeChatId.value,
+      target.chatId,
+      ids,
+    );
+    closeForward();
+    exitSelectMode();
+    showToast(`Forwarded to ${target.name}`);
+  } catch (e: any) {
+    showToast(e?.response?.data?.error ?? e?.message ?? "Failed to forward");
+  } finally {
+    forwardSending.value = false;
+  }
+}
+
+// ── Multi-select ─────────────────────────────────────────────────────────────
+
+function enterSelectMode(msg: TgMessage) {
+  selectMode.value = true;
+  selectedMsgIds.value = new Set([msg.id]);
+}
+
+function toggleSelectMsg(msg: TgMessage) {
+  const next = new Set(selectedMsgIds.value);
+  if (next.has(msg.id)) next.delete(msg.id);
+  else next.add(msg.id);
+  selectedMsgIds.value = next;
+}
+
+function exitSelectMode() {
+  selectMode.value = false;
+  selectedMsgIds.value = new Set();
+}
+
+function onBubbleClick(msg: TgMessage) {
+  if (selectMode.value) {
+    toggleSelectMsg(msg);
+    return;
+  }
+  activeMsgId.value = activeMsgId.value === msg.id ? null : msg.id;
+}
+
+// ── Typing indicators ────────────────────────────────────────────────────────
+
+function onTypingEvent(
+  chatId: string,
+  userName: string | null,
+  cancelled: boolean,
+) {
+  const existing = typingTimers.get(chatId);
+  if (existing) clearTimeout(existing);
+  const clearTyping = () => {
+    typingTimers.delete(chatId);
+    const rest = { ...typingChats.value };
+    delete rest[chatId];
+    typingChats.value = rest;
+  };
+  if (cancelled) {
+    clearTyping();
+    return;
+  }
+  typingChats.value = { ...typingChats.value, [chatId]: userName };
+  // Telegram typing notifications are valid for ~6s unless renewed
+  typingTimers.set(chatId, setTimeout(clearTyping, 6000));
+}
+
+function isTyping(chatId: string): boolean {
+  return chatId in typingChats.value;
+}
+
+function typingLabel(chatId: string): string {
+  const name = typingChats.value[chatId];
+  return name ? `${name} is typing...` : "typing...";
+}
+
+function onComposeInput() {
+  autoResize();
+  notifyTyping();
+}
+
+// Throttled -- Telegram expects a SetTyping ping roughly every 5s while typing
+function notifyTyping() {
+  if (!selectedAccountId.value || !activeChatId.value) return;
+  if (!inputText.value.trim()) return;
+  const now = Date.now();
+  if (now - lastTypingSent < 4000) return;
+  lastTypingSent = now;
+  tgClientApi
+    .sendTyping(selectedAccountId.value, activeChatId.value)
+    .catch(() => {});
 }
 
 // Returns a data URI from the local cache, or '' if not yet loaded.
@@ -1846,6 +2497,7 @@ async function openProfile() {
         memberCount: null,
         firstName: null,
         lastName: null,
+        blocked: null,
       };
     }
   } finally {
@@ -2806,6 +3458,11 @@ async function onAccountChange() {
   tgFolders.value = [];
   showThread.value = false;
   replyingTo.value = null;
+  editingMsg.value = null;
+  exitSelectMode();
+  typingTimers.forEach((timer) => clearTimeout(timer));
+  typingTimers.clear();
+  typingChats.value = {};
   botCommands.value = [];
   saveMessengerState();
   await loadDialogs();
@@ -2965,6 +3622,8 @@ async function openChat(dialog: TgDialog, addToHistory = false) {
   showThread.value = false;
   threadRootMsg.value = null;
   replyingTo.value = null;
+  editingMsg.value = null;
+  exitSelectMode();
   botCommands.value = [];
   joinRequestSent.value = false;
   pendingJoinChatId.value = null;
@@ -3255,6 +3914,11 @@ async function loadOlderMessages() {
 }
 
 function onComposeKey(e: KeyboardEvent) {
+  if (e.key === "Escape" && editingMsg.value) {
+    e.preventDefault();
+    cancelEditMessage();
+    return;
+  }
   // Command suggestion keyboard navigation
   if (commandSuggestions.value.length) {
     if (e.key === "ArrowUp") {
@@ -3404,6 +4068,10 @@ async function sendFileMessage() {
 }
 
 async function sendMessage() {
+  if (editingMsg.value) {
+    await submitEditMessage();
+    return;
+  }
   if (pendingFile.value) {
     await sendFileMessage();
     return;
@@ -3522,6 +4190,12 @@ function startLiveSocket() {
         dialogs.value = data.dialogs as TgDialog[];
       } else if (data.type === "readOutbox") {
         onReadOutbox(data.chatId as string, data.maxId as number);
+      } else if (data.type === "typing") {
+        onTypingEvent(
+          data.chatId as string,
+          (data.userName as string | null) ?? null,
+          Boolean(data.cancelled),
+        );
       }
     } catch {
       /* ignore parse errors */
@@ -6187,5 +6861,245 @@ async function saveContactEdit() {
 
 .tgc-gourl-input:focus {
   border-color: #4361ee;
+}
+
+/* Profile action buttons (block / report) */
+.tgc-profile-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px 16px;
+}
+
+.tgc-profile-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fff;
+  color: #444;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tgc-profile-action-btn:hover:not(:disabled) {
+  background: #f5f5f5;
+}
+
+.tgc-profile-action-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.tgc-profile-action-danger,
+.tgc-profile-action-danger i {
+  color: #d33;
+}
+
+.tgc-profile-action-danger:hover:not(:disabled) {
+  background: #fdecec;
+}
+
+/* Report dialog */
+.tgc-report-card {
+  text-align: left;
+}
+
+.tgc-report-card .tgc-invite-icon,
+.tgc-report-card .tgc-invite-title {
+  text-align: center;
+}
+
+.tgc-report-reasons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  margin: 12px 0 14px;
+}
+
+.tgc-report-reason {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #444;
+  cursor: pointer;
+}
+
+.tgc-report-comment {
+  resize: vertical;
+  font-family: inherit;
+}
+
+/* Danger variant of the confirm button */
+.tgc-danger-btn {
+  background: #d33;
+}
+
+.tgc-danger-btn:hover:not(:disabled) {
+  background: #b52a2a;
+}
+
+/* Delete confirmations */
+.tgc-revoke-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 13px;
+  color: #444;
+  margin-bottom: 18px;
+  cursor: pointer;
+}
+
+/* Forward picker */
+.tgc-forward-card {
+  text-align: left;
+  max-width: 360px;
+}
+
+.tgc-forward-card .tgc-invite-title {
+  margin-bottom: 14px;
+}
+
+.tgc-forward-list {
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: 14px;
+  border: 1px solid #eee;
+  border-radius: 8px;
+}
+
+.tgc-forward-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  font-size: 14px;
+  color: #222;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tgc-forward-item:hover:not(:disabled) {
+  background: #f2f5ff;
+}
+
+.tgc-forward-item:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tgc-forward-avatar {
+  width: 32px;
+  height: 32px;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.tgc-forward-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Typing indicator */
+.tgc-typing {
+  color: #4361ee;
+  font-style: italic;
+}
+
+/* Multi-select mode */
+.tgc-msg-selectable {
+  cursor: pointer;
+}
+
+.tgc-msg-selectable .tgc-msg-bubble {
+  pointer-events: none;
+}
+
+.tgc-msg-selected .tgc-msg-bubble {
+  outline: 2px solid #4361ee;
+  outline-offset: 1px;
+}
+
+.tgc-msg-select-tick {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid #bbb;
+  color: transparent;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  margin: 0 6px;
+  flex-shrink: 0;
+  background: #fff;
+}
+
+.tgc-msg-select-tick.checked {
+  background: #4361ee;
+  border-color: #4361ee;
+  color: #fff;
+}
+
+.tgc-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid #eee;
+  background: #fff;
+}
+
+.tgc-select-count {
+  font-size: 14px;
+  font-weight: 600;
+  color: #222;
+  flex: 1;
+}
+
+.tgc-select-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.tgc-select-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 8px;
+  background: #4361ee;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tgc-select-btn:hover:not(:disabled) {
+  background: #3451d1;
+}
+
+.tgc-select-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tgc-select-danger {
+  background: #d33;
+}
+
+.tgc-select-danger:hover:not(:disabled) {
+  background: #b52a2a;
 }
 </style>

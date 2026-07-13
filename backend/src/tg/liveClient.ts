@@ -76,6 +76,14 @@ type LiveEntry = {
   // Tracks the highest outgoing message ID the recipient has read, per chatId
   readOutboxCache: Map<string, number>;
   readSubscribers: Set<(chatId: string, maxId: number) => void>;
+  typingSubscribers: Set<(event: TgTypingEvent) => void>;
+};
+
+export type TgTypingEvent = {
+  chatId: string;
+  userId: string | null;
+  userName: string | null;
+  cancelled: boolean;
 };
 
 const liveClients = new Map<number, LiveEntry>();
@@ -399,6 +407,7 @@ export async function getLiveClient(accountId: number): Promise<LiveEntry> {
     avatarCache: new Map(),
     readOutboxCache: new Map(),
     readSubscribers: new Set(),
+    typingSubscribers: new Set(),
   };
   liveClients.set(accountId, entry);
 
@@ -465,6 +474,57 @@ export async function getLiveClient(accountId: number): Promise<LiveEntry> {
       entry!.readSubscribers.forEach((sub) => sub(chatId, update.maxId));
     },
     new Raw({ types: [Api.UpdateReadChannelOutbox] }),
+  );
+
+  // Typing notifications for private chats, basic groups and supergroups
+  const emitTyping = (
+    chatId: string,
+    fromId: string | null,
+    action: Api.TypeSendMessageAction,
+  ) => {
+    let userName: string | null = null;
+    if (fromId) {
+      const sender = entry!.entityCache.get(fromId);
+      if (sender) userName = entityName(sender);
+    }
+    entry!.typingSubscribers.forEach((sub) =>
+      sub({
+        chatId,
+        userId: fromId,
+        userName,
+        cancelled: action instanceof Api.SendMessageCancelAction,
+      }),
+    );
+  };
+
+  client.addEventHandler(
+    (update: Api.UpdateUserTyping) => {
+      const uid = `u${update.userId.toString()}`;
+      emitTyping(uid, uid, update.action);
+    },
+    new Raw({ types: [Api.UpdateUserTyping] }),
+  );
+
+  client.addEventHandler(
+    (update: Api.UpdateChatUserTyping) => {
+      emitTyping(
+        `g${update.chatId.toString()}`,
+        update.fromId ? peerToChatId(update.fromId) : null,
+        update.action,
+      );
+    },
+    new Raw({ types: [Api.UpdateChatUserTyping] }),
+  );
+
+  client.addEventHandler(
+    (update: Api.UpdateChannelUserTyping) => {
+      emitTyping(
+        `c${update.channelId.toString()}`,
+        update.fromId ? peerToChatId(update.fromId) : null,
+        update.action,
+      );
+    },
+    new Raw({ types: [Api.UpdateChannelUserTyping] }),
   );
 
   return entry;
@@ -555,13 +615,24 @@ export async function getMessages(
   const entity = entry.entityCache.get(chatId);
   if (!entity) throw new Error("Chat not found -- open the dialogs list first");
 
-  const all = await entry.client.getMessages(entity, {
-    limit,
-    ...(offsetId ? { offsetId } : {}),
-    ...(search ? { search } : {}),
-  });
-  // Drop service messages (join/leave/pin announcements) and empty placeholders
-  const msgs = all.filter((m) => m instanceof Api.Message);
+  // Service messages (join/leave/pin announcements) are dropped, so keep fetching
+  // until a full page of real messages is collected. Returning a short page would
+  // make the frontend believe history is exhausted and stop paginating.
+  const msgs: Api.Message[] = [];
+  let cursor = offsetId;
+  for (let hop = 0; hop < 5 && msgs.length < limit; hop++) {
+    const batch = await entry.client.getMessages(entity, {
+      limit,
+      ...(cursor ? { offsetId: cursor } : {}),
+      ...(search ? { search } : {}),
+    });
+    if (!batch.length) break;
+    for (const m of batch) {
+      if (m instanceof Api.Message && msgs.length < limit) msgs.push(m);
+    }
+    cursor = batch[batch.length - 1].id;
+    if (batch.length < limit) break; // genuine end of history
+  }
 
   // Batch-fetch reply-to message texts for quote display
   const replyIdSet = new Set<number>();
@@ -960,6 +1031,7 @@ export type TgProfileInfo = {
   memberCount: number | null;
   firstName: string | null;
   lastName: string | null;
+  blocked: boolean | null;
 };
 
 export async function getEntityDetails(
@@ -983,6 +1055,7 @@ export async function getEntityDetails(
 
   let bio: string | null = null;
   let memberCount: number | null = null;
+  let blocked: boolean | null = null;
 
   try {
     if (entity instanceof Api.User) {
@@ -990,6 +1063,7 @@ export async function getEntityDetails(
         new Api.users.GetFullUser({ id: entity as any }),
       );
       bio = (full as any).fullUser?.about ?? null;
+      blocked = Boolean((full as any).fullUser?.blocked);
     } else if (entity instanceof Api.Channel) {
       const full = await entry.client.invoke(
         new Api.channels.GetFullChannel({ channel: entity as any }),
@@ -1019,7 +1093,169 @@ export async function getEntityDetails(
     memberCount,
     firstName: isUser ? ((entity as Api.User).firstName ?? null) : null,
     lastName: isUser ? ((entity as Api.User).lastName ?? null) : null,
+    blocked,
   };
+}
+
+// Block or unblock a user (contacts.Block / contacts.Unblock)
+export async function setBlocked(
+  entry: LiveEntry,
+  chatId: string,
+  blocked: boolean,
+): Promise<void> {
+  await ensureEntityCached(entry, chatId);
+  const entity = entry.entityCache.get(chatId);
+  if (!(entity instanceof Api.User))
+    throw new Error("Only users and bots can be blocked");
+  if (blocked) {
+    await entry.client.invoke(new Api.contacts.Block({ id: entity as any }));
+  } else {
+    await entry.client.invoke(new Api.contacts.Unblock({ id: entity as any }));
+  }
+}
+
+export type TgReportReason =
+  | "spam"
+  | "violence"
+  | "pornography"
+  | "childAbuse"
+  | "illegalDrugs"
+  | "personalDetails"
+  | "fake"
+  | "copyright"
+  | "other";
+
+const REPORT_REASON_MAP: Record<TgReportReason, () => Api.TypeReportReason> = {
+  spam: () => new Api.InputReportReasonSpam(),
+  violence: () => new Api.InputReportReasonViolence(),
+  pornography: () => new Api.InputReportReasonPornography(),
+  childAbuse: () => new Api.InputReportReasonChildAbuse(),
+  illegalDrugs: () => new Api.InputReportReasonIllegalDrugs(),
+  personalDetails: () => new Api.InputReportReasonPersonalDetails(),
+  fake: () => new Api.InputReportReasonFake(),
+  copyright: () => new Api.InputReportReasonCopyright(),
+  other: () => new Api.InputReportReasonOther(),
+};
+
+// Report a user, group or channel to Telegram
+export async function reportPeer(
+  entry: LiveEntry,
+  chatId: string,
+  reason: TgReportReason,
+  comment = "",
+): Promise<void> {
+  await ensureEntityCached(entry, chatId);
+  const entity = entry.entityCache.get(chatId);
+  if (!entity) throw new Error("Chat not found");
+  const makeReason = REPORT_REASON_MAP[reason];
+  if (!makeReason) throw new Error("Unknown report reason");
+  await entry.client.invoke(
+    new Api.account.ReportPeer({
+      peer: entity as any,
+      reason: makeReason(),
+      message: comment,
+    }),
+  );
+}
+
+// Delete chat history. revoke=true also removes it for the other side
+// (private chats only). Channels/supergroups clear the local copy only.
+export async function deleteHistory(
+  entry: LiveEntry,
+  chatId: string,
+  revoke: boolean,
+): Promise<void> {
+  await ensureEntityCached(entry, chatId);
+  const entity = entry.entityCache.get(chatId);
+  if (!entity) throw new Error("Chat not found");
+  if (entity instanceof Api.Channel) {
+    await entry.client.invoke(
+      new Api.channels.DeleteHistory({ channel: entity as any, maxId: 0 }),
+    );
+  } else {
+    await entry.client.invoke(
+      new Api.messages.DeleteHistory({
+        peer: entity as any,
+        maxId: 0,
+        revoke,
+      }),
+    );
+  }
+}
+
+// Delete specific messages. revoke=true deletes for everyone
+// (channel/supergroup deletes are always for everyone).
+export async function deleteMessages(
+  entry: LiveEntry,
+  chatId: string,
+  ids: number[],
+  revoke: boolean,
+): Promise<void> {
+  await ensureEntityCached(entry, chatId);
+  const entity = entry.entityCache.get(chatId);
+  if (!entity) throw new Error("Chat not found");
+  if (entity instanceof Api.Channel) {
+    await entry.client.invoke(
+      new Api.channels.DeleteMessages({ channel: entity as any, id: ids }),
+    );
+  } else {
+    await entry.client.invoke(
+      new Api.messages.DeleteMessages({ id: ids, revoke }),
+    );
+  }
+}
+
+// Edit the text of an own message
+export async function editMessage(
+  entry: LiveEntry,
+  chatId: string,
+  msgId: number,
+  text: string,
+): Promise<void> {
+  await ensureEntityCached(entry, chatId);
+  const entity = entry.entityCache.get(chatId);
+  if (!entity) throw new Error("Chat not found");
+  await entry.client.invoke(
+    new Api.messages.EditMessage({
+      peer: entity as any,
+      id: msgId,
+      message: text,
+    }),
+  );
+}
+
+// Broadcast that this account is typing in a chat (auto-expires after ~6s)
+export async function sendTyping(
+  entry: LiveEntry,
+  chatId: string,
+): Promise<void> {
+  await ensureEntityCached(entry, chatId);
+  const entity = entry.entityCache.get(chatId);
+  if (!entity) throw new Error("Chat not found");
+  await entry.client.invoke(
+    new Api.messages.SetTyping({
+      peer: entity as any,
+      action: new Api.SendMessageTypingAction(),
+    }),
+  );
+}
+
+// Forward messages to another chat
+export async function forwardMessages(
+  entry: LiveEntry,
+  fromChatId: string,
+  toChatId: string,
+  ids: number[],
+): Promise<void> {
+  await ensureEntityCached(entry, fromChatId);
+  await ensureEntityCached(entry, toChatId);
+  const fromEntity = entry.entityCache.get(fromChatId);
+  const toEntity = entry.entityCache.get(toChatId);
+  if (!fromEntity || !toEntity) throw new Error("Chat not found");
+  await entry.client.forwardMessages(toEntity, {
+    messages: ids,
+    fromPeer: fromEntity,
+  });
 }
 
 export type TgFolderItem = {
@@ -1748,6 +1984,16 @@ export function subscribeToDialogs(
   return () => entry.dialogSubscribers.delete(handler);
 }
 
+export function subscribeToTyping(
+  accountId: number,
+  handler: (event: TgTypingEvent) => void,
+): () => void {
+  const entry = liveClients.get(accountId);
+  if (!entry) return () => {};
+  entry.typingSubscribers.add(handler);
+  return () => entry.typingSubscribers.delete(handler);
+}
+
 // --- Message cache helpers ---
 
 const MSG_CACHE_MAX = 500;
@@ -1791,6 +2037,39 @@ export function cacheMessages(
       SELECT msg_id FROM tg_message_cache WHERE account_id = ? AND chat_id = ? ORDER BY msg_id DESC LIMIT ?
     )`,
   ).run(accountId, chatId, accountId, chatId, MSG_CACHE_MAX);
+}
+
+// Rewrite the cached payload text after an edit so reloads show the new text
+export function updateCachedMessageText(
+  accountId: number,
+  chatId: string,
+  msgId: number,
+  text: string,
+): void {
+  const row = db
+    .prepare(
+      "SELECT payload FROM tg_message_cache WHERE account_id = ? AND chat_id = ? AND msg_id = ?",
+    )
+    .get(accountId, chatId, msgId) as { payload: string } | undefined;
+  if (!row) return;
+  const payload = JSON.parse(row.payload) as TgMsgPayload;
+  payload.text = text;
+  payload.html = entitiesToHtml(text, undefined);
+  db.prepare(
+    "UPDATE tg_message_cache SET payload = ? WHERE account_id = ? AND chat_id = ? AND msg_id = ?",
+  ).run(JSON.stringify(payload), accountId, chatId, msgId);
+}
+
+export function removeCachedMessages(
+  accountId: number,
+  chatId: string,
+  ids: number[],
+): void {
+  if (!ids.length) return;
+  const placeholders = ids.map(() => "?").join(",");
+  db.prepare(
+    `DELETE FROM tg_message_cache WHERE account_id = ? AND chat_id = ? AND msg_id IN (${placeholders})`,
+  ).run(accountId, chatId, ...ids);
 }
 
 export function clearCachedMessages(accountId: number, chatId: string): void {

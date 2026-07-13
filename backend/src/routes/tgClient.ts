@@ -33,6 +33,15 @@ import {
   getCachedMessages,
   cacheMessages,
   clearCachedMessages,
+  removeCachedMessages,
+  updateCachedMessageText,
+  setBlocked,
+  reportPeer,
+  deleteHistory,
+  deleteMessages,
+  editMessage,
+  forwardMessages,
+  sendTyping,
   syncMessagesInBackground,
   joinChannel,
   leaveChat,
@@ -596,6 +605,135 @@ router.post("/:accountId/pin/:chatId", async (req, res) => {
   try {
     const entry = await getLiveClient(accountId);
     await pinDialog(entry, chatId, Boolean(pinned));
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/typing/:chatId -- broadcast a typing notification
+router.post("/:accountId/typing/:chatId", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  try {
+    const entry = await getLiveClient(accountId);
+    await sendTyping(entry, chatId);
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/block/:chatId -- block or unblock a user
+router.post("/:accountId/block/:chatId", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  const { blocked = true } = req.body as { blocked?: boolean };
+  try {
+    const entry = await getLiveClient(accountId);
+    await setBlocked(entry, chatId, Boolean(blocked));
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/report/:chatId -- report a user, group or channel
+router.post("/:accountId/report/:chatId", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  const { reason, comment = "" } = req.body as {
+    reason?: string;
+    comment?: string;
+  };
+  if (!reason) {
+    res.status(400).json({ error: "reason is required" });
+    return;
+  }
+  try {
+    const entry = await getLiveClient(accountId);
+    await reportPeer(entry, chatId, reason as any, String(comment));
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// DELETE /:accountId/history/:chatId?revoke=1 -- delete chat history
+router.delete("/:accountId/history/:chatId", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  const revoke = req.query.revoke === "1";
+  try {
+    const entry = await getLiveClient(accountId);
+    await deleteHistory(entry, chatId, revoke);
+    clearCachedMessages(accountId, chatId);
+    // Refresh the dialog list so the removed chat disappears
+    syncDialogsInBackground(accountId).catch(() => {});
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/messages/:chatId/delete -- delete messages { ids, revoke }
+router.post("/:accountId/messages/:chatId/delete", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  const { ids, revoke = true } = req.body as {
+    ids?: number[];
+    revoke?: boolean;
+  };
+  if (!Array.isArray(ids) || !ids.length) {
+    res.status(400).json({ error: "ids is required" });
+    return;
+  }
+  const msgIds = ids.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+  try {
+    const entry = await getLiveClient(accountId);
+    await deleteMessages(entry, chatId, msgIds, Boolean(revoke));
+    removeCachedMessages(accountId, chatId, msgIds);
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/messages/:chatId/:msgId/edit -- edit an own message { text }
+router.post("/:accountId/messages/:chatId/:msgId/edit", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  const msgId = Number(req.params.msgId);
+  const { text } = req.body as { text?: string };
+  if (!text?.trim()) {
+    res.status(400).json({ error: "text is required" });
+    return;
+  }
+  try {
+    const entry = await getLiveClient(accountId);
+    await editMessage(entry, chatId, msgId, text.trim());
+    updateCachedMessageText(accountId, chatId, msgId, text.trim());
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/messages/:chatId/forward -- forward messages { toChatId, ids }
+router.post("/:accountId/messages/:chatId/forward", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  const { toChatId, ids } = req.body as { toChatId?: string; ids?: number[] };
+  if (!toChatId || !Array.isArray(ids) || !ids.length) {
+    res.status(400).json({ error: "toChatId and ids are required" });
+    return;
+  }
+  const msgIds = ids.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+  try {
+    const entry = await getLiveClient(accountId);
+    await forwardMessages(entry, chatId, String(toChatId), msgIds);
+    // Sync the target chat so the forwarded messages appear promptly
+    syncMessagesInBackground(accountId, String(toChatId)).catch(() => {});
     res.json({ ok: true });
   } catch (err: any) {
     tgError(err, accountId, res);

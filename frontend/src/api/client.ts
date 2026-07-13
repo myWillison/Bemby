@@ -949,7 +949,19 @@ export type TgProfile = {
   memberCount: number | null;
   firstName: string | null;
   lastName: string | null;
+  blocked: boolean | null;
 };
+
+export type TgReportReason =
+  | "spam"
+  | "violence"
+  | "pornography"
+  | "childAbuse"
+  | "illegalDrugs"
+  | "personalDetails"
+  | "fake"
+  | "copyright"
+  | "other";
 
 export type TgBotCommand = {
   command: string;
@@ -1155,6 +1167,86 @@ export const tgClientApi = {
       }>(
         `/tg-client/${accountId}/messages/${encodeURIComponent(chatId)}/${msgId}/button`,
         { data },
+      )
+      .then((r) => r.data),
+
+  sendTyping: (accountId: number, chatId: string) =>
+    api
+      .post<{
+        ok: boolean;
+      }>(`/tg-client/${accountId}/typing/${encodeURIComponent(chatId)}`)
+      .then((r) => r.data),
+
+  setBlocked: (accountId: number, chatId: string, blocked: boolean) =>
+    api
+      .post<{
+        ok: boolean;
+      }>(`/tg-client/${accountId}/block/${encodeURIComponent(chatId)}`, {
+        blocked,
+      })
+      .then((r) => r.data),
+
+  report: (
+    accountId: number,
+    chatId: string,
+    reason: TgReportReason,
+    comment?: string,
+  ) =>
+    api
+      .post<{
+        ok: boolean;
+      }>(`/tg-client/${accountId}/report/${encodeURIComponent(chatId)}`, {
+        reason,
+        ...(comment ? { comment } : {}),
+      })
+      .then((r) => r.data),
+
+  deleteHistory: (accountId: number, chatId: string, revoke: boolean) =>
+    api
+      .delete<{
+        ok: boolean;
+      }>(`/tg-client/${accountId}/history/${encodeURIComponent(chatId)}`, {
+        params: revoke ? { revoke: 1 } : {},
+      })
+      .then((r) => r.data),
+
+  deleteMessages: (
+    accountId: number,
+    chatId: string,
+    ids: number[],
+    revoke: boolean,
+  ) =>
+    api
+      .post<{
+        ok: boolean;
+      }>(
+        `/tg-client/${accountId}/messages/${encodeURIComponent(chatId)}/delete`,
+        { ids, revoke },
+      )
+      .then((r) => r.data),
+
+  editMessage: (accountId: number, chatId: string, msgId: number, text: string) =>
+    api
+      .post<{
+        ok: boolean;
+      }>(
+        `/tg-client/${accountId}/messages/${encodeURIComponent(chatId)}/${msgId}/edit`,
+        { text },
+      )
+      .then((r) => r.data),
+
+  forwardMessages: (
+    accountId: number,
+    chatId: string,
+    toChatId: string,
+    ids: number[],
+  ) =>
+    api
+      .post<{
+        ok: boolean;
+      }>(
+        `/tg-client/${accountId}/messages/${encodeURIComponent(chatId)}/forward`,
+        { toChatId, ids },
       )
       .then((r) => r.data),
 
