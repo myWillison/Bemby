@@ -1201,6 +1201,23 @@ export const tgClientApi = {
       })
       .then((r) => r.data),
 
+  clearAccountCache: (accountId: number) =>
+    api
+      .delete<{ ok: boolean }>(`/tg-client/${accountId}/cache`)
+      .then((r) => r.data),
+
+  cleanAccount: (accountId: number) =>
+    api
+      .post<{
+        ok: boolean;
+        left: number;
+        deleted: number;
+        contacts: number;
+        folders: number;
+        failed: { chatId: string; name: string; error: string }[];
+      }>(`/tg-client/${accountId}/clean`)
+      .then((r) => r.data),
+
   deleteHistory: (accountId: number, chatId: string, revoke: boolean) =>
     api
       .delete<{

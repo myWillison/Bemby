@@ -37,6 +37,22 @@
         <div class="tgc-header-right">
           <button
             class="tgc-icon-btn"
+            :title="t('tgc.clearAccountCache')"
+            :disabled="!selectedAccountId || clearingCache"
+            @click="onClearAccountCache"
+          >
+            <i class="fa-solid fa-eraser"></i>
+          </button>
+          <button
+            class="tgc-icon-btn tgc-clean-btn"
+            :title="t('tgc.clean.btnTitle')"
+            :disabled="!selectedAccountId"
+            @click="openCleanConfirm"
+          >
+            <i class="fa-solid fa-broom"></i>
+          </button>
+          <button
+            class="tgc-icon-btn"
             title="Contacts"
             @click="showContacts = true"
           >
@@ -1502,6 +1518,68 @@
     </div>
   </div>
 
+  <!-- Clean account confirmation -->
+  <div
+    v-if="showCleanConfirm"
+    class="tgc-invite-overlay"
+    @click.self="closeCleanConfirm"
+  >
+    <div class="tgc-invite-card tgc-clean-card">
+      <div class="tgc-invite-icon tgc-clean-icon">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+      </div>
+      <div class="tgc-invite-title">{{ t("tgc.clean.title") }}</div>
+      <div class="tgc-clean-account-line">
+        {{ t("tgc.clean.bembyAccount") }}
+        <strong>{{ selectedAccount?.name }}</strong>
+      </div>
+      <div class="tgc-clean-account-line">
+        {{ t("tgc.clean.tgAccount") }}
+        <strong>{{
+          selectedAccount?.tgDisplayName ||
+          selectedAccount?.tgUsername ||
+          selectedAccount?.phoneNumber ||
+          t("tgc.clean.unknown")
+        }}</strong>
+      </div>
+      <div class="tgc-invite-meta tgc-clean-warning">
+        {{ t("tgc.clean.actionsIntro") }}
+        <ul class="tgc-clean-list">
+          <li>{{ t("tgc.clean.actionLeaveGroups") }}</li>
+          <li>{{ t("tgc.clean.actionLeaveChannels") }}</li>
+          <li>{{ t("tgc.clean.actionDeleteChats") }}</li>
+          <li>{{ t("tgc.clean.actionRemoveContacts") }}</li>
+          <li>{{ t("tgc.clean.actionRemoveFolders") }}</li>
+        </ul>
+        {{ t("tgc.clean.keptNote") }}
+      </div>
+      <label class="tgc-revoke-check">
+        <input type="checkbox" v-model="cleanConfirmChecked" />
+        {{ t("tgc.clean.confirmCheck") }}
+      </label>
+      <div class="tgc-invite-actions">
+        <button
+          class="tgc-invite-cancel"
+          :disabled="cleaning"
+          @click="closeCleanConfirm"
+        >
+          {{ t("common.cancel") }}
+        </button>
+        <button
+          class="tgc-invite-join tgc-danger-btn"
+          :disabled="!cleanConfirmChecked || cleaning"
+          @click="confirmCleanAccount"
+        >
+          <span v-if="cleaning">
+            <span class="tgc-spinner tgc-spinner-sm"></span>
+            {{ t("tgc.clean.cleaning") }}
+          </span>
+          <span v-else>{{ t("tgc.clean.confirmBtn") }}</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Forward message picker -->
   <div
     v-if="forwardIds"
@@ -1787,6 +1865,18 @@ const reportSending = ref(false);
 const deleteChatTarget = ref<TgDialog | null>(null);
 const deleteChatRevoke = ref(true);
 const deletingChat = ref(false);
+
+// Clean account (bulk leave/delete)
+const showCleanConfirm = ref(false);
+const cleanConfirmChecked = ref(false);
+const cleaning = ref(false);
+const clearingCache = ref(false);
+const selectedAccount = computed(
+  () =>
+    authenticatedAccounts.value.find(
+      (a) => a.id === selectedAccountId.value,
+    ) ?? null,
+);
 
 const REPORT_REASONS: { value: TgReportReason; label: string }[] = [
   { value: "spam", label: "Spam" },
@@ -2228,6 +2318,83 @@ async function submitReport() {
     showToast(e?.response?.data?.error ?? e?.message ?? "Failed to report");
   } finally {
     reportSending.value = false;
+  }
+}
+
+// ── Clean account ─────────────────────────────────────────────────────────────
+
+async function onClearAccountCache() {
+  if (!selectedAccountId.value || clearingCache.value) return;
+  clearingCache.value = true;
+  try {
+    await tgClientApi.clearAccountCache(selectedAccountId.value);
+    // Reset local state so everything refetches fresh
+    avatarCache.clear();
+    persistAvatarCache();
+    contacts.value = [];
+    chatNavStack.value = [];
+    if (activeChatId.value) closeChat();
+    profileDetails.value = null;
+    showProfile.value = false;
+    await loadDialogs();
+    showToast(t("tgc.clearAccountCacheDone"));
+  } catch (e: any) {
+    showToast(
+      e?.response?.data?.error ??
+        e?.message ??
+        t("tgc.clearAccountCacheFailed"),
+    );
+  } finally {
+    clearingCache.value = false;
+  }
+}
+
+function openCleanConfirm() {
+  if (!selectedAccountId.value) return;
+  cleanConfirmChecked.value = false;
+  showCleanConfirm.value = true;
+}
+
+function closeCleanConfirm() {
+  if (cleaning.value) return;
+  showCleanConfirm.value = false;
+  cleanConfirmChecked.value = false;
+}
+
+async function confirmCleanAccount() {
+  if (!selectedAccountId.value || cleaning.value) return;
+  const accountId = selectedAccountId.value;
+  cleaning.value = true;
+  try {
+    const result = await tgClientApi.cleanAccount(accountId);
+    showCleanConfirm.value = false;
+    cleanConfirmChecked.value = false;
+    // Reset the open chat and reload the (now nearly empty) dialog list
+    chatNavStack.value = [];
+    if (activeChatId.value) closeChat();
+    profileDetails.value = null;
+    showProfile.value = false;
+    contacts.value = [];
+    activeFolder.value = "all";
+    await loadDialogs();
+    let msg = t("tgc.clean.toastResult")
+      .replace("{left}", String(result.left))
+      .replace("{deleted}", String(result.deleted))
+      .replace("{contacts}", String(result.contacts))
+      .replace("{folders}", String(result.folders));
+    if (result.failed.length) {
+      msg += `, ${t("tgc.clean.toastFailedPart").replace(
+        "{n}",
+        String(result.failed.length),
+      )}`;
+    }
+    showToast(msg);
+  } catch (e: any) {
+    showToast(
+      e?.response?.data?.error ?? e?.message ?? t("tgc.clean.failed"),
+    );
+  } finally {
+    cleaning.value = false;
   }
 }
 
@@ -6987,6 +7154,37 @@ async function saveContactEdit() {
   color: #444;
   margin-bottom: 18px;
   cursor: pointer;
+}
+
+/* Clean account confirmation */
+.tgc-clean-card {
+  max-width: 360px;
+}
+
+.tgc-clean-icon {
+  background: #fdecec;
+  color: #d33;
+}
+
+.tgc-clean-account-line {
+  font-size: 13px;
+  color: #444;
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+
+.tgc-clean-warning {
+  margin-top: 10px;
+}
+
+.tgc-clean-list {
+  text-align: left;
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.tgc-clean-list li {
+  margin-bottom: 2px;
 }
 
 /* Forward picker */

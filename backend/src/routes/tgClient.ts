@@ -48,6 +48,8 @@ import {
   getCachedDialogs,
   cacheDialogs,
   removeCachedDialog,
+  clearAccountCache,
+  cleanAccount,
   syncDialogsInBackground,
   fetchAvatarsBatch,
   checkMembership,
@@ -655,6 +657,32 @@ router.post("/:accountId/report/:chatId", async (req, res) => {
     const entry = await getLiveClient(accountId);
     await reportPeer(entry, chatId, reason as any, String(comment));
     res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// DELETE /:accountId/cache -- drop all cached data for the account.
+// Works without a connected client; everything refetches on demand.
+router.delete("/:accountId/cache", (req, res) => {
+  const accountId = Number(req.params.accountId);
+  try {
+    clearAccountCache(accountId);
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/clean -- leave all groups/channels and delete all private
+// chats for both sides. Irreversible; the frontend confirms before calling.
+router.post("/:accountId/clean", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  try {
+    const entry = await getLiveClient(accountId);
+    const result = await cleanAccount(entry, accountId);
+    syncDialogsInBackground(accountId).catch(() => {});
+    res.json({ ok: true, ...result });
   } catch (err: any) {
     tgError(err, accountId, res);
   }

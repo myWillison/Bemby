@@ -1888,6 +1888,20 @@ function openEdit(a: Account) {
 
 async function saveAccount() {
   formError.value = "";
+  if (!form.name || !form.phoneNumber) {
+    formError.value = t("accounts.errors.namePhoneRequired");
+    return;
+  }
+  // On create, credentials are only optional when global defaults exist
+  // (on edit, blank fields keep the account's stored credentials)
+  if (
+    !editTarget.value &&
+    !hasGlobalTgCreds.value &&
+    (!form.apiId || !form.apiHash)
+  ) {
+    formError.value = t("accounts.errors.apiCredsRequired");
+    return;
+  }
   saving.value = true;
   try {
     if (editTarget.value) {
@@ -1914,7 +1928,13 @@ async function saveAccount() {
     showForm.value = false;
     await load();
   } catch (err: any) {
-    formError.value = err.response?.data?.error ?? t("common.saveFailed");
+    const raw = err.response?.data?.error as string | undefined;
+    // Translate known backend messages; show others as-is
+    formError.value = raw?.includes("apiId and apiHash are required")
+      ? t("accounts.errors.apiCredsRequired")
+      : raw?.includes("name and phoneNumber are required")
+        ? t("accounts.errors.namePhoneRequired")
+        : (raw ?? t("common.saveFailed"));
   } finally {
     saving.value = false;
   }

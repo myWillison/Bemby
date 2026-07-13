@@ -2135,6 +2135,24 @@ export function cacheDialogs(accountId: number, dialogs: TgDialogItem[]): void {
   })();
 }
 
+// Drop everything cached for an account: SQLite message/dialog caches and the
+// live client's in-memory entity, avatar and read-state caches. All of it is
+// refetched from Telegram on demand.
+export function clearAccountCache(accountId: number): void {
+  db.prepare("DELETE FROM tg_message_cache WHERE account_id = ?").run(
+    accountId,
+  );
+  db.prepare("DELETE FROM tg_dialog_cache WHERE account_id = ?").run(
+    accountId,
+  );
+  const entry = liveClients.get(accountId);
+  if (entry) {
+    entry.entityCache.clear();
+    entry.avatarCache.clear();
+    entry.readOutboxCache.clear();
+  }
+}
+
 export function removeCachedDialog(accountId: number, chatId: string): void {
   db.prepare(
     "DELETE FROM tg_dialog_cache WHERE account_id = ? AND chat_id = ?",
@@ -2171,4 +2189,133 @@ export async function syncDialogsInBackground(
     cacheDialogs(accountId, dialogs);
     entry.dialogSubscribers.forEach((sub) => sub(dialogs));
   } catch {}
+}
+
+export type TgCleanResult = {
+  left: number;
+  deleted: number;
+  contacts: number;
+  folders: number;
+  failed: { chatId: string; name: string; error: string }[];
+};
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Bulk-clean an account: leave every group and channel, delete every private
+// chat for both sides, remove all contacts and all custom chat folders.
+// Saved Messages is kept. Destructive and irreversible -- the caller is
+// responsible for confirming with the user first.
+// Dialog loads are capped, so process in rounds until nothing is pending.
+export async function cleanAccount(
+  entry: LiveEntry,
+  accountId: number,
+): Promise<TgCleanResult> {
+  const result: TgCleanResult = {
+    left: 0,
+    deleted: 0,
+    contacts: 0,
+    folders: 0,
+    failed: [],
+  };
+  const failedIds = new Set<string>();
+
+  for (let round = 0; round < 10; round++) {
+    const dialogs = await loadDialogs(entry);
+    const pending = dialogs.filter((d) => {
+      if (failedIds.has(d.chatId)) return false;
+      const entity = entry.entityCache.get(d.chatId);
+      if (entity instanceof Api.User) {
+        // Never wipe the user's own Saved Messages
+        if (entity.self) return false;
+        // Keep Telegram service notifications (u777000) and SpamBot --
+        // both are needed for account status and appeal messages
+        if (entity.id.toString() === "777000") return false;
+        if ((entity.username ?? "").toLowerCase() === "spambot") return false;
+      }
+      return true;
+    });
+    if (!pending.length) break;
+
+    for (const d of pending) {
+      try {
+        if (d.type === "group" || d.type === "channel") {
+          await leaveChat(entry, d.chatId);
+          // Leaving does not always drop the dialog -- clear the leftover copy
+          try {
+            await deleteHistory(entry, d.chatId, false);
+          } catch {}
+          result.left++;
+        } else {
+          await deleteHistory(entry, d.chatId, true);
+          result.deleted++;
+        }
+        removeCachedDialog(accountId, d.chatId);
+        clearCachedMessages(accountId, d.chatId);
+        // Pace the calls to stay clear of Telegram flood limits
+        await sleep(250);
+      } catch (err: any) {
+        failedIds.add(d.chatId);
+        result.failed.push({
+          chatId: d.chatId,
+          name: d.name,
+          error: err?.message ?? String(err),
+        });
+      }
+    }
+  }
+
+  // Remove all custom chat folders (the default "All chats" view has no id).
+  // UpdateDialogFilter without a filter payload deletes the folder.
+  try {
+    const raw = await entry.client.invoke(new Api.messages.GetDialogFilters());
+    const filters: any[] = Array.isArray(raw)
+      ? raw
+      : ((raw as any)?.filters ?? []);
+    for (const f of filters) {
+      if (!f.id) continue;
+      await entry.client.invoke(
+        new Api.messages.UpdateDialogFilter({ id: f.id }),
+      );
+      result.folders++;
+      await sleep(250);
+    }
+  } catch (err: any) {
+    result.failed.push({
+      chatId: "folders",
+      name: "Folders",
+      error: err?.message ?? String(err),
+    });
+  }
+
+  // Remove all contacts, deleted accounts included
+  try {
+    const res = await entry.client.invoke(
+      new Api.contacts.GetContacts({ hash: BigInt(0) as any }),
+    );
+    if ("users" in res) {
+      const ids = (res.users as Api.User[]).map(
+        (u) =>
+          new Api.InputUser({
+            userId: u.id,
+            accessHash: u.accessHash ?? (BigInt(0) as any),
+          }),
+      );
+      for (let i = 0; i < ids.length; i += 100) {
+        const batch = ids.slice(i, i + 100);
+        await entry.client.invoke(
+          new Api.contacts.DeleteContacts({ id: batch }),
+        );
+        result.contacts += batch.length;
+        await sleep(250);
+      }
+    }
+  } catch (err: any) {
+    result.failed.push({
+      chatId: "contacts",
+      name: "Contacts",
+      error: err?.message ?? String(err),
+    });
+  }
+
+  return result;
 }
