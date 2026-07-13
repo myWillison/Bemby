@@ -1518,6 +1518,35 @@
     </div>
   </div>
 
+  <!-- Open link chooser -->
+  <div
+    v-if="linkChooserUrl"
+    class="tgc-invite-overlay"
+    @click.self="linkChooserUrl = null"
+  >
+    <div class="tgc-invite-card tgc-openlink-card">
+      <div class="tgc-invite-icon"><i class="fa-solid fa-globe"></i></div>
+      <div class="tgc-invite-title">{{ t("tgc.openLink.title") }}</div>
+      <div class="tgc-openlink-url">{{ linkChooserUrl }}</div>
+      <div class="tgc-invite-actions">
+        <button class="tgc-invite-join" @click="openLinkInBemby">
+          <i class="fa-solid fa-window-maximize"></i>
+          {{ t("tgc.openLink.inBemby") }}
+        </button>
+        <button class="tgc-invite-join" @click="openLinkInBrowser">
+          <i class="fa-solid fa-arrow-up-right-from-square"></i>
+          {{ t("tgc.openLink.inBrowser") }}
+        </button>
+      </div>
+      <button
+        class="tgc-invite-cancel tgc-openlink-cancel"
+        @click="linkChooserUrl = null"
+      >
+        {{ t("common.cancel") }}
+      </button>
+    </div>
+  </div>
+
   <!-- Clean account confirmation -->
   <div
     v-if="showCleanConfirm"
@@ -1804,6 +1833,8 @@ const lightboxUrl = ref<string | null>(null);
 const showMobileChat = ref(false);
 const showProfile = ref(false);
 const webViewPanel = ref<{ url: string; title: string } | null>(null);
+// Chooser for non-Telegram links: Bemby viewer or external browser
+const linkChooserUrl = ref<string | null>(null);
 const openMiniAppInApp = ref(true);
 const profileDetails = ref<TgProfile | null>(null);
 const profileLoading = ref(false);
@@ -2822,9 +2853,9 @@ async function handleMiniAppMessage(e: MessageEvent) {
       const url = data?.eventData?.url;
       if (!url) return;
       if (openMiniAppInApp.value && isMiniAppUrl(url)) {
-        await handleLinkClick(url);
+        await handleTgUrl(url);
       } else {
-        window.open(url, "_blank", "noopener");
+        askOpenLink(url);
       }
     } catch {}
   }
@@ -2857,7 +2888,35 @@ async function openMiniApp(
   }
 }
 
+// Ask whether to open a link in the Bemby viewer or the external browser
+function askOpenLink(url: string) {
+  linkChooserUrl.value = url;
+}
+
+function openLinkInBemby() {
+  const url = linkChooserUrl.value;
+  if (!url) return;
+  linkChooserUrl.value = null;
+  let title = url;
+  try {
+    title = new URL(url).hostname;
+  } catch {}
+  webViewPanel.value = { url, title };
+}
+
+function openLinkInBrowser() {
+  const url = linkChooserUrl.value;
+  if (!url) return;
+  linkChooserUrl.value = null;
+  window.open(url, "_blank", "noopener");
+}
+
 async function handleTgUrl(url: string) {
+  // Non-Telegram links always go through the chooser
+  if (!/https?:\/\/t(?:elegram)?\.me\//i.test(url)) {
+    askOpenLink(url);
+    return;
+  }
   if (!selectedAccountId.value) {
     window.open(url, "_blank", "noopener");
     return;
@@ -2953,13 +3012,9 @@ async function handleTgUrl(url: string) {
   }
 
   // Never open t.me links in the browser -- show a toast if we couldn't handle it
-  if (/https?:\/\/t(?:elegram)?\.me\//i.test(url)) {
-    copyToast.value = "Could not open this Telegram link in the messenger";
-    if (copyToastTimer) clearTimeout(copyToastTimer);
-    copyToastTimer = setTimeout(() => { copyToast.value = ""; }, 4000);
-    return;
-  }
-  window.open(url, "_blank", "noopener");
+  copyToast.value = "Could not open this Telegram link in the messenger";
+  if (copyToastTimer) clearTimeout(copyToastTimer);
+  copyToastTimer = setTimeout(() => { copyToast.value = ""; }, 4000);
 }
 
 function openGoUrlDialog() {
@@ -2976,7 +3031,7 @@ async function submitGoUrl() {
   goUrlInput.value = "";
 
   if (!selectedAccountId.value) {
-    window.open(url, "_blank", "noopener");
+    askOpenLink(url);
     return;
   }
 
@@ -3008,10 +3063,8 @@ async function submitGoUrl() {
     return;
   }
 
-  // Arbitrary URL → open in messenger webview directly
-  let title = url;
-  try { title = new URL(url).hostname; } catch {}
-  webViewPanel.value = { url, title };
+  // Arbitrary URL → ask whether to open in the Bemby viewer or the browser
+  askOpenLink(url);
 }
 
 async function confirmJoinInvite() {
@@ -7154,6 +7207,29 @@ async function saveContactEdit() {
   color: #444;
   margin-bottom: 18px;
   cursor: pointer;
+}
+
+/* Open link chooser */
+.tgc-openlink-card {
+  max-width: 360px;
+}
+
+.tgc-openlink-url {
+  font-size: 13px;
+  color: #666;
+  word-break: break-all;
+  max-height: 80px;
+  overflow-y: auto;
+  margin-bottom: 20px;
+  padding: 8px 10px;
+  background: #f7f8fc;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.tgc-openlink-cancel {
+  width: 100%;
+  margin-top: 10px;
 }
 
 /* Clean account confirmation */

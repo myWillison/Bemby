@@ -711,6 +711,11 @@ const zh = {
     openUrl: "打开链接",
     closeChat: "关闭聊天",
     jumpToLatest: "跳至最新消息",
+    openLink: {
+      title: "打开链接",
+      inBemby: "在 Bemby 中打开",
+      inBrowser: "在浏览器中打开",
+    },
     clean: {
       btnTitle: "清理账户",
       title: "清理账户",
@@ -1470,6 +1475,11 @@ const en: typeof zh = {
     openUrl: "Open URL",
     closeChat: "Close chat",
     jumpToLatest: "Jump to latest message",
+    openLink: {
+      title: "Open link",
+      inBemby: "Open in Bemby",
+      inBrowser: "Open in browser",
+    },
     clean: {
       btnTitle: "Clean account",
       title: "Clean account",
