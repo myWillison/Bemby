@@ -700,6 +700,11 @@ const zh = {
     searchPlaceholder: "在此聊天中搜索…",
     searchNoResults: "未找到相关消息",
     searchYou: "我",
+    chatActions: "聊天操作",
+    clearCache: "清除缓存并重新加载",
+    openUrl: "打开链接",
+    closeChat: "关闭聊天",
+    jumpToLatest: "跳至最新消息",
   },
 };
 
@@ -1426,6 +1431,11 @@ const en: typeof zh = {
     searchPlaceholder: "Search in this chat…",
     searchNoResults: "No messages found",
     searchYou: "You",
+    chatActions: "Chat actions",
+    clearCache: "Clear cache and reload",
+    openUrl: "Open URL",
+    closeChat: "Close chat",
+    jumpToLatest: "Jump to latest message",
   },
 };
 

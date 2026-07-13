@@ -219,42 +219,53 @@
                   @{{ activeChat.username }}
                 </div>
               </div>
+              <div class="tgc-chat-actions">
+                <button
+                  class="tgc-icon-btn"
+                  :class="{ 'tgc-icon-btn--active': msgSearchOpen }"
+                  @click="toggleMsgSearch"
+                  :title="t('tgc.searchMessages')"
+                >
+                  <i class="fa-solid fa-magnifying-glass"></i>
+                </button>
+                <button
+                  class="tgc-icon-btn"
+                  @click="clearChatCache"
+                  :title="t('tgc.clearCache')"
+                >
+                  <i class="fa-solid fa-arrows-rotate"></i>
+                </button>
+                <button
+                  class="tgc-icon-btn"
+                  :class="{ 'tgc-icon-btn--active': openMiniAppInApp }"
+                  @click="openMiniAppInApp = !openMiniAppInApp"
+                  :title="openMiniAppInApp ? t('tgc.miniAppInApp') : t('tgc.miniAppInBrowser')"
+                >
+                  <i class="fa-solid fa-puzzle-piece"></i>
+                </button>
+                <button
+                  class="tgc-icon-btn"
+                  @click="openGoUrlDialog"
+                  :title="t('tgc.openUrl')"
+                >
+                  <i class="fa-solid fa-globe"></i>
+                </button>
+                <button
+                  class="tgc-icon-btn tgc-chat-close-btn"
+                  @click="closeChat"
+                  :title="t('tgc.closeChat')"
+                >
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+              <!-- Mobile: all header actions collapse into a single menu -->
               <button
-                class="tgc-icon-btn"
-                :class="{ 'tgc-icon-btn--active': msgSearchOpen }"
-                @click="toggleMsgSearch"
-                :title="t('tgc.searchMessages')"
+                class="tgc-icon-btn tgc-chat-menu-btn"
+                :class="{ 'tgc-icon-btn--active': chatMenuOpen }"
+                @click="toggleChatMenu"
+                :title="t('tgc.chatActions')"
               >
-                <i class="fa-solid fa-magnifying-glass"></i>
-              </button>
-              <button
-                class="tgc-icon-btn"
-                @click="clearChatCache"
-                title="Clear cache and reload messages"
-              >
-                <i class="fa-solid fa-arrows-rotate"></i>
-              </button>
-              <button
-                class="tgc-icon-btn"
-                :class="{ 'tgc-icon-btn--active': openMiniAppInApp }"
-                @click="openMiniAppInApp = !openMiniAppInApp"
-                :title="openMiniAppInApp ? t('tgc.miniAppInApp') : t('tgc.miniAppInBrowser')"
-              >
-                <i class="fa-solid fa-puzzle-piece"></i>
-              </button>
-              <button
-                class="tgc-icon-btn"
-                @click="openGoUrlDialog"
-                title="Open URL"
-              >
-                <i class="fa-solid fa-globe"></i>
-              </button>
-              <button
-                class="tgc-icon-btn tgc-chat-close-btn"
-                @click="closeChat"
-                title="Close chat"
-              >
-                <i class="fa-solid fa-xmark"></i>
+                <i class="fa-solid fa-ellipsis-vertical"></i>
               </button>
             </div>
 
@@ -559,6 +570,20 @@
                   No messages yet
                 </div>
               </template>
+
+              <!-- Floating jump-to-latest button -->
+              <div v-show="jumpBtnVisible" class="tgc-jump-anchor">
+                <button
+                  class="tgc-jump-btn"
+                  :title="t('tgc.jumpToLatest')"
+                  @click.stop="jumpToLatest"
+                >
+                  <span v-if="jumpUnseenCount" class="tgc-jump-badge">{{
+                    jumpUnseenCount > 99 ? "99+" : jumpUnseenCount
+                  }}</span>
+                  <i class="fa-solid fa-chevron-down"></i>
+                </button>
+              </div>
             </div>
 
             <!-- Command suggestions -->
@@ -930,6 +955,36 @@
     </div>
     <!-- end tgc-popup -->
 
+    <!-- Mobile chat header actions menu -->
+    <div
+      v-if="chatMenuOpen"
+      class="tgc-ctx-backdrop"
+      @click="chatMenuOpen = false"
+    ></div>
+    <div
+      v-if="chatMenuOpen"
+      class="tgc-ctx-menu tgc-chat-menu"
+      :style="{ top: chatMenuPos.top + 'px', right: chatMenuPos.right + 'px' }"
+    >
+      <button class="tgc-ctx-item" @click="chatMenuRun(toggleMsgSearch)">
+        <i class="fa-solid fa-magnifying-glass"></i> {{ t('tgc.searchMessages') }}
+      </button>
+      <button class="tgc-ctx-item" @click="chatMenuRun(clearChatCache)">
+        <i class="fa-solid fa-arrows-rotate"></i> {{ t('tgc.clearCache') }}
+      </button>
+      <button class="tgc-ctx-item" @click="chatMenuRun(() => (openMiniAppInApp = !openMiniAppInApp))">
+        <i class="fa-solid fa-puzzle-piece"></i>
+        {{ openMiniAppInApp ? t('tgc.miniAppInApp') : t('tgc.miniAppInBrowser') }}
+      </button>
+      <button class="tgc-ctx-item" @click="chatMenuRun(openGoUrlDialog)">
+        <i class="fa-solid fa-globe"></i> {{ t('tgc.openUrl') }}
+      </button>
+      <div class="tgc-ctx-divider"></div>
+      <button class="tgc-ctx-item" @click="chatMenuRun(closeChat)">
+        <i class="fa-solid fa-xmark"></i> {{ t('tgc.closeChat') }}
+      </button>
+    </div>
+
     <!-- Context menu dismiss backdrop -->
     <div
       v-if="ctxMenu"
@@ -1298,6 +1353,27 @@ const msgSearchResults = ref<TgMessage[]>([]);
 const msgSearchLoading = ref(false);
 const msgSearchDone = ref(false);
 const msgSearchInputEl = ref<HTMLInputElement | null>(null);
+// Mobile chat header actions menu (collapsed buttons)
+const chatMenuOpen = ref(false);
+const chatMenuPos = ref({ top: 0, right: 0 });
+
+function toggleChatMenu(ev: MouseEvent) {
+  if (chatMenuOpen.value) {
+    chatMenuOpen.value = false;
+    return;
+  }
+  const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+  chatMenuPos.value = {
+    top: rect.bottom + 4,
+    right: window.innerWidth - rect.right,
+  };
+  chatMenuOpen.value = true;
+}
+
+function chatMenuRun(action: () => void) {
+  chatMenuOpen.value = false;
+  action();
+}
 const firstUnreadId = ref<number | null>(null);
 const loadingMessages = ref(false);
 const loadingOlder = ref(false);
@@ -1443,6 +1519,15 @@ let wsBackoff = 1_000; // ms, doubles on each failure, caps at 30s
 let wsAccountId: number | null = null; // account the socket is open for
 let wsEverOpen = false; // distinguishes first-open from reconnect
 let scrolledToBottom = true;
+
+// Floating jump-to-latest button (shown when scrolled away from the bottom)
+const jumpBtnVisible = ref(false);
+const jumpUnseenCount = ref(0);
+
+function jumpToLatest() {
+  jumpUnseenCount.value = 0;
+  scrollBottom(true);
+}
 
 // ── Computed ──────────────────────────────────────────────────────────────────
 
@@ -2374,6 +2459,7 @@ async function refreshMessages() {
         messages.value[idx] = msg; // update edited messages in-place
       } else if (msg.id > lastId) {
         messages.value.push(msg);
+        if (!scrolledToBottom && !msg.fromMe) jumpUnseenCount.value++;
         appended = true;
       }
     }
@@ -2689,6 +2775,9 @@ function onMsgScroll() {
   const el = messagesEl.value;
   if (!el) return;
   scrolledToBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
+  // Show the jump button only once meaningfully away from the bottom
+  jumpBtnVisible.value = el.scrollHeight - el.scrollTop - el.clientHeight > 300;
+  if (scrolledToBottom) jumpUnseenCount.value = 0;
   if (el.scrollTop <= 60 && canLoadMore.value && !loadingOlder.value && messages.value.length >= 30) {
     loadOlderMessages();
   }
@@ -2868,6 +2957,8 @@ async function openChat(dialog: TgDialog, addToHistory = false) {
   firstUnreadId.value = null;
   canLoadMore.value = true;
   scrolledToBottom = true;
+  jumpBtnVisible.value = false;
+  jumpUnseenCount.value = 0;
   showMobileChat.value = true;
   showProfile.value = false;
   profileDetails.value = null;
@@ -3492,6 +3583,7 @@ function onIncomingMessage(chatId: string, msg: TgMessage) {
     // Avoid duplicate if already optimistically appended
     if (!messages.value.find((m) => m.id === msg.id)) {
       messages.value.push(msg);
+      if (!scrolledToBottom && !msg.fromMe) jumpUnseenCount.value++;
       scrollBottom();
     }
     // Mark as read on TG server and clear local badge
@@ -3975,6 +4067,19 @@ async function saveContactEdit() {
   flex: 1;
 }
 
+.tgc-chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* Collapsed actions menu button -- mobile only */
+.tgc-chat-menu-btn {
+  display: none;
+  flex-shrink: 0;
+}
+
 .tgc-chat-name {
   font-size: 15px;
   font-weight: 600;
@@ -4114,6 +4219,59 @@ async function saveContactEdit() {
   flex-direction: column;
   gap: 2px;
   background: #f5f7fb;
+}
+
+/* ── Jump-to-latest floating button ─────────────────────────────────────────
+   Zero-height sticky anchor as the last child of the scroller, so the button
+   pins to the bottom-right of the visible message area without taking space */
+.tgc-jump-anchor {
+  position: sticky;
+  bottom: 8px;
+  height: 0;
+  align-self: flex-end;
+  z-index: 5;
+}
+
+.tgc-jump-btn {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid #e8e9ed;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  color: #555;
+  font-size: 15px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.tgc-jump-btn:hover {
+  background: #f0f2f5;
+  color: #1a1a2e;
+}
+
+.tgc-jump-badge {
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #4361ee;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
 }
 
 /* ── Messages ───────────────────────────────────────────────────────────────── */
@@ -5703,6 +5861,24 @@ async function saveContactEdit() {
     position: sticky;
     top: 0;
     z-index: 15;
+  }
+
+  /* Collapse individual header actions into a single menu so the chat name
+     keeps its space */
+  .tgc-chat-actions {
+    display: none;
+  }
+
+  /* Comfortable touch target for the jump-to-latest button */
+  .tgc-jump-btn {
+    width: 46px;
+    height: 46px;
+  }
+
+  .tgc-chat-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
   /* Tap-to-show message actions on mobile (no hover available) */
