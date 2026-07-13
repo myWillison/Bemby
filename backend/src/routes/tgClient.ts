@@ -47,6 +47,7 @@ import {
   leaveChat,
   getCachedDialogs,
   cacheDialogs,
+  removeCachedDialog,
   syncDialogsInBackground,
   fetchAvatarsBatch,
   checkMembership,
@@ -668,6 +669,9 @@ router.delete("/:accountId/history/:chatId", async (req, res) => {
     const entry = await getLiveClient(accountId);
     await deleteHistory(entry, chatId, revoke);
     clearCachedMessages(accountId, chatId);
+    // Drop the cached dialog row immediately, otherwise the chat
+    // reappears from the cache on the next dialog load
+    removeCachedDialog(accountId, chatId);
     // Refresh the dialog list so the removed chat disappears
     syncDialogsInBackground(accountId).catch(() => {});
     res.json({ ok: true });

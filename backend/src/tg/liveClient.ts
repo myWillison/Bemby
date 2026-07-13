@@ -2135,6 +2135,31 @@ export function cacheDialogs(accountId: number, dialogs: TgDialogItem[]): void {
   })();
 }
 
+export function removeCachedDialog(accountId: number, chatId: string): void {
+  db.prepare(
+    "DELETE FROM tg_dialog_cache WHERE account_id = ? AND chat_id = ?",
+  ).run(accountId, chatId);
+}
+
+// Removes cached rows for chats no longer in a full dialog load
+// (deleted chats, left groups). Upserts alone never drop them.
+function pruneCachedDialogs(
+  accountId: number,
+  dialogs: TgDialogItem[],
+): void {
+  if (!dialogs.length) return;
+  const keep = new Set(dialogs.map((d) => d.chatId));
+  const rows = db
+    .prepare("SELECT chat_id FROM tg_dialog_cache WHERE account_id = ?")
+    .all(accountId) as { chat_id: string }[];
+  const del = db.prepare(
+    "DELETE FROM tg_dialog_cache WHERE account_id = ? AND chat_id = ?",
+  );
+  for (const r of rows) {
+    if (!keep.has(r.chat_id)) del.run(accountId, r.chat_id);
+  }
+}
+
 export async function syncDialogsInBackground(
   accountId: number,
 ): Promise<void> {
@@ -2142,6 +2167,7 @@ export async function syncDialogsInBackground(
   if (!entry) return;
   try {
     const dialogs = await loadDialogs(entry);
+    pruneCachedDialogs(accountId, dialogs);
     cacheDialogs(accountId, dialogs);
     entry.dialogSubscribers.forEach((sub) => sub(dialogs));
   } catch {}

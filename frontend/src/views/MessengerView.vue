@@ -1396,6 +1396,12 @@
     <div class="tgc-invite-card tgc-report-card">
       <div class="tgc-invite-icon"><i class="fa-solid fa-flag"></i></div>
       <div class="tgc-invite-title">Report {{ reportTarget.name }}</div>
+      <div
+        v-if="reportTarget.type === 'user' || reportTarget.type === 'bot'"
+        class="tgc-invite-meta"
+      >
+        {{ reportTarget.name }} will also be blocked and the chat deleted.
+      </div>
       <div class="tgc-report-reasons">
         <label
           v-for="r in REPORT_REASONS"
@@ -1770,7 +1776,11 @@ const ctxConfirmBlock = ref(false);
 
 // Block / report / delete chat
 const blockToggling = ref(false);
-const reportTarget = ref<{ chatId: string; name: string } | null>(null);
+const reportTarget = ref<{
+  chatId: string;
+  name: string;
+  type: TgDialog["type"];
+} | null>(null);
 const reportReason = ref<TgReportReason>("spam");
 const reportComment = ref("");
 const reportSending = ref(false);
@@ -2116,7 +2126,11 @@ function ctxReport() {
   closeCtx();
   reportReason.value = "spam";
   reportComment.value = "";
-  reportTarget.value = { chatId: dialog.chatId, name: dialog.name };
+  reportTarget.value = {
+    chatId: dialog.chatId,
+    name: dialog.name,
+    type: dialog.type,
+  };
 }
 
 function ctxDeleteChat() {
@@ -2175,21 +2189,41 @@ function openReportFromProfile() {
   reportTarget.value = {
     chatId: profileDetails.value.chatId,
     name: profileDetails.value.name,
+    type: profileDetails.value.type,
   };
 }
 
 async function submitReport() {
   if (!reportTarget.value || !selectedAccountId.value) return;
+  const target = reportTarget.value;
+  const accountId = selectedAccountId.value;
   reportSending.value = true;
   try {
     await tgClientApi.report(
-      selectedAccountId.value,
-      reportTarget.value.chatId,
+      accountId,
+      target.chatId,
       reportReason.value,
       reportComment.value.trim() || undefined,
     );
+    if (target.type === "user" || target.type === "bot") {
+      // Reporting a user also blocks them and removes the chat
+      await tgClientApi.setBlocked(accountId, target.chatId, true);
+      await tgClientApi.deleteHistory(accountId, target.chatId, false);
+      const idx = dialogs.value.findIndex((d) => d.chatId === target.chatId);
+      if (idx !== -1) dialogs.value.splice(idx, 1);
+      if (profileDetails.value?.chatId === target.chatId) {
+        profileDetails.value = null;
+        showProfile.value = false;
+      }
+      if (activeChatId.value === target.chatId) {
+        chatNavStack.value = [];
+        closeChat();
+      }
+      showToast(`Reported and blocked ${target.name}, chat deleted`);
+    } else {
+      showToast("Report sent");
+    }
     reportTarget.value = null;
-    showToast("Report sent");
   } catch (e: any) {
     showToast(e?.response?.data?.error ?? e?.message ?? "Failed to report");
   } finally {
