@@ -1201,6 +1201,11 @@ export const tgClientApi = {
       })
       .then((r) => r.data),
 
+  frameable: (url: string) =>
+    api
+      .get<{ frameable: boolean }>("/tg-client/frameable", { params: { url } })
+      .then((r) => r.data),
+
   clearAccountCache: (accountId: number) =>
     api
       .delete<{ ok: boolean }>(`/tg-client/${accountId}/cache`)

@@ -253,6 +253,126 @@ router.get("/miniapp-proxy", async (req, res) => {
   }
 });
 
+// GET /frameable?url= -- probe whether a page allows cross-origin framing
+router.get("/frameable", async (req, res) => {
+  const url = req.query.url as string;
+  if (!url || !/^https?:\/\//i.test(url)) {
+    res.status(400).json({ error: "valid url required" });
+    return;
+  }
+  try {
+    await assertPublicUrl(url);
+  } catch {
+    res.status(400).json({ error: "URL not allowed" });
+    return;
+  }
+  res.json({ frameable: await isFrameable(url) });
+});
+
+// GET /web-proxy?url=&token= -- proxy a page that refuses framing so the
+// messenger viewer can still render it. The frontend shows the result in an
+// iframe WITHOUT allow-same-origin, so proxied scripts run in an opaque origin
+// and cannot reach Bemby's storage or API. Subresources are rewritten to load
+// directly from the site; link navigation is routed back through the proxy.
+router.get("/web-proxy", async (req, res) => {
+  const url = req.query.url as string;
+  const token = (req.query.token as string) ?? "";
+  if (!url || !/^https?:\/\//i.test(url)) {
+    res.status(400).json({ error: "valid url required" });
+    return;
+  }
+  try {
+    await assertPublicUrl(url);
+  } catch {
+    res.status(400).json({ error: "URL not allowed" });
+    return;
+  }
+  try {
+    const upstream = await ssrfSafeFetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+
+    const contentType = upstream.headers.get("content-type") ?? "text/html";
+    res.setHeader("Content-Type", contentType);
+    res.removeHeader("X-Frame-Options");
+    res.removeHeader("Content-Security-Policy");
+
+    if (!contentType.includes("text/html")) {
+      const buf = await upstream.arrayBuffer();
+      res.send(Buffer.from(buf));
+      return;
+    }
+
+    let html = await upstream.text();
+    const finalUrl = (upstream.url || url).split("#")[0];
+    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : "";
+
+    const toAbs = (resourceUrl: string): string => {
+      try {
+        return new URL(resourceUrl, finalUrl).toString();
+      } catch {
+        return resourceUrl;
+      }
+    };
+
+    // A <base> or meta CSP from the page would break the proxied copy
+    html = html.replace(/<base\b[^>]*>/gi, "");
+    html = html.replace(
+      /<meta\b[^>]+http-equiv\s*=\s*["']?content-security-policy["']?[^>]*>/gi,
+      "",
+    );
+
+    // Route link navigation back through the proxy so clicking around keeps
+    // working (a direct navigation would hit the framing block again)
+    html = html.replace(
+      /(<a\b[^>]*?\shref\s*=\s*)(["'])([^"']+)\2/gi,
+      (m, prefix, q, href) => {
+        if (/^(#|mailto:|tel:|javascript:|data:)/i.test(href)) return m;
+        const abs = toAbs(href);
+        if (!/^https?:\/\//i.test(abs)) return m;
+        return `${prefix}${q}/api/tg-client/web-proxy?url=${encodeURIComponent(abs)}${tokenParam}${q}`;
+      },
+    );
+
+    // Everything else (images, scripts, styles, forms) loads directly from
+    // the site -- make relative URLs absolute
+    html = html.replace(
+      /(\b(?:src|action)\s*=\s*)(["'])(?!data:|https?:\/\/|\/\/|#)([^"']+)\2/gi,
+      (_m, attr, q, val) => `${attr}${q}${toAbs(val)}${q}`,
+    );
+    html = html.replace(/<link\b[^>]+>/gi, (linkTag) =>
+      linkTag.replace(
+        /(href\s*=\s*)(["'])(?!data:|https?:\/\/|\/\/|#)([^"']+)\2/i,
+        (_m, attr, q, href) => `${attr}${q}${toAbs(href)}${q}`,
+      ),
+    );
+    html = html.replace(
+      /(\bsrcset\s*=\s*)(["'])([^"']+)\2/gi,
+      (_m, attr, q, val) => {
+        const rewritten = val
+          .split(",")
+          .map((part: string) => {
+            const [u, ...rest] = part.trim().split(/\s+/);
+            if (!u || /^(data:|https?:\/\/|\/\/)/i.test(u)) return part.trim();
+            return [toAbs(u), ...rest].join(" ");
+          })
+          .join(", ");
+        return `${attr}${q}${rewritten}${q}`;
+      },
+    );
+
+    res.send(html);
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
 // GET /:accountId/folders
 router.get("/:accountId/folders", async (req, res) => {
   const accountId = Number(req.params.accountId);

@@ -198,10 +198,21 @@
                   <i class="fa-solid fa-xmark"></i>
                 </button>
               </div>
+              <div v-if="webViewPanel.proxied" class="tgc-webview-proxy-note">
+                <i class="fa-solid fa-shield-halved"></i>
+                {{ t("tgc.openLink.proxiedNote") }}
+              </div>
+              <!-- Proxied pages are served from Bemby's own origin, so they
+                   must NOT get allow-same-origin -- it would let arbitrary
+                   site scripts reach Bemby's storage and auth token -->
               <iframe
                 :src="webViewPanel.url"
                 class="tgc-webview-frame"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+                :sandbox="
+                  webViewPanel.proxied
+                    ? 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox'
+                    : 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox'
+                "
                 allow="camera; microphone; geolocation"
                 @load="onWebViewLoad"
               ></iframe>
@@ -1529,17 +1540,32 @@
       <div class="tgc-invite-title">{{ t("tgc.openLink.title") }}</div>
       <div class="tgc-openlink-url">{{ linkChooserUrl }}</div>
       <div class="tgc-invite-actions">
-        <button class="tgc-invite-join" @click="openLinkInBemby">
-          <i class="fa-solid fa-window-maximize"></i>
-          {{ t("tgc.openLink.inBemby") }}
+        <button
+          class="tgc-invite-join"
+          :disabled="linkOpening"
+          @click="openLinkInBemby"
+        >
+          <span v-if="linkOpening">
+            <span class="tgc-spinner tgc-spinner-sm"></span>
+            {{ t("tgc.openLink.checking") }}
+          </span>
+          <span v-else>
+            <i class="fa-solid fa-window-maximize"></i>
+            {{ t("tgc.openLink.inBemby") }}
+          </span>
         </button>
-        <button class="tgc-invite-join" @click="openLinkInBrowser">
+        <button
+          class="tgc-invite-join"
+          :disabled="linkOpening"
+          @click="openLinkInBrowser"
+        >
           <i class="fa-solid fa-arrow-up-right-from-square"></i>
           {{ t("tgc.openLink.inBrowser") }}
         </button>
       </div>
       <button
         class="tgc-invite-cancel tgc-openlink-cancel"
+        :disabled="linkOpening"
         @click="linkChooserUrl = null"
       >
         {{ t("common.cancel") }}
@@ -1832,9 +1858,14 @@ const sendAsDocument = ref(false);
 const lightboxUrl = ref<string | null>(null);
 const showMobileChat = ref(false);
 const showProfile = ref(false);
-const webViewPanel = ref<{ url: string; title: string } | null>(null);
+const webViewPanel = ref<{
+  url: string;
+  title: string;
+  proxied?: boolean;
+} | null>(null);
 // Chooser for non-Telegram links: Bemby viewer or external browser
 const linkChooserUrl = ref<string | null>(null);
+const linkOpening = ref(false);
 const openMiniAppInApp = ref(true);
 const profileDetails = ref<TgProfile | null>(null);
 const profileLoading = ref(false);
@@ -2893,15 +2924,31 @@ function askOpenLink(url: string) {
   linkChooserUrl.value = url;
 }
 
-function openLinkInBemby() {
+async function openLinkInBemby() {
   const url = linkChooserUrl.value;
-  if (!url) return;
-  linkChooserUrl.value = null;
+  if (!url || linkOpening.value) return;
   let title = url;
   try {
     title = new URL(url).hostname;
   } catch {}
-  webViewPanel.value = { url, title };
+  // Sites that block framing are routed through the backend web proxy and
+  // rendered in a stricter sandbox (no allow-same-origin)
+  linkOpening.value = true;
+  let frameable = true;
+  try {
+    ({ frameable } = await tgClientApi.frameable(url));
+  } catch {}
+  linkOpening.value = false;
+  linkChooserUrl.value = null;
+  if (frameable) {
+    webViewPanel.value = { url, title };
+  } else {
+    const token = localStorage.getItem("token") ?? "";
+    const proxiedUrl = `/api/tg-client/web-proxy?url=${encodeURIComponent(
+      url,
+    )}&token=${encodeURIComponent(token)}`;
+    webViewPanel.value = { url: proxiedUrl, title, proxied: true };
+  }
 }
 
 function openLinkInBrowser() {
@@ -7207,6 +7254,17 @@ async function saveContactEdit() {
   color: #444;
   margin-bottom: 18px;
   cursor: pointer;
+}
+
+.tgc-webview-proxy-note {
+  font-size: 12px;
+  color: #8a6d1a;
+  background: #fdf6e3;
+  border-bottom: 1px solid #f0e3bb;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* Open link chooser */

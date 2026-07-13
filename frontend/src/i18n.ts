@@ -715,6 +715,9 @@ const zh = {
       title: "打开链接",
       inBemby: "在 Bemby 中打开",
       inBrowser: "在浏览器中打开",
+      checking: "检查中...",
+      proxiedNote:
+        "该网站禁止内嵌，已通过 Bemby 代理加载。登录及部分交互功能可能不可用。",
     },
     clean: {
       btnTitle: "清理账户",
@@ -1479,6 +1482,9 @@ const en: typeof zh = {
       title: "Open link",
       inBemby: "Open in Bemby",
       inBrowser: "Open in browser",
+      checking: "Checking...",
+      proxiedNote:
+        "This site blocks embedding, so it was loaded via the Bemby proxy. Sign-ins and some interactive features may not work.",
     },
     clean: {
       btnTitle: "Clean account",
