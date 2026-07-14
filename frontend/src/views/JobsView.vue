@@ -49,6 +49,10 @@
         <button class="btn btn-sm btn-secondary" @click="showBulkWindowModal = true"><i class="fa-solid fa-clock"></i> {{ t('jobs.bulkWindow').replace('{n}', String(selectedJobIds.length)) }}</button>
         <button class="btn btn-sm btn-ghost" style="margin-left:auto" @click="selectedJobIds = []"><i class="fa-solid fa-xmark"></i></button>
       </div>
+      <PaginationBar
+        :page="page" :page-size="pageSize" :total="total"
+        @update:page="onPageChange" @update:page-size="onPageSizeChange"
+      />
       <div class="table-wrap">
         <table>
           <thead>
@@ -110,10 +114,6 @@
           </tbody>
         </table>
       </div>
-      <PaginationBar
-        :page="page" :page-size="pageSize" :total="total"
-        @update:page="onPageChange" @update:page-size="onPageSizeChange"
-      />
     </div>
 
     <!-- Add / Edit modal -->

@@ -134,10 +134,14 @@ type AICreds = { modelId: string; apiKey: string; baseUrl: string; timeoutMs: nu
 function resolveAICreds(modelId?: string): AICreds {
   const model = modelId?.trim() || getAiSetting('ai_model', 'AI_MODEL', 'nvidia/nemotron-nano-12b-v2-vl:free');
   type SupplierRow = { api_key: string; base_url: string; timeout_ms: number };
+  // Prefer a supplier with a non-empty key: the same model can exist under
+  // multiple suppliers (e.g. two accounts of the same provider)
   const row = db.prepare(`
     SELECT s.api_key, s.base_url, s.timeout_ms
     FROM ai_models m JOIN ai_suppliers s ON s.id = m.supplier_id
-    WHERE m.model_id = ? LIMIT 1
+    WHERE m.model_id = ?
+    ORDER BY (s.api_key != '') DESC, m.id
+    LIMIT 1
   `).get(model) as SupplierRow | undefined;
   return {
     modelId: model,
@@ -214,10 +218,16 @@ async function callAIWithFallback(
   const primary = resolveAICreds();
   const fallbackEnabled = getAiSetting('ai_fallback_enabled', '', 'true') === 'true';
 
+  // Dedupe by full credentials, not model id: the same model under a different
+  // supplier (e.g. a second account of the same provider) is a valid fallback
+  const credsKey = (c: AICreds) => `${c.modelId}|${c.baseUrl}|${c.apiKey}`;
   const candidates: AICreds[] = [primary];
   if (fallbackEnabled) {
+    const seen = new Set([credsKey(primary)]);
     for (const c of getAllModelCreds()) {
-      if (c.modelId !== primary.modelId) candidates.push(c);
+      if (seen.has(credsKey(c))) continue;
+      seen.add(credsKey(c));
+      candidates.push(c);
     }
   }
 

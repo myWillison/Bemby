@@ -70,7 +70,7 @@ function onSizeChange(value: string) {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 0.5rem;
-  padding: 0.6rem 0.25rem 0.1rem;
+  padding: 10px 14px 2px;
 }
 .pagination-total {
   color: var(--text-secondary, #888);

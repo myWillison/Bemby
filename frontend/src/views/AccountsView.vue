@@ -65,6 +65,11 @@
     </div>
 
     <div class="card">
+      <PaginationBar
+        v-model:page="page"
+        v-model:page-size="pageSize"
+        :total="total"
+      />
       <div class="table-wrap">
         <table>
           <thead>
@@ -259,11 +264,6 @@
           </tbody>
         </table>
       </div>
-      <PaginationBar
-        v-model:page="page"
-        v-model:page-size="pageSize"
-        :total="total"
-      />
     </div>
 
     <!-- Bulk notes modal -->

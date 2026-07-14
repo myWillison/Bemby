@@ -28,6 +28,13 @@
     </div>
 
     <div class="card">
+      <PaginationBar
+        :page="page"
+        :page-size="pageSize"
+        :total="total"
+        @update:page="onPageChange"
+        @update:page-size="onPageSizeChange"
+      />
       <div class="table-wrap">
         <table>
           <thead>
@@ -97,13 +104,6 @@
           </tbody>
         </table>
       </div>
-      <PaginationBar
-        :page="page"
-        :page-size="pageSize"
-        :total="total"
-        @update:page="onPageChange"
-        @update:page-size="onPageSizeChange"
-      />
     </div>
 
     <!-- Add / Edit modal -->
