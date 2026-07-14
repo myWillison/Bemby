@@ -723,6 +723,9 @@ export type Settings = {
   /** Server-computed: "true" when any AI supplier, legacy setting or env provides a key. */
   ai_key_configured?: string;
   ai_model: string;
+  /** ai_models row id pinning the default model to an exact supplier. */
+  ai_default_model_id?: string;
+  ai_fallback_enabled?: string;
   notify_tg_username: string;
   notify_tg_events: string;
   ua_presets: string;

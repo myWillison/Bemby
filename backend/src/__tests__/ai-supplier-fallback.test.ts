@@ -48,6 +48,12 @@ function insertSupplier(name: string, apiKey: string, modelIds: string[]): numbe
   return supplierId;
 }
 
+function modelRowId(supplierId: number): number {
+  return (testDb
+    .prepare("SELECT id FROM ai_models WHERE supplier_id = ?")
+    .get(supplierId) as { id: number }).id;
+}
+
 function setSetting(key: string, value: string) {
   testDb
     .prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
@@ -91,6 +97,57 @@ describe("credential resolution with duplicate model ids", () => {
     await callAI([IMG], "prompt");
 
     expect(authKeyOfCall(0)).toBe("key-2");
+  });
+});
+
+describe("pinned default model (ai_default_model_id)", () => {
+  it("uses the pinned supplier's key even when an earlier supplier has one", async () => {
+    insertSupplier("vercel", "key-1", [MODEL]);
+    const supplier2 = insertSupplier("vercel 2", "key-2", [MODEL]);
+    setSetting("ai_default_model_id", String(modelRowId(supplier2)));
+    fetchMock.mockResolvedValueOnce(aiResponse("ok"));
+
+    await callAI([IMG], "prompt");
+
+    expect(authKeyOfCall(0)).toBe("key-2");
+  });
+
+  it("makes the pinned account primary and the other the fallback", async () => {
+    insertSupplier("vercel", "key-1", [MODEL]);
+    const supplier2 = insertSupplier("vercel 2", "key-2", [MODEL]);
+    setSetting("ai_default_model_id", String(modelRowId(supplier2)));
+    fetchMock
+      .mockResolvedValueOnce(new Response("quota exceeded", { status: 429 }))
+      .mockResolvedValueOnce(aiResponse("ABCD"));
+
+    const result = await recognizeCaptchaWithAI([IMG]);
+
+    expect(result.text).toBe("ABCD");
+    expect(authKeyOfCall(0)).toBe("key-2");
+    expect(authKeyOfCall(1)).toBe("key-1");
+  });
+
+  it("falls back to model-string resolution when the pinned row is gone", async () => {
+    insertSupplier("vercel", "key-1", [MODEL]);
+    setSetting("ai_default_model_id", "9999");
+    fetchMock.mockResolvedValueOnce(aiResponse("ok"));
+
+    await callAI([IMG], "prompt");
+
+    expect(authKeyOfCall(0)).toBe("key-1");
+  });
+
+  it("ignores the pin when an explicit model override is given", async () => {
+    const supplier1 = insertSupplier("vercel", "key-1", [MODEL]);
+    insertSupplier("other", "key-other", ["other/model"]);
+    setSetting("ai_default_model_id", String(modelRowId(supplier1)));
+    fetchMock.mockResolvedValueOnce(aiResponse("ok"));
+
+    await callAI([IMG], "prompt", 200, "other/model");
+
+    expect(authKeyOfCall(0)).toBe("key-other");
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.model).toBe("other/model");
   });
 });
 

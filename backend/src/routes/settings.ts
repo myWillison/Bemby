@@ -16,6 +16,7 @@ export const ALLOWED_KEYS = [
   "default_play_duration",
   "default_device_name",
   "ai_model",
+  "ai_default_model_id",
   "ai_fallback_enabled",
   "notify_tg_username",
   "notify_tg_events",

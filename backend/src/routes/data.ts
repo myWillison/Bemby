@@ -14,6 +14,8 @@ export const EXPORT_EXCLUDED_SETTINGS = new Set([
   'admin_password_hash',
   'admin_username',
   'jwt_secret',
+  // References an instance-local ai_models row id; meaningless after import
+  'ai_default_model_id',
 ]);
 
 // Settings whose presence forces the export to be encrypted.
@@ -344,6 +346,8 @@ router.post('/import', async (req, res) => {
       db.prepare('DELETE FROM jobs').run();
       db.prepare('DELETE FROM job_templates').run();
       db.prepare('DELETE FROM tg_accounts').run();
+      // The pinned default references a wiped ai_models row id
+      db.prepare("DELETE FROM settings WHERE key = 'ai_default_model_id'").run();
     }
 
     // Import accounts and build accountIndex -> new db id mapping

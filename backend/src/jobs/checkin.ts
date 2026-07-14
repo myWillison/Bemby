@@ -132,17 +132,37 @@ export function parseAiBtnHint(val: string): string | undefined {
 type AICreds = { modelId: string; apiKey: string; baseUrl: string; timeoutMs: number };
 
 function resolveAICreds(modelId?: string): AICreds {
-  const model = modelId?.trim() || getAiSetting('ai_model', 'AI_MODEL', 'nvidia/nemotron-nano-12b-v2-vl:free');
-  type SupplierRow = { api_key: string; base_url: string; timeout_ms: number };
+  type CredsRow = { model_id: string; api_key: string; base_url: string; timeout_ms: number };
+  const override = modelId?.trim();
+  let row: CredsRow | undefined;
+
+  // Pinned default: an exact ai_models row, so the same model under a second
+  // supplier (e.g. another account of the same provider) can be the primary
+  if (!override) {
+    const pinnedId = Number(getAiSetting('ai_default_model_id', '', ''));
+    if (pinnedId) {
+      row = db.prepare(`
+        SELECT m.model_id, s.api_key, s.base_url, s.timeout_ms
+        FROM ai_models m JOIN ai_suppliers s ON s.id = m.supplier_id
+        WHERE m.id = ?
+      `).get(pinnedId) as CredsRow | undefined;
+    }
+  }
+
+  const model = override || row?.model_id || getAiSetting('ai_model', 'AI_MODEL', 'nvidia/nemotron-nano-12b-v2-vl:free');
+
   // Prefer a supplier with a non-empty key: the same model can exist under
-  // multiple suppliers (e.g. two accounts of the same provider)
-  const row = db.prepare(`
-    SELECT s.api_key, s.base_url, s.timeout_ms
-    FROM ai_models m JOIN ai_suppliers s ON s.id = m.supplier_id
-    WHERE m.model_id = ?
-    ORDER BY (s.api_key != '') DESC, m.id
-    LIMIT 1
-  `).get(model) as SupplierRow | undefined;
+  // multiple suppliers
+  if (!row) {
+    row = db.prepare(`
+      SELECT m.model_id, s.api_key, s.base_url, s.timeout_ms
+      FROM ai_models m JOIN ai_suppliers s ON s.id = m.supplier_id
+      WHERE m.model_id = ?
+      ORDER BY (s.api_key != '') DESC, m.id
+      LIMIT 1
+    `).get(model) as CredsRow | undefined;
+  }
+
   return {
     modelId: model,
     // `||` not `??`: upgraded installs can have a seeded supplier with an empty

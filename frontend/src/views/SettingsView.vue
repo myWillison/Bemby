@@ -1268,10 +1268,10 @@
           >
             <div class="form-group">
               <label class="form-label">{{ t("settings.defaultModel") }}</label>
-              <select v-model="form.ai_model" class="form-select">
+              <select v-model="form.ai_default_model_id" class="form-select">
                 <option value="">{{ t("settings.defaultModelNone") }}</option>
                 <optgroup v-for="s in suppliers" :key="s.id" :label="s.name">
-                  <option v-for="m in s.models" :key="m.id" :value="m.model_id">
+                  <option v-for="m in s.models" :key="m.id" :value="String(m.id)">
                     {{ m.model_id }}
                   </option>
                 </optgroup>
@@ -1337,6 +1337,7 @@ const form = reactive({
   default_play_duration: 300,
   default_device_name: "Mac",
   ai_model: "",
+  ai_default_model_id: "",
   ai_fallback_enabled: true,
 });
 const saving = ref(false);
@@ -1674,6 +1675,7 @@ onMounted(async () => {
     form.default_play_duration = Number(s.default_play_duration ?? 300);
     form.default_device_name = s.default_device_name ?? "Mac";
     form.ai_model = s.ai_model ?? "";
+    form.ai_default_model_id = s.ai_default_model_id ?? "";
     form.ai_fallback_enabled = s.ai_fallback_enabled !== "false";
     notifyForm.username = s.notify_tg_username ?? "";
     try {
@@ -1692,6 +1694,17 @@ onMounted(async () => {
     /* ignore */
   } finally {
     aiSuppliersLoading.value = false;
+  }
+  // Upgraded installs only have the legacy model string: pre-select the row
+  // the backend resolves it to (first supplier with a key carrying that model)
+  if (!form.ai_default_model_id && form.ai_model) {
+    const rows = suppliers.value.flatMap((s) =>
+      s.models.map((m) => ({ ...m, hasKey: Boolean(s.api_key) })),
+    );
+    const match =
+      rows.find((m) => m.model_id === form.ai_model && m.hasKey) ??
+      rows.find((m) => m.model_id === form.ai_model);
+    if (match) form.ai_default_model_id = String(match.id);
   }
 });
 
@@ -1854,7 +1867,17 @@ async function saveAi() {
   aiError.value = "";
   aiSaving.value = true;
   try {
-    await settingsApi.update({ ai_model: form.ai_model, ai_fallback_enabled: String(form.ai_fallback_enabled) });
+    // Keep the legacy model string in sync: it is the fallback when the
+    // pinned row id no longer exists (e.g. after a data import)
+    const selected = suppliers.value
+      .flatMap((s) => s.models)
+      .find((m) => String(m.id) === form.ai_default_model_id);
+    form.ai_model = selected?.model_id ?? "";
+    await settingsApi.update({
+      ai_default_model_id: form.ai_default_model_id,
+      ai_model: form.ai_model,
+      ai_fallback_enabled: String(form.ai_fallback_enabled),
+    });
     aiMsg.value = t("settings.saved");
   } catch (err: any) {
     aiError.value = err.response?.data?.error ?? t("settings.saveFailed");
