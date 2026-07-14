@@ -146,7 +146,19 @@
                   {{ a.resolvedDeviceModel }}
                 </div>
               </td>
-              <td>{{ a.phoneNumber }}</td>
+              <td>
+                {{ a.phoneNumber }}
+                <div
+                  v-if="phoneCountry(a.phoneNumber)"
+                  class="phone-country"
+                  :title="phoneCountry(a.phoneNumber)!.name"
+                >
+                  <span class="phone-country-flag">{{
+                    phoneCountry(a.phoneNumber)!.flag
+                  }}</span>
+                  {{ phoneCountry(a.phoneNumber)!.name }}
+                </div>
+              </td>
               <td class="col-hide-mobile">
                 <div class="tg-name-cell">
                   <span v-if="metaLoading.has(a.id)" class="tg-name-loading">
@@ -1281,6 +1293,7 @@ import {
 } from "../api/client";
 import { t, locale } from "../i18n";
 import { usePersistedRef } from "../composables/usePersistedRef";
+import { phoneCountry } from "../utils/phoneCountry";
 import { debounce } from "../composables/useDebounce";
 import PaginationBar from "../components/PaginationBar.vue";
 
@@ -2333,6 +2346,18 @@ async function verify2fa() {
   font-size: 11px;
   color: #888;
   font-family: var(--font-mono, monospace);
+}
+
+.phone-country {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #888;
+  white-space: nowrap;
+}
+
+.phone-country-flag {
+  margin-right: 3px;
+  font-size: 13px;
 }
 
 .device-model-preview i {
