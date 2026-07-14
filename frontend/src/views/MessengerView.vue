@@ -76,10 +76,7 @@
             <button
               v-if="searchQuery"
               class="tgc-search-clear"
-              @click="
-                searchQuery = '';
-                searchResults = null;
-              "
+              @click="clearSearch"
             >
               <i class="fa-solid fa-xmark"></i>
             </button>
@@ -174,7 +171,20 @@
                 </div>
               </div>
               <div
-                v-if="!displayedDialogs.length && !loadingDialogs"
+                v-if="searchQuery && searchLoading && !displayedDialogs.length"
+                class="tgc-empty-list"
+              >
+                <span class="tgc-spinner tgc-spinner-sm"></span>
+                Searching Telegram...
+              </div>
+              <div
+                v-else-if="searchQuery && searchError"
+                class="tgc-empty-list"
+              >
+                {{ searchError }}
+              </div>
+              <div
+                v-else-if="!displayedDialogs.length && !loadingDialogs"
                 class="tgc-empty-list"
               >
                 No chats found
@@ -1772,6 +1782,8 @@ const AVATAR_CONCURRENCY = 3;
 const searchQuery = ref("");
 const searchResults = ref<TgDialog[] | null>(null);
 const searchTimer = ref<ReturnType<typeof setTimeout> | null>(null);
+const searchLoading = ref(false);
+const searchError = ref<string | null>(null);
 
 const activeChatId = ref<string | null>(null);
 const activeChat = ref<TgDialog | null>(null);
@@ -3291,11 +3303,13 @@ async function joinCurrentChat() {
     }
   } catch (e: any) {
     const raw = e?.response?.data?.error ?? e?.message ?? "Failed to join";
-    copyToast.value = raw;
+    copyToast.value = friendlyTgError(raw);
     if (copyToastTimer) clearTimeout(copyToastTimer);
     copyToastTimer = setTimeout(() => {
       copyToast.value = "";
-    }, 4000);
+    }, 8000);
+    // Private chats need an invite link -- open the URL dialog so it can be pasted
+    if (raw.includes("CHANNEL_PRIVATE")) openGoUrlDialog();
   } finally {
     joiningChannel.value = false;
   }
@@ -3752,8 +3766,7 @@ async function onAccountChange() {
   activeChat.value = null;
   messages.value = [];
   contacts.value = [];
-  searchQuery.value = "";
-  searchResults.value = null;
+  clearSearch();
   showMobileChat.value = false;
   activeFolder.value = "all";
   tgFolders.value = [];
@@ -3786,6 +3799,12 @@ function friendlyTgError(raw: string): string {
     return "Too many requests -- Telegram has asked us to slow down. Please wait a moment and try again.";
   if (raw.includes("PHONE_NUMBER_BANNED"))
     return "This phone number is banned from Telegram.";
+  if (raw.includes("CHANNEL_PRIVATE"))
+    return "This group/channel is private and can only be joined with an invite link (t.me/+...).";
+  if (raw.includes("INVITE_HASH_EXPIRED"))
+    return "This invite link has expired or been revoked. Ask for a new one.";
+  if (raw.includes("USER_ALREADY_PARTICIPANT"))
+    return "This account is already a member of this chat.";
   if (
     raw.includes("CONNECTION") ||
     raw.includes("NETWORK") ||
@@ -3849,11 +3868,21 @@ async function loadDialogs() {
 
 // ── Search ────────────────────────────────────────────────────────────────────
 
+function clearSearch() {
+  if (searchTimer.value) clearTimeout(searchTimer.value);
+  searchQuery.value = "";
+  searchResults.value = null;
+  searchLoading.value = false;
+  searchError.value = null;
+}
+
 function onSearchInput() {
   if (searchTimer.value) clearTimeout(searchTimer.value);
   const q = searchQuery.value.trim();
+  searchError.value = null;
   if (!q) {
     searchResults.value = null;
+    searchLoading.value = false;
     return;
   }
 
@@ -3865,10 +3894,16 @@ function onSearchInput() {
   );
 
   // Then fetch from Telegram after debounce
+  searchLoading.value = true;
   searchTimer.value = setTimeout(async () => {
-    if (!selectedAccountId.value) return;
+    if (!selectedAccountId.value) {
+      searchLoading.value = false;
+      return;
+    }
     try {
       const remote = await tgClientApi.search(selectedAccountId.value, q);
+      // A newer keystroke may have superseded this request
+      if (searchQuery.value.trim() !== q) return;
       // Merge remote results, dedup by chatId
       const seen = new Set(searchResults.value?.map((d) => d.chatId));
       const merged = [...(searchResults.value ?? [])];
@@ -3876,8 +3911,12 @@ function onSearchInput() {
         if (!seen.has(r.chatId)) merged.push(r);
       }
       searchResults.value = merged;
-    } catch {
-      /* silently ignore search errors */
+    } catch (e: any) {
+      if (searchQuery.value.trim() !== q) return;
+      const raw = e?.response?.data?.error ?? e?.message ?? "Search failed";
+      searchError.value = friendlyTgError(raw);
+    } finally {
+      if (searchQuery.value.trim() === q) searchLoading.value = false;
     }
   }, 500);
 }

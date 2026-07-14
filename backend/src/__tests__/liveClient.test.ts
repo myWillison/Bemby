@@ -5,7 +5,8 @@
 const {
   MockUser, MockChat, MockChannel,
   MockPeerUser, MockPeerChannel, MockPeerChat,
-  MockMessage, MockMessageMediaPhoto, MockMessageMediaDocument, MockReplyInlineMarkup,
+  MockMessage, MockChatInvite, MockChatInviteAlready, MockChatInvitePeek,
+  MockMessageMediaPhoto, MockMessageMediaDocument, MockReplyInlineMarkup,
   MockTelegramClient, mockClientInstance,
   mockAddEventHandler, mockGetDialogs, mockGetMessages, mockSendMessage, mockInvoke,
 } = vi.hoisted(() => {
@@ -16,6 +17,9 @@ const {
   class MockPeerChannel { constructor(d: Record<string, any>) { Object.assign(this, d); } }
   class MockPeerChat { constructor(d: Record<string, any>) { Object.assign(this, d); } }
   class MockMessage { constructor(d: Record<string, any>) { Object.assign(this, d); } }
+  class MockChatInvite { constructor(d: Record<string, any>) { Object.assign(this, d); } }
+  class MockChatInviteAlready { constructor(d: Record<string, any>) { Object.assign(this, d); } }
+  class MockChatInvitePeek { constructor(d: Record<string, any>) { Object.assign(this, d); } }
   class MockMessageMediaPhoto {}
   class MockMessageMediaDocument {}
   class MockReplyInlineMarkup {
@@ -38,6 +42,7 @@ const {
     sendMessage:     mockSendMessage,
     invoke:          mockInvoke,
     downloadMedia:   vi.fn(),
+    getInputEntity:  vi.fn().mockResolvedValue({}),
   };
 
   const MockTelegramClient = vi.fn().mockReturnValue(mockClientInstance);
@@ -45,7 +50,8 @@ const {
   return {
     MockUser, MockChat, MockChannel,
     MockPeerUser, MockPeerChannel, MockPeerChat,
-    MockMessage, MockMessageMediaPhoto, MockMessageMediaDocument, MockReplyInlineMarkup,
+    MockMessage, MockChatInvite, MockChatInviteAlready, MockChatInvitePeek,
+    MockMessageMediaPhoto, MockMessageMediaDocument, MockReplyInlineMarkup,
     MockTelegramClient, mockClientInstance,
     mockAddEventHandler, mockGetDialogs, mockGetMessages, mockSendMessage, mockInvoke,
   };
@@ -69,6 +75,21 @@ vi.mock('telegram', () => ({
       ImportContacts: vi.fn().mockImplementation((d: any) => d),
       Search:         vi.fn().mockImplementation((d: any) => d),
     },
+    messages: {
+      SearchGlobal:     vi.fn().mockImplementation((d: any) => d),
+      // Tagged so mockInvoke routing can tell the two hash requests apart
+      CheckChatInvite:  vi.fn().mockImplementation((d: any) => ({ checkHash: d.hash })),
+      ImportChatInvite: vi.fn().mockImplementation((d: any) => ({ importHash: d.hash })),
+    },
+    channels: {
+      JoinChannel: vi.fn().mockImplementation((d: any) => ({ joinChannel: d.channel })),
+    },
+    ChatInvite:        MockChatInvite,
+    ChatInviteAlready: MockChatInviteAlready,
+    ChatInvitePeek:    MockChatInvitePeek,
+    InputChannelFromMessage: vi.fn().mockImplementation((d: any) => ({ fromMessage: true, ...d })),
+    InputMessagesFilterEmpty: vi.fn().mockImplementation(() => ({})),
+    InputPeerEmpty:           vi.fn().mockImplementation(() => ({})),
     InputPhoneContact: vi.fn().mockImplementation((d: any) => d),
     updates: {
       GetState: vi.fn().mockImplementation((d: any) => d),
@@ -113,6 +134,7 @@ import {
   getContacts,
   addContact,
   searchPeers,
+  joinChannel,
   subscribeToMessages,
 } from '../tg/liveClient';
 import { db } from '../db/database';
@@ -436,9 +458,27 @@ describe('addContact', () => {
 // ---- searchPeers -----------------------------------------------------------
 
 describe('searchPeers', () => {
+  const emptyGlobal = { messages: [], chats: [], users: [] };
+  const emptyFound = { users: [], chats: [] };
+
+  // SearchGlobal requests carry offsetRate; contacts.Search requests don't
+  function routeInvoke(handlers: {
+    searchGlobal?: (req: any) => any;
+    contactsSearch?: (req: any) => any;
+  } = {}) {
+    mockInvoke.mockImplementation(async (req: any) => {
+      if ('offsetRate' in req) return handlers.searchGlobal?.(req) ?? emptyGlobal;
+      return handlers.contactsSearch?.(req) ?? emptyFound;
+    });
+  }
+
+  function contactsSearchCalls() {
+    return mockInvoke.mock.calls.filter((c: any[]) => !('offsetRate' in c[0]));
+  }
+
   it('returns formatted results for matching users', async () => {
     const user = new MockUser({ id: 70n, firstName: 'Found', username: 'found', bot: false });
-    mockInvoke.mockResolvedValueOnce({ users: [user], chats: [] });
+    routeInvoke({ contactsSearch: () => ({ users: [user], chats: [] }) });
 
     const result = await searchPeers(makeEntry() as any, 'found');
 
@@ -448,12 +488,210 @@ describe('searchPeers', () => {
 
   it('returns formatted results for matching channels', async () => {
     const channel = new MockChannel({ id: 71n, title: 'Tech News', megagroup: false });
-    mockInvoke.mockResolvedValueOnce({ users: [], chats: [channel] });
+    routeInvoke({ contactsSearch: () => ({ users: [], chats: [channel] }) });
 
     const result = await searchPeers(makeEntry() as any, 'tech');
 
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ chatId: 'c71', type: 'channel' });
+  });
+
+  it('finds own dialogs by title when the server searches return nothing', async () => {
+    const group = new MockChannel({ id: 80n, title: 'SNTP Media Lite 公益计划 v3', megagroup: true });
+    mockGetDialogs.mockResolvedValueOnce([
+      { entity: group, name: 'SNTP Media Lite 公益计划 v3', dialog: { unreadCount: 0 }, message: undefined },
+    ]);
+    routeInvoke();
+
+    const result = await searchPeers(makeEntry() as any, '公益计划');
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ chatId: 'c80', type: 'group' });
+  });
+
+  it('surfaces a left group returned only as a title-matched entity by searchGlobal', async () => {
+    mockGetDialogs.mockResolvedValueOnce([]);
+    const group = new MockChannel({
+      id: 90n, title: 'SNTP Media Lite 公益计划 v3', megagroup: true, left: true,
+    });
+    routeInvoke({ searchGlobal: () => ({ messages: [], chats: [group], users: [] }) });
+
+    const result = await searchPeers(makeEntry() as any, 'SNTP Media Lite 公益计划 v3');
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ chatId: 'c90', type: 'group', left: true });
+  });
+
+  it('ranks chats that merely mention the query in a message after other matches', async () => {
+    mockGetDialogs.mockResolvedValueOnce([]);
+    const mentionChat = new MockChannel({ id: 91n, title: 'Some Chatter', megagroup: true });
+    const msg = new MockMessage({
+      peerId: new MockPeerChannel({ channelId: 91n }),
+      message: 'how do I join found group?',
+      date: 1700000000,
+      out: false,
+    });
+    const user = new MockUser({ id: 92n, firstName: 'Found', username: 'found', bot: false });
+    routeInvoke({
+      searchGlobal: () => ({ messages: [msg], chats: [mentionChat], users: [] }),
+      contactsSearch: () => ({ users: [user], chats: [] }),
+    });
+
+    const result = await searchPeers(makeEntry() as any, 'found');
+
+    expect(result.map((r) => r.chatId)).toEqual(['u92', 'c91']);
+    expect(result[1].lastMessage?.text).toBe('how do I join found group?');
+  });
+
+  it('retries the server searches with trailing words dropped when the full query matches nothing', async () => {
+    mockGetDialogs.mockResolvedValueOnce([]);
+    const channel = new MockChannel({ id: 81n, title: 'SNTP Media Lite', megagroup: false });
+    routeInvoke({
+      contactsSearch: (req) =>
+        req.q === 'SNTP Media Lite' ? { users: [], chats: [channel] } : emptyFound,
+    });
+
+    const result = await searchPeers(makeEntry() as any, 'SNTP Media Lite v9');
+
+    expect(contactsSearchCalls()).toHaveLength(2);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ chatId: 'c81', type: 'channel' });
+  });
+
+  it('dedupes chats found both in own dialogs and the server search', async () => {
+    const group = new MockChannel({ id: 82n, title: 'Dup Group', megagroup: true });
+    mockGetDialogs.mockResolvedValueOnce([
+      { entity: group, name: 'Dup Group', dialog: { unreadCount: 2 }, message: undefined },
+    ]);
+    routeInvoke({ contactsSearch: () => ({ users: [], chats: [group] }) });
+
+    const result = await searchPeers(makeEntry() as any, 'dup');
+
+    expect(result).toHaveLength(1);
+    // The own-dialog entry wins so unread/lastMessage info is kept
+    expect(result[0].unreadCount).toBe(2);
+  });
+
+  it('reuses the cached dialog list for consecutive searches on the same entry', async () => {
+    routeInvoke();
+    const entry = makeEntry();
+    await searchPeers(entry as any, 'first');
+    await searchPeers(entry as any, 'second');
+
+    expect(mockGetDialogs).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---- joinChannel -----------------------------------------------------------
+
+describe('joinChannel', () => {
+  const CHANNEL_PRIVATE = new Error('400: CHANNEL_PRIVATE (caused by channels.JoinChannel)');
+
+  function makePrivateGroup() {
+    return new MockChannel({
+      id: 90n, title: 'Private Group', megagroup: true, left: true,
+    });
+  }
+
+  it('joins directly when the channel is accessible', async () => {
+    const group = makePrivateGroup();
+    mockInvoke.mockImplementation(async (req: any) => {
+      if ('joinChannel' in req) return {};
+      throw new Error(`unexpected request ${JSON.stringify(req)}`);
+    });
+
+    const result = await joinChannel(makeEntry([['c90', group]]) as any, 'c90');
+
+    expect(result).toEqual({ joined: true });
+    expect((group as any).left).toBe(false);
+  });
+
+  it('recovers from CHANNEL_PRIVATE via a message reference, without any invite', async () => {
+    const group = makePrivateGroup();
+    const mentioningMsg = new MockMessage({
+      id: 7,
+      peerId: new MockPeerChannel({ channelId: 91n }),
+      fwdFrom: { fromId: new MockPeerChannel({ channelId: 90n }) },
+      message: 'forwarded from the group',
+      date: 1700000000,
+    });
+    mockInvoke.mockImplementation(async (req: any) => {
+      if ('joinChannel' in req) {
+        // Direct join with the min entity fails; the message-derived reference works
+        if (req.joinChannel?.fromMessage) return {};
+        throw CHANNEL_PRIVATE;
+      }
+      if ('offsetRate' in req) return { messages: [mentioningMsg], chats: [], users: [] };
+      throw new Error(`unexpected request ${JSON.stringify(req)}`);
+    });
+
+    const result = await joinChannel(makeEntry([['c90', group]]) as any, 'c90');
+
+    expect(result).toEqual({ joined: true });
+    expect((group as any).left).toBe(false);
+  });
+
+  it('recovers from CHANNEL_PRIVATE via an invite link found in messages', async () => {
+    const group = makePrivateGroup();
+    const linkMsg = new MockMessage({
+      id: 8,
+      peerId: new MockPeerChannel({ channelId: 91n }),
+      message: 'join here https://t.me/+AbCdEf12345',
+      date: 1700000000,
+    });
+    const imported: string[] = [];
+    mockInvoke.mockImplementation(async (req: any) => {
+      if ('joinChannel' in req) throw CHANNEL_PRIVATE;
+      if ('offsetRate' in req) return { messages: [linkMsg], chats: [], users: [] };
+      if ('checkHash' in req) {
+        return new MockChatInvite({ title: 'Private Group', participantsCount: 11, megagroup: true });
+      }
+      if ('importHash' in req) {
+        imported.push(req.importHash);
+        return { chats: [new MockChannel({ id: 90n, title: 'Private Group', megagroup: true })] };
+      }
+      throw new Error(`unexpected request ${JSON.stringify(req)}`);
+    });
+
+    const result = await joinChannel(makeEntry([['c90', group]]) as any, 'c90');
+
+    expect(result).toEqual({ joined: true });
+    expect(imported).toEqual(['AbCdEf12345']);
+  });
+
+  it('skips invites that resolve to a different chat', async () => {
+    const group = makePrivateGroup();
+    const linkMsg = new MockMessage({
+      id: 9,
+      peerId: new MockPeerChannel({ channelId: 91n }),
+      message: 'unrelated https://t.me/+WrongGroup99',
+      date: 1700000000,
+    });
+    mockInvoke.mockImplementation(async (req: any) => {
+      if ('joinChannel' in req) throw CHANNEL_PRIVATE;
+      if ('offsetRate' in req) return { messages: [linkMsg], chats: [], users: [] };
+      if ('checkHash' in req) {
+        return new MockChatInvite({ title: 'A Different Group', participantsCount: 3 });
+      }
+      throw new Error(`unexpected request ${JSON.stringify(req)}`);
+    });
+
+    await expect(
+      joinChannel(makeEntry([['c90', group]]) as any, 'c90'),
+    ).rejects.toThrow('CHANNEL_PRIVATE');
+  });
+
+  it('rethrows CHANNEL_PRIVATE when nothing can be discovered', async () => {
+    const group = makePrivateGroup();
+    mockInvoke.mockImplementation(async (req: any) => {
+      if ('joinChannel' in req) throw CHANNEL_PRIVATE;
+      if ('offsetRate' in req) return { messages: [], chats: [], users: [] };
+      throw new Error(`unexpected request ${JSON.stringify(req)}`);
+    });
+
+    await expect(
+      joinChannel(makeEntry([['c90', group]]) as any, 'c90'),
+    ).rejects.toThrow('CHANNEL_PRIVATE');
   });
 });
 
