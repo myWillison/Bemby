@@ -950,7 +950,8 @@ const form = reactive({
   name: '',
   jobType: 'checkin' as 'checkin' | 'embywatch' | 'custom' | 'autoreg',
   botUsername: '',
-  timezone: 'Australia/Sydney',
+  // Empty means follow the default_timezone setting
+  timezone: '',
   replyTimeoutMs: 40000,
   retryMax: 5,
   runEveryDays: 1,
@@ -1246,7 +1247,7 @@ function openAdd() {
     name: '',
     jobType: 'checkin',
     botUsername: '',
-    timezone: settings.value?.default_timezone ?? 'Australia/Sydney',
+    timezone: '',
     replyTimeoutMs: 40000,
     retryMax: Number(settings.value?.default_max_retry ?? 5),
   });

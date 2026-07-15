@@ -40,7 +40,7 @@ db.exec(`
     bot_username          TEXT    NOT NULL,
     schedule_window_start INTEGER NOT NULL DEFAULT 1400,
     schedule_window_end   INTEGER NOT NULL DEFAULT 1600,
-    timezone              TEXT    NOT NULL DEFAULT 'Australia/Sydney',
+    timezone              TEXT    NOT NULL DEFAULT '',
     reply_timeout_ms      INTEGER NOT NULL DEFAULT 40000,
     retry_max             INTEGER NOT NULL DEFAULT 5,
     enabled               INTEGER NOT NULL DEFAULT 1,
@@ -276,7 +276,7 @@ db.exec(`
     name             TEXT    NOT NULL,
     job_type         TEXT    NOT NULL DEFAULT 'checkin',
     bot_username     TEXT    NOT NULL DEFAULT '',
-    timezone         TEXT    NOT NULL DEFAULT 'Australia/Sydney',
+    timezone         TEXT    NOT NULL DEFAULT '',
     reply_timeout_ms INTEGER NOT NULL DEFAULT 40000,
     retry_max        INTEGER NOT NULL DEFAULT 5,
     enabled          INTEGER NOT NULL DEFAULT 1,
@@ -286,6 +286,16 @@ db.exec(`
     created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
+
+// Jobs and templates historically froze the default timezone at creation, so
+// changing the default in Settings never affected them (issue #13). An empty
+// timezone now means "follow the default_timezone setting", resolved at
+// scheduling time. The per-row value was never exposed in the UI, so existing
+// rows all hold stale defaults rather than deliberate choices; blank them.
+runOnce("timezone-follow-default", () => {
+  db.exec("UPDATE jobs SET timezone = ''");
+  db.exec("UPDATE job_templates SET timezone = ''");
+});
 
 // AI supplier + model tables
 db.exec(`
@@ -359,7 +369,7 @@ try {
           bot_username          TEXT    NOT NULL,
           schedule_window_start INTEGER NOT NULL DEFAULT 1400,
           schedule_window_end   INTEGER NOT NULL DEFAULT 1600,
-          timezone              TEXT    NOT NULL DEFAULT 'Australia/Sydney',
+          timezone              TEXT    NOT NULL DEFAULT '',
           reply_timeout_ms      INTEGER NOT NULL DEFAULT 40000,
           retry_max             INTEGER NOT NULL DEFAULT 5,
           enabled               INTEGER NOT NULL DEFAULT 1,
@@ -484,6 +494,20 @@ try {
   }
 } catch (e) {
   console.error("[db] tg_accounts nullable migration failed:", e);
+}
+
+export const FALLBACK_TIMEZONE = "Australia/Sydney";
+
+/** Returns the default_timezone setting, or the built-in fallback when unset. */
+export function getDefaultTimezone(): string {
+  try {
+    const row = db
+      .prepare("SELECT value FROM settings WHERE key = 'default_timezone'")
+      .get() as { value: string } | undefined;
+    return row?.value || FALLBACK_TIMEZONE;
+  } catch {
+    return FALLBACK_TIMEZONE;
+  }
 }
 
 /** Returns the global fallback TG API credentials, or null if not configured. */

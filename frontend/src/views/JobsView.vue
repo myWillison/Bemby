@@ -1023,7 +1023,8 @@ const form = reactive({
   botUsername: '',
   scheduleWindowStart: 1000,
   scheduleWindowEnd: 2200,
-  timezone: 'Australia/Sydney',
+  // Empty means follow the default_timezone setting
+  timezone: '',
   replyTimeoutMs: 40000,
   retryMax: 5,
   enabled: true,
@@ -1330,7 +1331,7 @@ function openAdd() {
     name: '', accountId: accounts.value[0]?.id ?? null,
     jobType: 'checkin', botUsername: '',
     scheduleWindowStart: 1000, scheduleWindowEnd: 2200,
-    timezone: settings.value?.default_timezone ?? 'Australia/Sydney',
+    timezone: '',
     replyTimeoutMs: 40000,
     retryMax: Number(settings.value?.default_max_retry ?? 5),
     enabled: true,

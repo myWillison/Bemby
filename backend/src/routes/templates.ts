@@ -213,7 +213,7 @@ router.post('/', (req, res) => {
     name,
     jobType ?? 'checkin',
     (botUsername as string | undefined)?.replace(/^@+/, '') ?? '',
-    timezone ?? 'Australia/Sydney',
+    timezone ?? '',
     Number(replyTimeoutMs ?? 40000),
     Number(retryMax ?? 5),
     config != null ? JSON.stringify(config) : null,

@@ -100,8 +100,10 @@ router.put("/", (req, res) => {
     }
   })();
 
-  // Reschedule if daily-run check toggled
-  if ("check_daily_run" in updates) refreshScheduler();
+  // Reschedule if daily-run check toggled or the default timezone changed
+  // (jobs with no timezone of their own follow the default)
+  if ("check_daily_run" in updates || "default_timezone" in updates)
+    refreshScheduler();
 
   // Apply a tightened retention window straight away
   if ("log_retention_days" in updates) purgeOldLogs();

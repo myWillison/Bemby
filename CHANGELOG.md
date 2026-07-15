@@ -4,6 +4,20 @@ All notable changes to Bemby are documented here.
 
 ---
 
+## Unreleased
+
+### 中文
+
+- **修复任务不跟随默认时区变更（#13）** -- 任务与模板在创建时会把当时的默认时区固化到自身，之后在设置中修改「默认时区」对已有任务无效，导致时间窗口按旧时区执行（例如设置为香港时区后，01:00–03:00 的窗口实际按悉尼时间运行，即香港时间 23:00–01:00）；现任务时区为空时表示"跟随默认时区"，在每次排程时实时解析，修改默认时区会立即重新排程所有跟随默认的任务；无效时区会安全回退而不会产生失效的定时器
+- **升级须知** -- 首次启动会执行一次性迁移，将所有已有任务和模板的时区清空为"跟随默认时区"；由于界面从未提供过按任务设置时区的入口，这些存量值均为创建时固化的默认值而非用户的主动选择；若曾通过 API 手动为单个任务设置过时区，该值会被此迁移重置，如有需要请在升级后通过 API 重新设置
+
+### English
+
+- **Fix jobs not following default timezone changes (#13)** -- jobs and templates froze the default timezone into themselves at creation, so changing Default Timezone in Settings never affected existing jobs and their windows ran in the old zone (e.g. with the default set to Hong Kong, a 01:00–03:00 window actually ran on Sydney time, i.e. 23:00–01:00 Hong Kong time); an empty job timezone now means "follow the default", resolved at scheduling time, and saving a new default immediately reschedules every job that follows it; invalid zones fall back safely instead of producing broken timers
+- **Upgrade note** -- first boot runs a one-time migration that blanks the timezone on all existing jobs and templates so they follow the default; the UI never offered a per-job timezone, so these stored values were frozen defaults rather than deliberate choices; if you ever set a per-job timezone manually via the API, that value is reset by this migration and needs to be re-applied via the API after upgrading
+
+---
+
 ## v0.9.29-patch-1
 
 ### 中文

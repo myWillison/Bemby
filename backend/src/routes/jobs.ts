@@ -287,7 +287,7 @@ router.post("/", (req, res) => {
       (botUsername as string).replace(/^@+/, ""),
       Number(scheduleWindowStart ?? 1400),
       Number(scheduleWindowEnd ?? 1600),
-      timezone ?? "Australia/Sydney",
+      timezone ?? "",
       Number(replyTimeoutMs ?? 40000),
       Number(retryMax ?? 5),
       enabled !== false ? 1 : 0,
