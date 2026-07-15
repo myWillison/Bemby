@@ -1840,6 +1840,30 @@ export async function startBot(
   };
 }
 
+/**
+ * Parses a t.me/BotName[/AppShortName]?startapp=PARAM mini app link.
+ * The startapp value is percent-decoded and stripped of base64 padding:
+ * Telegram only accepts [A-Za-z0-9_-] in start_param, so raw links carrying
+ * %3D-encoded padding fail with START_PARAM_INVALID (issue seen with
+ * telegram.me/.../panel?startapp=...%3D%3D).
+ */
+export function parseMiniAppLink(
+  tmeOrUrl: string,
+): { botUsername: string; appShortName?: string; startParam: string } | null {
+  const m = tmeOrUrl.match(
+    /t(?:elegram)?\.me\/([A-Za-z]\w+)(?:\/([A-Za-z]\w+))?\?startapp=([^&\s]+)/i,
+  );
+  if (!m) return null;
+  let startParam = m[3];
+  try {
+    startParam = decodeURIComponent(startParam);
+  } catch {
+    // Malformed escape sequence -- keep the raw value
+  }
+  startParam = startParam.replace(/=+$/, "");
+  return { botUsername: m[1], appShortName: m[2], startParam };
+}
+
 // Resolves a mini app URL to an authenticated web app URL.
 // Handles two cases:
 //   - t.me/BotName?startapp=HASH            -- uses RequestMainWebView
@@ -1851,12 +1875,9 @@ export async function resolveWebApp(
   botChatId?: string, // for direct URLs we need to know which bot owns the app
   peerChatId?: string, // chat where the webview button lives (for RequestWebView)
 ): Promise<{ url: string; resolved: boolean }> {
-  // t.me/BotName[/AppShortName]?startapp=HASH pattern
-  const startappM = tmeOrUrl.match(
-    /t(?:elegram)?\.me\/([A-Za-z]\w+)(?:\/([A-Za-z]\w+))?\?startapp=([^&\s]+)/i,
-  );
-  if (startappM) {
-    const [, botUsername, appShortName, startParam] = startappM;
+  const miniApp = parseMiniAppLink(tmeOrUrl);
+  if (miniApp) {
+    const { botUsername, appShortName, startParam } = miniApp;
     const bot = (await entry.client.getEntity(botUsername)) as Api.User;
     entry.entityCache.set(entityToChatId(bot), bot);
 

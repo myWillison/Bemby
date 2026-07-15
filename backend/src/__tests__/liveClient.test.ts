@@ -136,6 +136,7 @@ import {
   searchPeers,
   joinChannel,
   subscribeToMessages,
+  parseMiniAppLink,
 } from '../tg/liveClient';
 import { db } from '../db/database';
 
@@ -747,5 +748,43 @@ describe('subscribeToMessages', () => {
     });
 
     expect(sub).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('parseMiniAppLink', () => {
+  it('parses a named mini app link with a plain start param', () => {
+    expect(parseMiniAppLink('https://t.me/somebot/app?startapp=abc_DEF-123')).toEqual({
+      botUsername: 'somebot',
+      appShortName: 'app',
+      startParam: 'abc_DEF-123',
+    });
+  });
+
+  it('parses a main mini app link without an app short name', () => {
+    const parsed = parseMiniAppLink('https://t.me/somebot?startapp=xyz');
+    expect(parsed?.botUsername).toBe('somebot');
+    expect(parsed?.appShortName).toBeUndefined();
+    expect(parsed?.startParam).toBe('xyz');
+  });
+
+  it('percent-decodes the start param and strips base64 padding (issue: START_PARAM_INVALID)', () => {
+    const parsed = parseMiniAppLink(
+      'https://telegram.me/nmnmfunbot/panel?startapp=L3dlYi12ZXJpZnkvLTEwMDM5NjEzNzczMDQvNjExNzU0NTc1MA%3D%3D',
+    );
+    expect(parsed).toEqual({
+      botUsername: 'nmnmfunbot',
+      appShortName: 'panel',
+      startParam: 'L3dlYi12ZXJpZnkvLTEwMDM5NjEzNzczMDQvNjExNzU0NTc1MA',
+    });
+  });
+
+  it('keeps the raw value when percent-decoding fails', () => {
+    const parsed = parseMiniAppLink('https://t.me/somebot/app?startapp=bad%zzvalue');
+    expect(parsed?.startParam).toBe('bad%zzvalue');
+  });
+
+  it('returns null for non-mini-app links', () => {
+    expect(parseMiniAppLink('https://t.me/somebot?start=abc')).toBeNull();
+    expect(parseMiniAppLink('https://example.com/?startapp=abc')).toBeNull();
   });
 });
