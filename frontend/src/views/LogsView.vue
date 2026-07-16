@@ -9,15 +9,26 @@
           v-model="filterJobId"
           class="form-select"
           style="width: 200px"
-          @change="load"
+          @change="onFilterChange"
         >
           <option value="">{{ t("logs.allJobs") }}</option>
           <option v-for="j in jobs" :key="j.id" :value="j.id">
             {{ j.name }}
           </option>
         </select>
+        <select
+          v-model="filterStatus"
+          class="form-select"
+          style="width: 150px"
+          @change="onFilterChange"
+        >
+          <option value="">{{ t("common.statusFilterAll") }}</option>
+          <option value="success">{{ t("logs.status.success") }}</option>
+          <option value="failed">{{ t("logs.status.failed") }}</option>
+          <option value="running">{{ t("logs.status.running") }}</option>
+        </select>
         <label class="dev-toggle" :title="t('logs.showRetired')">
-          <input type="checkbox" v-model="showRetired" @change="load" />
+          <input type="checkbox" v-model="showRetired" @change="onFilterChange" />
           <span class="dev-toggle-label">{{ t("logs.retiredLabel") }}</span>
         </label>
         <label class="dev-toggle" :title="t('logs.showDevLogs')">
@@ -37,6 +48,13 @@
     </div>
 
     <div class="card">
+      <PaginationBar
+        :page="page"
+        :page-size="pageSize"
+        :total="total"
+        @update:page="onPageChange"
+        @update:page-size="onPageSizeChange"
+      />
       <div class="table-wrap">
         <table>
           <thead>
@@ -49,10 +67,10 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-if="!filteredLogs.length">
+            <tr v-if="!logs.length">
               <td colspan="5" class="empty">{{ t("logs.noLogs") }}</td>
             </tr>
-            <template v-for="(l, idx) in filteredLogs" :key="l.id">
+            <template v-for="(l, idx) in logs" :key="l.id">
               <tr
                 style="cursor: pointer; user-select: none"
                 :class="[expandedId === l.id ? 'row-expanded' : idx % 2 === 1 ? 'row-even' : '', l.retired ? 'row-retired' : '']"
@@ -851,22 +869,14 @@
           </tbody>
         </table>
       </div>
-
-      <div
-        v-if="hasMore"
-        style="padding: 12px 16px; text-align: center"
-      >
-        <button class="btn btn-ghost btn-sm" @click="loadMore">
-          <i class="fa-solid fa-chevron-down"></i> {{ t("common.loadMore") }}
-        </button>
-      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import DebugPanel from "../components/DebugPanel.vue";
+import PaginationBar from "../components/PaginationBar.vue";
 import {
   logsApi,
   jobsApi,
@@ -882,23 +892,18 @@ import {
 } from "../api/client";
 import { t, locale } from "../i18n";
 import { usePersistedRef } from "../composables/usePersistedRef";
+import { debounce } from "../composables/useDebounce";
 
 const logs = ref<Log[]>([]);
 const jobs = ref<Job[]>([]);
 const filterJobId = usePersistedRef<number | "">("bemby:logs:filterJobId", "");
 const filterText = usePersistedRef<string>("bemby:logs:filterText", "");
+const filterStatus = usePersistedRef<string>("bemby:logs:filterStatus", "");
 const showDevLogs = usePersistedRef<boolean>("bemby:logs:showDevLogs", false);
 const showRetired = usePersistedRef<boolean>("bemby:logs:showRetired", false);
-const offset = ref(0);
-const hasMore = ref(false);
-
-const filteredLogs = computed(() => {
-  const q = filterText.value.trim().toLowerCase();
-  if (!q) return logs.value;
-  return logs.value.filter(l =>
-    [l.jobName, l.accountName, l.message].some(f => f?.toLowerCase().includes(q))
-  );
-});
+const page = ref(1);
+const pageSize = usePersistedRef<number>("bemby:logs:pageSize", 50);
+const total = ref(0);
 
 const expandedId = ref<number | null>(null);
 const expandedDetail = ref<CheckinAttemptLog[] | EmbywatchLog[] | { steps: CustomStepLog[] } | null>(null);
@@ -1024,30 +1029,48 @@ onMounted(async () => {
     .catch(() => {});
 });
 
-async function load() {
-  offset.value = 0;
-  expandedId.value = null;
-  const page = await logsApi.list({
-    jobId: filterJobId.value === "" ? undefined : Number(filterJobId.value),
-    limit: 50,
-    offset: 0,
+function fetchPage() {
+  return logsApi.listPaged({
+    page: page.value,
+    pageSize: pageSize.value,
+    jobId: filterJobId.value,
     showRetired: showRetired.value,
+    status: filterStatus.value || undefined,
+    search: filterText.value.trim() || undefined,
   });
-  logs.value = page;
-  hasMore.value = page.length === 50;
 }
 
-async function loadMore() {
-  offset.value += 50;
-  const more = await logsApi.list({
-    jobId: filterJobId.value === "" ? undefined : Number(filterJobId.value),
-    limit: 50,
-    offset: offset.value,
-    showRetired: showRetired.value,
-  });
-  logs.value.push(...more);
-  hasMore.value = more.length === 50;
+async function load() {
+  expandedId.value = null;
+  let res = await fetchPage();
+  // if the current page emptied out, step back one and reload once
+  if (!res.items.length && page.value > 1) {
+    page.value -= 1;
+    res = await fetchPage();
+  }
+  logs.value = res.items;
+  total.value = res.total;
 }
+
+function onFilterChange() {
+  page.value = 1;
+  load();
+}
+
+function onPageChange(p: number) {
+  if (p === page.value) return;
+  page.value = p;
+  load();
+}
+
+function onPageSizeChange(size: number) {
+  pageSize.value = size;
+  page.value = 1;
+  load();
+}
+
+const debouncedSearch = debounce(onFilterChange, 300);
+watch(filterText, () => debouncedSearch());
 
 async function toggleRetire(log: Log) {
   const result = await logsApi.retire(log.id);

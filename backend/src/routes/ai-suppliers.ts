@@ -6,6 +6,15 @@ const router = Router();
 type SupplierRow = { id: number; name: string; base_url: string; api_key: string; timeout_ms: number };
 type ModelRow    = { id: number; supplier_id: number; model_id: string; label: string | null };
 
+/** Removes the pinned-default setting when its ai_models row no longer exists. */
+function clearDanglingDefaultModel() {
+  const pinned = db.prepare("SELECT value FROM settings WHERE key = 'ai_default_model_id'").get() as { value: string } | undefined;
+  if (!pinned) return;
+  if (!db.prepare('SELECT id FROM ai_models WHERE id = ?').get(Number(pinned.value))) {
+    db.prepare("DELETE FROM settings WHERE key = 'ai_default_model_id'").run();
+  }
+}
+
 const maskKey = (key: string) => {
   if (!key) return '';
   if (key.length <= 8) return '*'.repeat(key.length);
@@ -54,6 +63,7 @@ router.put('/:id', (req, res) => {
 
 router.delete('/:id', (req, res) => {
   db.prepare('DELETE FROM ai_suppliers WHERE id = ?').run(Number(req.params.id));
+  clearDanglingDefaultModel();
   res.json({ ok: true });
 });
 
@@ -72,6 +82,7 @@ router.post('/:id/models', (req, res) => {
 
 router.delete('/:id/models/:modelId', (req, res) => {
   db.prepare('DELETE FROM ai_models WHERE id = ?').run(Number(req.params.modelId));
+  clearDanglingDefaultModel();
   res.json({ ok: true });
 });
 

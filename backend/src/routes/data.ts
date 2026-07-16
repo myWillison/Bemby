@@ -14,6 +14,8 @@ export const EXPORT_EXCLUDED_SETTINGS = new Set([
   'admin_password_hash',
   'admin_username',
   'jwt_secret',
+  // References an instance-local ai_models row id; meaningless after import
+  'ai_default_model_id',
 ]);
 
 // Settings whose presence forces the export to be encrypted.
@@ -344,6 +346,8 @@ router.post('/import', async (req, res) => {
       db.prepare('DELETE FROM jobs').run();
       db.prepare('DELETE FROM job_templates').run();
       db.prepare('DELETE FROM tg_accounts').run();
+      // The pinned default references a wiped ai_models row id
+      db.prepare("DELETE FROM settings WHERE key = 'ai_default_model_id'").run();
     }
 
     // Import accounts and build accountIndex -> new db id mapping
@@ -398,7 +402,7 @@ router.post('/import', async (req, res) => {
           t.name,
           t.jobType ?? 'checkin',
           t.botUsername ?? '',
-          t.timezone ?? 'Australia/Sydney',
+          t.timezone ?? '',
           t.replyTimeoutMs ?? 40000,
           t.retryMax ?? 5,
           t.config ?? null,
@@ -429,7 +433,7 @@ router.post('/import', async (req, res) => {
         j.botUsername,
         j.scheduleWindowStart ?? 1400,
         j.scheduleWindowEnd ?? 1600,
-        j.timezone ?? 'Australia/Sydney',
+        j.timezone ?? '',
         j.replyTimeoutMs ?? 40000,
         j.retryMax ?? 5,
         j.enabled ? 1 : 0,

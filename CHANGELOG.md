@@ -4,6 +4,56 @@ All notable changes to Bemby are documented here.
 
 ---
 
+## v0.9.30
+
+### 中文
+
+**消息（Messenger）**
+- **补全 Telegram 官方功能** -- 拉黑/取消拉黑联系人、举报（垂类原因 + 备注）、删除聊天（可选"为对方也删除"）、删除消息（含批量、"为对方也删除"）、编辑自己发送的消息、转发消息（含批量选择目标聊天）、多选模式（批量转发/删除）、输入中提示（收发双向，聊天列表与聊天头部均显示"对方正在输入…"）
+- **举报用户/机器人时同步拉黑并删除聊天** -- 此前举报仅发送举报请求；现举报用户或机器人会同时拉黑对方并删除该聊天，对话框中会提示该行为，操作完成后聊天从列表中移除
+- **修复删除聊天后重新出现** -- 删除聊天后刷新对话列表，该聊天此前会因本地缓存未清理而重新出现；现删除后立即从缓存中移除
+- **群组/频道搜索大幅改进** -- 此前搜索主要依赖用户名匹配，常搜不到无用户名或非拉丁文标题的群组；现同时匹配本地已加入聊天的标题/用户名，并对已退出、已归档或无用户名的聊天做全局消息内容匹配，兼顾公开聊天的全局用户名匹配，结果按相关性排序；搜索时显示"正在搜索 Telegram…"、失败时给出提示而非静默失败，多词查询搜不到时自动去掉末尾词重试
+- **加入群组失败提示更友好** -- 私有群组/频道、邀请链接已失效、已是群成员等场景均有明确文案；私有群加入失败时自动弹出"输入网址"对话框，方便直接粘贴邀请链接
+- **移动端聊天头部按钮优化** -- 搜索、清空缓存、小程序模式、打开网址、关闭聊天等按钮在移动端合并为单个 ⋯ 菜单，避免挤占聊天名称显示空间；新增"跳转到最新消息"悬浮按钮，滚动离底部较远时出现，并显示未读消息数角标
+- **清除缓存 / 清理账号** -- 消息视图头部新增两个按钮：**清除缓存**（清空该账号本地缓存并重新从 Telegram 拉取，用于排查显示异常）；**清理账号**（退出所有群组与频道、删除所有私聊记录、移除所有联系人及自定义文件夹，自动保留"收藏夹""Telegram 官方通知"和 SpamBot）；清理账号为不可逆操作，需在确认框中勾选"已核对账号名称并了解此操作不可撤销"后才能执行，完成后显示处理结果（成功/失败数量）
+- **打开非 Telegram 链接改为可选择** -- 点击站外链接时弹出选择卡片，可选"在 Bemby 中打开"或"在浏览器中打开"；在 Bemby 中打开前会先探测目标网站是否允许被嵌入 iframe，不允许时自动改走内置代理加载，并在页面上方显示"该网站禁止嵌入，已通过 Bemby 代理加载，登录及部分交互功能可能无法使用"提示；代理加载的页面运行在隔离的沙箱环境中，无法访问 Bemby 自身的登录凭据
+- **修复机器人编辑消息回复漏检问题** -- 签到与自定义任务中点击按钮后，若机器人是通过编辑已有消息（而非发送新消息）来更新按钮，此前可能被漏检导致任务超时失败；现同时监听消息编辑与新消息两种更新方式，并修复发送指令与开始监听之间的极短时间窗口导致回复丢失的问题，成功/失败关键字匹配也改为综合所有收到的回复消息判断
+
+**AI**
+- **修复不同服务商提供同名模型时默认模型可能用错凭据** -- 此前默认模型仅按模型名称匹配，当两个服务商提供同名模型（如同一模型换了服务商）时，系统会任选其中一个有效凭据的服务商，可能并非用户实际选择的那个；现默认模型改为精确锁定到具体的"服务商 + 模型"记录，设置页下拉选项据此区分显示；服务商或模型被删除时会自动清理失效的默认模型指向
+
+**账户**
+- **账户列表显示所属国家及国旗** -- 账户列表手机号下方新增一行，显示根据号码国家代码解析出的国旗与国家名称（悬停查看完整名称），名称随界面语言自动切换
+- **新增/编辑账户表单校验** -- 名称与手机号现为必填项；未配置全局默认 API 凭据时，API ID 与 API Hash 也为必填项；已知的后端报错信息改为可读的中/英文提示
+
+**列表、筛选与分页**
+- **账户、任务、日志、模板列表改为服务端分页与筛选** -- 支持大数据量下的分页浏览，账户与模板新增搜索框（模板搜索支持模糊匹配并按相关度排序），日志新增状态筛选（全部/成功/失败/运行中），任务筛选下拉选项覆盖全部数据而非仅当前页；分页控件移至表格上方，页码/每页数量随刷新自动恢复
+
+### English
+
+**Messenger**
+- **Fill out official Telegram feature parity** -- block/unblock a contact, report (with a reason and optional comment), delete a chat (with an optional "also delete for them"), delete messages (single or bulk, with the same revoke option), edit your own sent messages, forward messages (single or bulk, picking a destination chat), multi-select mode for bulk forward/delete, and typing indicators in both directions ("X is typing…" shown in the dialog list and the open chat header)
+- **Reporting a user/bot now also blocks and deletes the chat** -- previously report only filed the report; reporting a user or bot now blocks them and deletes the chat in the same action, with the confirmation card calling this out, and the chat disappears from the list once done
+- **Fix deleted chats reappearing** -- deleting a chat and then refreshing the dialog list could bring it back because the local cache wasn't pruned; it's now removed from the cache immediately on delete
+- **Much better group/channel search** -- search previously relied mostly on username matching and often missed groups without a username or with non-Latin titles; it now matches your own chats by title or username locally, plus a global content search for chats you've left, archived, or that have no username, and a global username search for public chats, all ranked by relevance; shows a "Searching Telegram…" spinner, surfaces errors instead of failing silently, and retries multi-word queries by dropping trailing words when nothing matches
+- **Friendlier join-group failures** -- clear messages for private groups/channels, expired invite links, and already-being-a-member; a failed private-group join now auto-opens the "Go to URL" dialog so you can paste the invite link directly
+- **Mobile chat header cleanup** -- search, clear cache, mini app mode, open URL, and close chat collapse into a single ⋯ menu on mobile so the chat name keeps its space; a new floating "jump to latest" button appears once you've scrolled away from the bottom, with an unseen-message count badge
+- **Clear cache / Clean account** -- two new buttons in the Messenger header: **Clear cache** wipes the account's local cache and refetches everything from Telegram (useful when something looks stale or wrong); **Clean account** leaves every group and channel, deletes every private chat history, and removes all contacts and custom folders (Saved Messages, the official Telegram service chat, and SpamBot are always kept); it's irreversible, so it requires ticking "I checked the account names above and understand this is irreversible" before it can run, and reports how many items succeeded or failed afterwards
+- **Opening non-Telegram links now asks first** -- clicking an external link shows a chooser card with "Open in Bemby" or "Open in browser"; choosing Bemby first checks whether the target site allows being embedded, and if it doesn't, loads it through a built-in proxy instead with a banner noting "This site blocks embedding, so it was loaded via the Bemby proxy — sign-ins and some interactive features may not work"; proxied pages run in an isolated sandbox that cannot reach Bemby's own login credentials
+- **Fix missed bot replies delivered as message edits** -- when a bot updates its buttons by editing its existing message rather than sending a new one, check-in and custom jobs could previously miss the update and time out; both edit and new-message updates are now watched, a short gap between sending a command and starting to listen no longer drops a fast reply, and success/failure text matching now considers every reply received rather than just one message
+
+**AI**
+- **Fix the default model sometimes running against the wrong provider's credentials** -- the default model was previously matched by name only, so when two providers offered a model with the same name, the app could pick either one's credentials rather than the one you actually selected; the default is now pinned to the exact provider + model combination, shown as distinct options in Settings, and automatically cleared if that provider or model is later removed
+
+**Accounts**
+- **Show each account's country and flag** -- the phone number column in the Accounts list now shows a flag and country name resolved from the number's calling code (full name on hover), localised to the active UI language
+- **Add/edit account form validation** -- name and phone number are now required; API ID and API Hash are required too unless a global default is configured; known backend errors now show a readable message instead of raw text
+
+**Lists, filtering & pagination**
+- **Accounts, Jobs, Logs, and Templates move to server-side pagination and filtering** -- these lists now page through large datasets instead of loading everything at once; Accounts and Templates gain a search box (Templates search is fuzzy-matched and relevance-ranked), Logs gains a status filter (all / success / failed / running), and the Jobs filter dropdown now covers the whole dataset rather than just the loaded page; the pagination bar moved to the top of each table, and page/size selections persist across refreshes
+
+---
+
 ## v0.9.29-patch-1
 
 ### 中文

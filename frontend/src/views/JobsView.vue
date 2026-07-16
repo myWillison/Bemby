@@ -35,7 +35,7 @@
           <option v-for="opt in botUrlTplOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
         </select>
         <input v-model="filterName" class="form-input" style="width:160px;height:30px;font-size:13px;padding:0 8px" :placeholder="t('jobs.filterPlaceholder')" />
-        <button v-if="sortedJobs.length" class="btn btn-sm btn-secondary" style="margin-left:auto" @click="toggleAllJobs">
+        <button v-if="jobs.length" class="btn btn-sm btn-secondary" style="margin-left:auto" @click="toggleAllJobs">
           {{ allJobsSelected ? t('common.deselectAll') : t('common.selectAll') }}
         </button>
       </div>
@@ -49,6 +49,10 @@
         <button class="btn btn-sm btn-secondary" @click="showBulkWindowModal = true"><i class="fa-solid fa-clock"></i> {{ t('jobs.bulkWindow').replace('{n}', String(selectedJobIds.length)) }}</button>
         <button class="btn btn-sm btn-ghost" style="margin-left:auto" @click="selectedJobIds = []"><i class="fa-solid fa-xmark"></i></button>
       </div>
+      <PaginationBar
+        :page="page" :page-size="pageSize" :total="total"
+        @update:page="onPageChange" @update:page-size="onPageSizeChange"
+      />
       <div class="table-wrap">
         <table>
           <thead>
@@ -63,11 +67,11 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-if="!sortedJobs.length">
+            <tr v-if="!jobs.length">
               <td colspan="7" class="empty">{{ t('jobs.noJobs') }}</td>
             </tr>
             <tr
-              v-for="j in sortedJobs" :key="j.id"
+              v-for="j in jobs" :key="j.id"
               style="cursor:pointer"
               :class="selectedJobIds.includes(j.id) ? 'row-selected' : ''"
               @click="toggleJobSelect(j.id)"
@@ -875,11 +879,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
-import { jobsApi, accountsApi, statusApi, settingsApi, logsApi, templatesApi, type Job, type JobTemplate, type Account, type ScheduleStatus, type Settings, type UAPreset, type EmbywatchConfig, type CustomConfig, type AutoregConfig } from '../api/client';
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue';
+import { jobsApi, accountsApi, statusApi, settingsApi, logsApi, templatesApi, type Job, type JobFacets, type JobTemplate, type Account, type ScheduleStatus, type Settings, type UAPreset, type EmbywatchConfig, type CustomConfig, type AutoregConfig } from '../api/client';
 import { t, locale } from '../i18n';
 import { usePersistedRef } from '../composables/usePersistedRef';
 import { formatAccountLabel, loadAccountDisplaySetting } from '../composables/accountDisplay';
+import { debounce } from '../composables/useDebounce';
+import PaginationBar from '../components/PaginationBar.vue';
 
 type CustomActionForm = {
   type: 'send_command' | 'send_contact_message' | 'wait_reply' | 'delay' | 'click_button' | 'click_message_button' | 'enter_captcha' | 'join_group' | 'subscribe_channel';
@@ -918,6 +924,11 @@ const uaPresets = computed<UAPreset[]>(() => {
 });
 const running = ref(new Set<number>());
 
+const page = ref(1);
+const total = ref(0);
+const pageSize = usePersistedRef<number>('bemby:jobs:pageSize', 25);
+const facets = ref<JobFacets>({ botUsernames: [], templates: [] });
+
 const filterType = usePersistedRef<string>('bemby:jobs:filterType', '');
 const filterAccountId = usePersistedRef<number | ''>('bemby:jobs:filterAccountId', '');
 const filterBotUrlTpl = usePersistedRef<string>('bemby:jobs:filterBotUrlTpl', '');
@@ -929,9 +940,10 @@ const filterOptions = computed(() => [
   { value: 'custom', label: t('logs.jobType.custom') },
   { value: 'autoreg', label: t('logs.jobType.autoreg') },
 ]);
+// Options come from server facets so the dropdown covers the whole dataset, not just the loaded page
 const botUrlTplOptions = computed(() => {
-  const botVals = [...new Set(jobs.value.map(j => j.botUsername).filter(Boolean))].sort().map(v => ({ value: `bot:${v}`, label: v }));
-  const tplVals = templates.value.filter(t => jobs.value.some(j => j.templateId === t.id)).map(t => ({ value: `tpl:${t.id}`, label: `[T] ${t.name}` }));
+  const botVals = facets.value.botUsernames.map(v => ({ value: `bot:${v}`, label: v }));
+  const tplVals = facets.value.templates.map(t => ({ value: `tpl:${t.id}`, label: `[T] ${t.name}` }));
   return [...botVals, ...tplVals];
 });
 
@@ -940,7 +952,7 @@ const sortDir = usePersistedRef<'asc' | 'desc'>('bemby:jobs:sortDir', 'asc');
 const actionMenuJob = ref<Job | null>(null);
 const confirmDisableJob = ref<Job | null>(null);
 const selectedJobIds = ref<number[]>([]);
-const allJobsSelected = computed(() => sortedJobs.value.length > 0 && sortedJobs.value.every(j => selectedJobIds.value.includes(j.id)));
+const allJobsSelected = computed(() => jobs.value.length > 0 && jobs.value.every(j => selectedJobIds.value.includes(j.id)));
 const confirmBulkDisableJobs = ref(false);
 const confirmBulkRetireJobs = ref(false);
 const showBulkRunModal = ref(false);
@@ -956,6 +968,8 @@ function setSort(key: string) {
     sortKey.value = key;
     sortDir.value = 'asc';
   }
+  page.value = 1;
+  loadJobs();
 }
 
 function sortIcon(key: string): string {
@@ -963,38 +977,28 @@ function sortIcon(key: string): string {
   return sortDir.value === 'asc' ? '↑' : '↓';
 }
 
-const sortedJobs = computed(() => {
-  const nameQ = filterName.value.trim().toLowerCase();
-  const filtered = jobs.value.filter(j => {
-    if (nameQ && !j.name.toLowerCase().includes(nameQ)) return false;
-    if (filterType.value && j.jobType !== filterType.value) return false;
-    if (filterAccountId.value !== '' && j.accountId !== filterAccountId.value) return false;
-    if (filterBotUrlTpl.value) {
-      if (filterBotUrlTpl.value.startsWith('bot:')) {
-        if (j.botUsername !== filterBotUrlTpl.value.slice(4)) return false;
-      } else if (filterBotUrlTpl.value.startsWith('tpl:')) {
-        if (j.templateId !== Number(filterBotUrlTpl.value.slice(4))) return false;
-      }
-    }
-    return true;
-  });
-  if (!sortKey.value) return filtered;
-  return [...filtered].sort((a, b) => {
-    let av: string | number, bv: string | number;
-    switch (sortKey.value) {
-      case 'name':    av = a.name.toLowerCase();                    bv = b.name.toLowerCase(); break;
-      case 'account': av = (a.accountName ?? '').toLowerCase();     bv = (b.accountName ?? '').toLowerCase(); break;
-      case 'type':    av = a.jobType;                               bv = b.jobType; break;
-      case 'botUrl':  av = a.botUsername.toLowerCase();             bv = b.botUsername.toLowerCase(); break;
-      case 'window':  av = a.scheduleWindowStart;                   bv = b.scheduleWindowStart; break;
-      case 'enabled': av = a.enabled ? 0 : 1;                      bv = b.enabled ? 0 : 1; break;
-      default:        return 0;
-    }
-    if (av < bv) return sortDir.value === 'asc' ? -1 : 1;
-    if (av > bv) return sortDir.value === 'asc' ? 1 : -1;
-    return 0;
-  });
+// Filtering and sorting happen server-side; filter changes restart from page 1
+watch([filterType, filterAccountId, filterBotUrlTpl], () => {
+  page.value = 1;
+  loadJobs();
 });
+const debouncedNameFilter = debounce(() => {
+  page.value = 1;
+  loadJobs();
+}, 300);
+watch(filterName, () => debouncedNameFilter());
+
+function onPageChange(p: number) {
+  if (p === page.value) return;
+  page.value = p;
+  loadJobs();
+}
+
+function onPageSizeChange(size: number) {
+  pageSize.value = size;
+  page.value = 1;
+  loadJobs();
+}
 
 function jobTypeBadge(type: string) {
   const map: Record<string, string> = {
@@ -1019,7 +1023,8 @@ const form = reactive({
   botUsername: '',
   scheduleWindowStart: 1000,
   scheduleWindowEnd: 2200,
-  timezone: 'Australia/Sydney',
+  // Empty means follow the default_timezone setting
+  timezone: '',
   replyTimeoutMs: 40000,
   retryMax: 5,
   enabled: true,
@@ -1279,7 +1284,27 @@ function onTemplateChange() {
 }
 
 async function loadJobs() {
-  jobs.value = await jobsApi.list();
+  const params: Parameters<typeof jobsApi.listPaged>[0] = {
+    page: page.value,
+    pageSize: pageSize.value,
+    search: filterName.value.trim() || undefined,
+    sortKey: sortKey.value || undefined,
+    sortDir: sortKey.value ? sortDir.value : undefined,
+    jobType: filterType.value || undefined,
+    accountId: filterAccountId.value,
+  };
+  if (filterBotUrlTpl.value.startsWith('bot:')) params.botUsername = filterBotUrlTpl.value.slice(4);
+  else if (filterBotUrlTpl.value.startsWith('tpl:')) params.templateId = Number(filterBotUrlTpl.value.slice(4));
+  const res = await jobsApi.listPaged(params);
+  // Step back when deletions leave the current page empty
+  if (!res.items.length && page.value > 1) {
+    page.value -= 1;
+    return loadJobs();
+  }
+  jobs.value = res.items;
+  total.value = res.total;
+  facets.value = res.facets;
+  selectedJobIds.value = selectedJobIds.value.filter(id => res.items.some(j => j.id === id));
 }
 
 async function loadAccounts() {
@@ -1306,7 +1331,7 @@ function openAdd() {
     name: '', accountId: accounts.value[0]?.id ?? null,
     jobType: 'checkin', botUsername: '',
     scheduleWindowStart: 1000, scheduleWindowEnd: 2200,
-    timezone: settings.value?.default_timezone ?? 'Australia/Sydney',
+    timezone: '',
     replyTimeoutMs: 40000,
     retryMax: Number(settings.value?.default_max_retry ?? 5),
     enabled: true,
@@ -1733,7 +1758,7 @@ async function retire(id: number) {
 }
 
 function toggleAllJobs() {
-  selectedJobIds.value = allJobsSelected.value ? [] : sortedJobs.value.map(j => j.id);
+  selectedJobIds.value = allJobsSelected.value ? [] : jobs.value.map(j => j.id);
 }
 
 function toggleJobSelect(id: number) {

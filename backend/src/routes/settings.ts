@@ -16,6 +16,7 @@ export const ALLOWED_KEYS = [
   "default_play_duration",
   "default_device_name",
   "ai_model",
+  "ai_default_model_id",
   "ai_fallback_enabled",
   "notify_tg_username",
   "notify_tg_events",
@@ -99,8 +100,10 @@ router.put("/", (req, res) => {
     }
   })();
 
-  // Reschedule if daily-run check toggled
-  if ("check_daily_run" in updates) refreshScheduler();
+  // Reschedule if daily-run check toggled or the default timezone changed
+  // (jobs with no timezone of their own follow the default)
+  if ("check_daily_run" in updates || "default_timezone" in updates)
+    refreshScheduler();
 
   // Apply a tightened retention window straight away
   if ("log_retention_days" in updates) purgeOldLogs();

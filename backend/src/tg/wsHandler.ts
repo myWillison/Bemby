@@ -7,6 +7,7 @@ import {
   subscribeToMessages,
   subscribeToDialogs,
   subscribeToReadOutbox,
+  subscribeToTyping,
   syncMessagesInBackground,
 } from "./liveClient";
 
@@ -86,6 +87,12 @@ async function setupConnection(ws: WebSocket, accountId: number): Promise<void> 
       }
     });
 
+    const unsubscribeTyping = subscribeToTyping(accountId, (event) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "typing", ...event }));
+      }
+    });
+
     // Track which chat the frontend currently has open
     let activeChatId: string | null = null;
 
@@ -131,6 +138,7 @@ async function setupConnection(ws: WebSocket, accountId: number): Promise<void> 
       unsubscribeMsgs();
       unsubscribeDialogs();
       unsubscribeReadOutbox();
+      unsubscribeTyping();
     };
 
     ws.on("close", cleanup);

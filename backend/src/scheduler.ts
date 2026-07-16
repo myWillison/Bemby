@@ -1,4 +1,9 @@
-import { db, getDefaultTgApiCredentials } from "./db/database";
+import {
+  db,
+  getDefaultTgApiCredentials,
+  getDefaultTimezone,
+  FALLBACK_TIMEZONE,
+} from "./db/database";
 import { runJob, type JobDetailLog } from "./jobs/runner";
 import {
   sendTgNotify,
@@ -7,7 +12,7 @@ import {
   getNotifyConfig,
 } from "./jobs/notify";
 import type { Job, TgAccount } from "./types";
-import { DateTime } from "luxon";
+import { DateTime, IANAZone } from "luxon";
 import {
   registerJob,
   unregisterJob,
@@ -19,6 +24,8 @@ import { toMinutes, pickNextRun } from "./scheduler-utils";
 type ScheduleEntry = {
   job: Job;
   account: TgAccount | null;
+  /** Timezone the nextRun was computed in, after resolving the default. */
+  timezone: string;
   nextRun: Date;
   timer: ReturnType<typeof setTimeout>;
 };
@@ -59,6 +66,18 @@ function releaseRunSlot(): void {
   const next = waitingJobs.shift();
   if (next) next();
   else runningJobs--;
+}
+
+/**
+ * Resolves a job's timezone for scheduling. Empty means "follow the
+ * default_timezone setting"; invalid zones fall back rather than producing
+ * NaN timers.
+ */
+export function resolveJobTimezone(jobTimezone: string | null | undefined): string {
+  const tz = jobTimezone || getDefaultTimezone();
+  if (IANAZone.isValidZone(tz)) return tz;
+  const fallback = getDefaultTimezone();
+  return IANAZone.isValidZone(fallback) ? fallback : FALLBACK_TIMEZONE;
 }
 
 function checkDailyRunEnabled(): boolean {
@@ -261,17 +280,24 @@ function scheduleOne(job: Job, account: TgAccount | null, daysAhead = 0): void {
     .filter((entry) => entry.job.id !== job.id)
     .map((entry) => entry.nextRun.getTime());
 
+  const timezone = resolveJobTimezone(job.timezone);
   const nextRun = pickNextRun(
     job.scheduleWindowStart,
     job.scheduleWindowEnd,
-    job.timezone,
+    timezone,
     daysAhead,
     { occupied, gapMinutes: getScheduleGapMinutes() },
   );
   const delayMs = Math.max(0, nextRun.toMillis() - Date.now());
 
   const timer = setTimeout(() => executeJob(job, account), delayMs);
-  schedule.set(job.id, { job, account, nextRun: nextRun.toJSDate(), timer });
+  schedule.set(job.id, {
+    job,
+    account,
+    timezone,
+    nextRun: nextRun.toJSDate(),
+    timer,
+  });
 
   console.log(
     `[scheduler] "${job.name}" next run: ${nextRun.toISO()} (in ${Math.round(delayMs / 60_000)} min)`,
@@ -296,22 +322,25 @@ function refreshJobs(): void {
   // Add newly eligible jobs, or re-schedule if config changed
   for (const { job, account } of eligible) {
     const existing = schedule.get(job.id);
+    const resolvedTz = resolveJobTimezone(job.timezone);
     if (!existing) {
       const daysAhead = dailyCheckOn
-        ? daysUntilNextRun(job.id, job.timezone, job.runEveryDays ?? 1)
+        ? daysUntilNextRun(job.id, resolvedTz, job.runEveryDays ?? 1)
         : 0;
       scheduleOne(job, account, daysAhead);
     } else {
+      // Compare resolved timezones so a default_timezone change reschedules
+      // jobs that follow the default
       const scheduleChanged =
         existing.job.scheduleWindowStart !== job.scheduleWindowStart ||
         existing.job.scheduleWindowEnd !== job.scheduleWindowEnd ||
-        existing.job.timezone !== job.timezone ||
+        existing.timezone !== resolvedTz ||
         existing.job.botUsername !== job.botUsername ||
         existing.job.accountId !== job.accountId ||
         existing.job.runEveryDays !== job.runEveryDays;
       if (scheduleChanged) {
         const daysAhead = dailyCheckOn
-          ? daysUntilNextRun(job.id, job.timezone, job.runEveryDays ?? 1)
+          ? daysUntilNextRun(job.id, resolvedTz, job.runEveryDays ?? 1)
           : 0;
         scheduleOne(job, account, daysAhead);
       } else {

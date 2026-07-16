@@ -3,6 +3,12 @@
     <div class="page-header">
       <h2 class="page-title">{{ t("accounts.title") }}</h2>
       <div class="page-header-actions">
+        <input
+          v-model="searchText"
+          class="form-input"
+          style="width: 200px"
+          :placeholder="t('common.search')"
+        />
         <button
           v-if="accounts.length"
           class="btn btn-secondary"
@@ -59,6 +65,11 @@
     </div>
 
     <div class="card">
+      <PaginationBar
+        v-model:page="page"
+        v-model:page-size="pageSize"
+        :total="total"
+      />
       <div class="table-wrap">
         <table>
           <thead>
@@ -86,7 +97,7 @@
                 selectedIds.has(a.id) ? 'row-selected' : '',
               ]"
               style="cursor: pointer"
-              draggable="true"
+              :draggable="!searchText.trim()"
               @click="toggleSelect(a.id)"
               @dragstart="onDragStart(idx, $event)"
               @dragover.prevent="dragOverIdx = idx"
@@ -135,7 +146,19 @@
                   {{ a.resolvedDeviceModel }}
                 </div>
               </td>
-              <td>{{ a.phoneNumber }}</td>
+              <td>
+                {{ a.phoneNumber }}
+                <div
+                  v-if="phoneCountry(a.phoneNumber)"
+                  class="phone-country"
+                  :title="phoneCountry(a.phoneNumber)!.name"
+                >
+                  <span class="phone-country-flag">{{
+                    phoneCountry(a.phoneNumber)!.flag
+                  }}</span>
+                  {{ phoneCountry(a.phoneNumber)!.name }}
+                </div>
+              </td>
               <td class="col-hide-mobile">
                 <div class="tg-name-cell">
                   <span v-if="metaLoading.has(a.id)" class="tg-name-loading">
@@ -308,8 +331,8 @@
                 ? `将导出 ${selectedIds.size} 个账户`
                 : `Exporting ${selectedIds.size} account(s)`
               : locale === "zh"
-                ? `将导出全部 ${accounts.length} 个账户`
-                : `Exporting all ${accounts.length} account(s)`
+                ? `将导出全部 ${total} 个账户`
+                : `Exporting all ${total} account(s)`
           }}
         </p>
         <div class="form-group" style="margin-top: 12px">
@@ -1270,14 +1293,44 @@ import {
 } from "../api/client";
 import { t, locale } from "../i18n";
 import { usePersistedRef } from "../composables/usePersistedRef";
+import { phoneCountry } from "../utils/phoneCountry";
+import { debounce } from "../composables/useDebounce";
+import PaginationBar from "../components/PaginationBar.vue";
 
 const accounts = ref<Account[]>([]);
+
+// ── Search and pagination state ───────────────────────────────────────────────
+const page = ref(1);
+const total = ref(0);
+const pageSize = usePersistedRef<number>("bemby:accounts:pageSize", 25);
+const searchText = usePersistedRef<string>("bemby:accounts:search", "");
+
+// Set while load() itself steps the page back, to avoid a duplicate fetch
+let skipPageWatch = false;
+watch([page, pageSize], () => {
+  if (skipPageWatch) {
+    skipPageWatch = false;
+    return;
+  }
+  load();
+});
+
+const debouncedSearch = debounce(() => {
+  if (page.value !== 1) page.value = 1;
+  else load();
+}, 300);
+watch(searchText, () => debouncedSearch());
 
 // ── Drag-and-drop reorder state ───────────────────────────────────────────────
 const dragSrcIdx = ref<number | null>(null);
 const dragOverIdx = ref<number | null>(null);
 
 function onDragStart(idx: number, e: DragEvent) {
+  // Reordering a filtered subset is misleading; disabled while searching
+  if (searchText.value.trim()) {
+    e.preventDefault();
+    return;
+  }
   dragSrcIdx.value = idx;
   if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
 }
@@ -1291,7 +1344,11 @@ async function onDrop(targetIdx: number) {
   const [moved] = arr.splice(src, 1);
   arr.splice(targetIdx, 0, moved);
   accounts.value = arr;
-  await accountsApi.reorder(arr.map((a, i) => ({ id: a.id, sortOrder: i })));
+  // Offset by the page start so within-page reorder keeps the global order
+  const base = (page.value - 1) * pageSize.value;
+  await accountsApi.reorder(
+    arr.map((a, i) => ({ id: a.id, sortOrder: base + i })),
+  );
 }
 const settings = ref<{
   proxies?: string;
@@ -1729,10 +1786,29 @@ onMounted(async () => {
 });
 
 async function load() {
-  [accounts.value, settings.value] = await Promise.all([
-    accountsApi.list(),
+  const params = () => ({
+    page: page.value,
+    pageSize: pageSize.value,
+    search: searchText.value.trim() || undefined,
+  });
+  let [res, s] = await Promise.all([
+    accountsApi.listPaged(params()),
     settingsApi.get(),
   ]);
+  settings.value = s;
+  if (!res.items.length && page.value > 1) {
+    // Page emptied out (e.g. after deletes); step back once
+    skipPageWatch = true;
+    page.value -= 1;
+    res = await accountsApi.listPaged(params());
+  }
+  accounts.value = res.items;
+  total.value = res.total;
+  // Drop selections no longer on the loaded page
+  const visible = new Set(res.items.map((a) => a.id));
+  selectedIds.value = new Set(
+    [...selectedIds.value].filter((id) => visible.has(id)),
+  );
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1825,6 +1901,20 @@ function openEdit(a: Account) {
 
 async function saveAccount() {
   formError.value = "";
+  if (!form.name || !form.phoneNumber) {
+    formError.value = t("accounts.errors.namePhoneRequired");
+    return;
+  }
+  // On create, credentials are only optional when global defaults exist
+  // (on edit, blank fields keep the account's stored credentials)
+  if (
+    !editTarget.value &&
+    !hasGlobalTgCreds.value &&
+    (!form.apiId || !form.apiHash)
+  ) {
+    formError.value = t("accounts.errors.apiCredsRequired");
+    return;
+  }
   saving.value = true;
   try {
     if (editTarget.value) {
@@ -1851,7 +1941,13 @@ async function saveAccount() {
     showForm.value = false;
     await load();
   } catch (err: any) {
-    formError.value = err.response?.data?.error ?? t("common.saveFailed");
+    const raw = err.response?.data?.error as string | undefined;
+    // Translate known backend messages; show others as-is
+    formError.value = raw?.includes("apiId and apiHash are required")
+      ? t("accounts.errors.apiCredsRequired")
+      : raw?.includes("name and phoneNumber are required")
+        ? t("accounts.errors.namePhoneRequired")
+        : (raw ?? t("common.saveFailed"));
   } finally {
     saving.value = false;
   }
@@ -2250,6 +2346,18 @@ async function verify2fa() {
   font-size: 11px;
   color: #888;
   font-family: var(--font-mono, monospace);
+}
+
+.phone-country {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #888;
+  white-space: nowrap;
+}
+
+.phone-country-flag {
+  margin-right: 3px;
+  font-size: 13px;
 }
 
 .device-model-preview i {

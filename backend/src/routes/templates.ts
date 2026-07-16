@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db/database';
 import { refreshScheduler } from '../scheduler';
+import { parsePaging, parseSort, textParam } from './list-query';
 import type { JobTemplate } from '../types';
 
 const router = Router();
@@ -104,15 +105,85 @@ function syncLinkedJobs(templateId: number, t: TemplateRow) {
   refreshScheduler();
 }
 
-router.get('/', (_req, res) => {
-  const rows = db.prepare(`
-    SELECT t.*, COUNT(j.id) AS linked_job_count
+const TEMPLATE_SORTS: Record<string, string> = {
+  name: 't.name COLLATE NOCASE',
+  type: 't.job_type',
+  // asc shows enabled templates first, matching the previous client-side sort
+  enabled: 'CASE WHEN t.enabled = 1 THEN 0 ELSE 1 END',
+  botUrl: 't.bot_username COLLATE NOCASE',
+  linkedJobs: 'linked_job_count',
+};
+
+router.get('/', (req, res) => {
+  const query = req.query as Record<string, unknown>;
+  const paging = parsePaging(query);
+  const search = textParam(query.search);
+  const jobType = textParam(query.jobType);
+  const enabled = textParam(query.enabled);
+  const sortKey = textParam(query.sortKey);
+
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (search) {
+    // Fuzzy match against name and bot username (see db/fuzzy.ts)
+    conditions.push("fuzzy_score(?, t.name || ' ' || t.bot_username) > 0");
+    params.push(search);
+  }
+  if (jobType) {
+    conditions.push('t.job_type = ?');
+    params.push(jobType);
+  }
+  if (enabled === '1' || enabled === '0') {
+    conditions.push('t.enabled = ?');
+    params.push(Number(enabled));
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  // With a search active and no explicit column sort, order by match relevance
+  const useRelevance = search && (!sortKey || sortKey === 'relevance');
+  const orderClause = useRelevance
+    ? 'search_score DESC, t.name COLLATE NOCASE'
+    : parseSort(query, TEMPLATE_SORTS, TEMPLATE_SORTS.name);
+  const scoreSelect = search
+    ? ", fuzzy_score(?, t.name || ' ' || t.bot_username) AS search_score"
+    : '';
+  const scoreParams = search ? [search] : [];
+
+  const baseSql = `
     FROM job_templates t
     LEFT JOIN jobs j ON j.template_id = t.id AND j.retired IS NULL
+    ${where}
     GROUP BY t.id
-    ORDER BY t.name COLLATE NOCASE
-  `).all() as (TemplateRow & { linked_job_count: number })[];
-  res.json(rows.map(r => ({ ...rowToTemplate(r), linkedJobCount: r.linked_job_count })));
+  `;
+
+  if (!paging) {
+    const rows = db.prepare(`
+      SELECT t.*, COUNT(j.id) AS linked_job_count ${scoreSelect}
+      ${baseSql}
+      ORDER BY ${orderClause}
+    `).all(...scoreParams, ...params) as (TemplateRow & { linked_job_count: number })[];
+    res.json(rows.map(r => ({ ...rowToTemplate(r), linkedJobCount: r.linked_job_count })));
+    return;
+  }
+
+  const totalRow = db.prepare(`
+    SELECT COUNT(*) AS total FROM job_templates t ${where}
+  `).get(...params) as { total: number };
+
+  const rows = db.prepare(`
+    SELECT t.*, COUNT(j.id) AS linked_job_count ${scoreSelect}
+    ${baseSql}
+    ORDER BY ${orderClause}
+    LIMIT ? OFFSET ?
+  `).all(...scoreParams, ...params, paging.limit, paging.offset) as (TemplateRow & { linked_job_count: number })[];
+
+  res.json({
+    items: rows.map(r => ({ ...rowToTemplate(r), linkedJobCount: r.linked_job_count })),
+    total: totalRow.total,
+    page: paging.page,
+    pageSize: paging.pageSize,
+  });
 });
 
 router.post('/', (req, res) => {
@@ -142,7 +213,7 @@ router.post('/', (req, res) => {
     name,
     jobType ?? 'checkin',
     (botUsername as string | undefined)?.replace(/^@+/, '') ?? '',
-    timezone ?? 'Australia/Sydney',
+    timezone ?? '',
     Number(replyTimeoutMs ?? 40000),
     Number(retryMax ?? 5),
     config != null ? JSON.stringify(config) : null,

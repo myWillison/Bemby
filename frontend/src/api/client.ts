@@ -65,6 +65,30 @@ export type TgAppClient = {
   isDefault: boolean;
 };
 
+// ── Server-side list paging ──────────────────────────────────────────────────
+
+export type Paged<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+export type ListParams = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sortKey?: string;
+  sortDir?: "asc" | "desc";
+};
+
+// Drops empty/undefined values so query strings stay clean
+function cleanParams(params: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""),
+  );
+}
+
 export type Account = {
   id: number;
   name: string;
@@ -408,6 +432,12 @@ export const authApi = {
 
 export const accountsApi = {
   list: () => api.get<Account[]>("/accounts").then((r) => r.data),
+  listPaged: (
+    params: ListParams & { authStatus?: string; disabled?: "0" | "1" | "" },
+  ) =>
+    api
+      .get<Paged<Account>>("/accounts", { params: cleanParams(params) })
+      .then((r) => r.data),
   create: (
     data: Omit<
       Account,
@@ -536,8 +566,27 @@ export const accountsApi = {
 
 // ── Jobs ─────────────────────────────────────────────────────────────────────
 
+export type JobFacets = {
+  botUsernames: string[];
+  templates: Array<{ id: number; name: string }>;
+};
+
 export const jobsApi = {
   list: () => api.get<Job[]>("/jobs").then((r) => r.data),
+  listPaged: (
+    params: ListParams & {
+      jobType?: string;
+      accountId?: number | "";
+      botUsername?: string;
+      templateId?: number | "";
+      enabled?: "0" | "1" | "";
+    },
+  ) =>
+    api
+      .get<Paged<Job> & { facets: JobFacets }>("/jobs", {
+        params: cleanParams(params),
+      })
+      .then((r) => r.data),
   create: (data: Partial<Job>) =>
     api.post<Job>("/jobs", data).then((r) => r.data),
   update: (id: number, data: Partial<Job>) =>
@@ -574,6 +623,13 @@ export type AvailableAccount = {
 
 export const templatesApi = {
   list: () => api.get<JobTemplate[]>("/templates").then((r) => r.data),
+  // search is fuzzy-matched server side against template name and bot username
+  listPaged: (
+    params: ListParams & { jobType?: string; enabled?: "0" | "1" | "" },
+  ) =>
+    api
+      .get<Paged<JobTemplate>>("/templates", { params: cleanParams(params) })
+      .then((r) => r.data),
   create: (data: Partial<JobTemplate>) =>
     api.post<JobTemplate>("/templates", data).then((r) => r.data),
   update: (id: number, data: Partial<JobTemplate>) =>
@@ -621,6 +677,22 @@ export const logsApi = {
         params: { ...params, showRetired: params?.showRetired ? "1" : "0" },
       })
       .then((r) => r.data),
+  listPaged: (params: {
+    page: number;
+    pageSize: number;
+    jobId?: number | "";
+    showRetired?: boolean;
+    status?: string;
+    search?: string;
+  }) =>
+    api
+      .get<Paged<Log>>("/logs", {
+        params: cleanParams({
+          ...params,
+          showRetired: params.showRetired ? "1" : "0",
+        }),
+      })
+      .then((r) => r.data),
   getOne: (id: number) => api.get<Log>(`/logs/${id}`).then((r) => r.data),
   cancel: (id: number) =>
     api.post<{ message: string }>(`/logs/${id}/cancel`).then((r) => r.data),
@@ -651,6 +723,9 @@ export type Settings = {
   /** Server-computed: "true" when any AI supplier, legacy setting or env provides a key. */
   ai_key_configured?: string;
   ai_model: string;
+  /** ai_models row id pinning the default model to an exact supplier. */
+  ai_default_model_id?: string;
+  ai_fallback_enabled?: string;
   notify_tg_username: string;
   notify_tg_events: string;
   ua_presets: string;
@@ -877,7 +952,19 @@ export type TgProfile = {
   memberCount: number | null;
   firstName: string | null;
   lastName: string | null;
+  blocked: boolean | null;
 };
+
+export type TgReportReason =
+  | "spam"
+  | "violence"
+  | "pornography"
+  | "childAbuse"
+  | "illegalDrugs"
+  | "personalDetails"
+  | "fake"
+  | "copyright"
+  | "other";
 
 export type TgBotCommand = {
   command: string;
@@ -1083,6 +1170,108 @@ export const tgClientApi = {
       }>(
         `/tg-client/${accountId}/messages/${encodeURIComponent(chatId)}/${msgId}/button`,
         { data },
+      )
+      .then((r) => r.data),
+
+  sendTyping: (accountId: number, chatId: string) =>
+    api
+      .post<{
+        ok: boolean;
+      }>(`/tg-client/${accountId}/typing/${encodeURIComponent(chatId)}`)
+      .then((r) => r.data),
+
+  setBlocked: (accountId: number, chatId: string, blocked: boolean) =>
+    api
+      .post<{
+        ok: boolean;
+      }>(`/tg-client/${accountId}/block/${encodeURIComponent(chatId)}`, {
+        blocked,
+      })
+      .then((r) => r.data),
+
+  report: (
+    accountId: number,
+    chatId: string,
+    reason: TgReportReason,
+    comment?: string,
+  ) =>
+    api
+      .post<{
+        ok: boolean;
+      }>(`/tg-client/${accountId}/report/${encodeURIComponent(chatId)}`, {
+        reason,
+        ...(comment ? { comment } : {}),
+      })
+      .then((r) => r.data),
+
+  frameable: (url: string) =>
+    api
+      .get<{ frameable: boolean }>("/tg-client/frameable", { params: { url } })
+      .then((r) => r.data),
+
+  clearAccountCache: (accountId: number) =>
+    api
+      .delete<{ ok: boolean }>(`/tg-client/${accountId}/cache`)
+      .then((r) => r.data),
+
+  cleanAccount: (accountId: number) =>
+    api
+      .post<{
+        ok: boolean;
+        left: number;
+        deleted: number;
+        contacts: number;
+        folders: number;
+        failed: { chatId: string; name: string; error: string }[];
+      }>(`/tg-client/${accountId}/clean`)
+      .then((r) => r.data),
+
+  deleteHistory: (accountId: number, chatId: string, revoke: boolean) =>
+    api
+      .delete<{
+        ok: boolean;
+      }>(`/tg-client/${accountId}/history/${encodeURIComponent(chatId)}`, {
+        params: revoke ? { revoke: 1 } : {},
+      })
+      .then((r) => r.data),
+
+  deleteMessages: (
+    accountId: number,
+    chatId: string,
+    ids: number[],
+    revoke: boolean,
+  ) =>
+    api
+      .post<{
+        ok: boolean;
+      }>(
+        `/tg-client/${accountId}/messages/${encodeURIComponent(chatId)}/delete`,
+        { ids, revoke },
+      )
+      .then((r) => r.data),
+
+  editMessage: (accountId: number, chatId: string, msgId: number, text: string) =>
+    api
+      .post<{
+        ok: boolean;
+      }>(
+        `/tg-client/${accountId}/messages/${encodeURIComponent(chatId)}/${msgId}/edit`,
+        { text },
+      )
+      .then((r) => r.data),
+
+  forwardMessages: (
+    accountId: number,
+    chatId: string,
+    toChatId: string,
+    ids: number[],
+  ) =>
+    api
+      .post<{
+        ok: boolean;
+      }>(
+        `/tg-client/${accountId}/messages/${encodeURIComponent(chatId)}/forward`,
+        { toChatId, ids },
       )
       .then((r) => r.data),
 

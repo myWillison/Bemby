@@ -44,6 +44,7 @@ export type Job = {
   botUsername: string;
   scheduleWindowStart: number;
   scheduleWindowEnd: number;
+  /** IANA zone; empty means follow the default_timezone setting */
   timezone: string;
   replyTimeoutMs: number;
   retryMax: number;
@@ -62,6 +63,7 @@ export type JobTemplate = {
   name: string;
   jobType: JobType;
   botUsername: string;
+  /** IANA zone; empty means follow the default_timezone setting */
   timezone: string;
   replyTimeoutMs: number;
   retryMax: number;

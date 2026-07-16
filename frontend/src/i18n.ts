@@ -44,6 +44,10 @@ const zh = {
     selectAll: "全选",
     deselectAll: "取消全选",
     loading: "加载中...",
+    search: "搜索...",
+    paginationTotal: "共 {n} 条",
+    perPage: "每页 {n}",
+    statusFilterAll: "全部状态",
   },
   login: {
     subtitle: "登录管理面板",
@@ -241,6 +245,9 @@ const zh = {
       sendFailed: "验证码发送失败",
       verifyFailed: "验证失败",
       twoFaFailed: "二步验证失败",
+      apiCredsRequired:
+        "请填写 API ID 和 API Hash（或在设置中配置全局默认凭据）",
+      namePhoneRequired: "请填写显示名称和手机号码",
     },
   },
   jobs: {
@@ -696,6 +703,44 @@ const zh = {
     searchPlaceholder: "在此聊天中搜索…",
     searchNoResults: "未找到相关消息",
     searchYou: "我",
+    chatActions: "聊天操作",
+    clearCache: "清除缓存并重新加载",
+    clearAccountCache: "清除该账户的所有缓存",
+    clearAccountCacheDone: "缓存已清除",
+    clearAccountCacheFailed: "清除缓存失败",
+    openUrl: "打开链接",
+    closeChat: "关闭聊天",
+    jumpToLatest: "跳至最新消息",
+    openLink: {
+      title: "打开链接",
+      inBemby: "在 Bemby 中打开",
+      inBrowser: "在浏览器中打开",
+      checking: "检查中...",
+      proxiedNote:
+        "该网站禁止内嵌，已通过 Bemby 代理加载。登录及部分交互功能可能不可用。",
+    },
+    clean: {
+      btnTitle: "清理账户",
+      title: "清理账户",
+      bembyAccount: "Bemby 账户：",
+      tgAccount: "Telegram 账号：",
+      unknown: "未知",
+      actionsIntro: "将对上述账户执行：",
+      actionLeaveGroups: "退出所有群组",
+      actionLeaveChannels: "退订所有频道",
+      actionDeleteChats: "删除所有私聊（双方均删除）",
+      actionRemoveContacts: "删除所有联系人",
+      actionRemoveFolders: "删除所有自定义聊天文件夹",
+      keptNote:
+        "收藏夹、Telegram 官方通知和 SpamBot 将被保留。此操作不可撤销。",
+      confirmCheck: "我已核对上方账户名称，并了解此操作不可恢复",
+      cleaning: "清理中... 可能需要一些时间",
+      confirmBtn: "清理账户",
+      toastResult:
+        "已退出 {left} 个群组/频道，删除 {deleted} 个聊天，移除 {contacts} 个联系人和 {folders} 个文件夹",
+      toastFailedPart: "{n} 个失败",
+      failed: "清理账户失败",
+    },
   },
 };
 
@@ -741,6 +786,10 @@ const en: typeof zh = {
     selectAll: "Select all",
     deselectAll: "Deselect all",
     loading: "Loading...",
+    search: "Search...",
+    paginationTotal: "{n} total",
+    perPage: "{n} / page",
+    statusFilterAll: "All statuses",
   },
   login: {
     subtitle: "Sign in to access the admin panel",
@@ -941,6 +990,9 @@ const en: typeof zh = {
       sendFailed: "Failed to send code",
       verifyFailed: "Verification failed",
       twoFaFailed: "2FA failed",
+      apiCredsRequired:
+        "API ID and API Hash are required (or configure global defaults in Settings)",
+      namePhoneRequired: "Display name and phone number are required",
     },
   },
   jobs: {
@@ -1418,6 +1470,45 @@ const en: typeof zh = {
     searchPlaceholder: "Search in this chat…",
     searchNoResults: "No messages found",
     searchYou: "You",
+    chatActions: "Chat actions",
+    clearCache: "Clear cache and reload",
+    clearAccountCache: "Clear all cached data for this account",
+    clearAccountCacheDone: "Cache cleared",
+    clearAccountCacheFailed: "Failed to clear cache",
+    openUrl: "Open URL",
+    closeChat: "Close chat",
+    jumpToLatest: "Jump to latest message",
+    openLink: {
+      title: "Open link",
+      inBemby: "Open in Bemby",
+      inBrowser: "Open in browser",
+      checking: "Checking...",
+      proxiedNote:
+        "This site blocks embedding, so it was loaded via the Bemby proxy. Sign-ins and some interactive features may not work.",
+    },
+    clean: {
+      btnTitle: "Clean account",
+      title: "Clean account",
+      bembyAccount: "Bemby account:",
+      tgAccount: "Telegram account:",
+      unknown: "unknown",
+      actionsIntro: "This will, for the account above:",
+      actionLeaveGroups: "Leave all groups",
+      actionLeaveChannels: "Unsubscribe from all channels",
+      actionDeleteChats: "Delete all private chats for both sides",
+      actionRemoveContacts: "Remove all contacts",
+      actionRemoveFolders: "Remove all custom chat folders",
+      keptNote:
+        "Saved Messages, the official Telegram chat and SpamBot are kept. This cannot be undone.",
+      confirmCheck:
+        "I checked the account names above and understand this is irreversible",
+      cleaning: "Cleaning... this may take a while",
+      confirmBtn: "Clean account",
+      toastResult:
+        "Left {left} groups/channels, deleted {deleted} chats, removed {contacts} contacts and {folders} folders",
+      toastFailedPart: "{n} failed",
+      failed: "Failed to clean account",
+    },
   },
 };
 

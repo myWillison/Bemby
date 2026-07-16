@@ -1,4 +1,4 @@
-import { TelegramClient, Api, Logger } from 'telegram';
+import { TelegramClient, Api, Logger, utils } from 'telegram';
 import { db } from '../db/database';
 import { LogLevel } from 'telegram/extensions/Logger';
 import { StringSession } from 'telegram/sessions';
@@ -132,13 +132,37 @@ export function parseAiBtnHint(val: string): string | undefined {
 type AICreds = { modelId: string; apiKey: string; baseUrl: string; timeoutMs: number };
 
 function resolveAICreds(modelId?: string): AICreds {
-  const model = modelId?.trim() || getAiSetting('ai_model', 'AI_MODEL', 'nvidia/nemotron-nano-12b-v2-vl:free');
-  type SupplierRow = { api_key: string; base_url: string; timeout_ms: number };
-  const row = db.prepare(`
-    SELECT s.api_key, s.base_url, s.timeout_ms
-    FROM ai_models m JOIN ai_suppliers s ON s.id = m.supplier_id
-    WHERE m.model_id = ? LIMIT 1
-  `).get(model) as SupplierRow | undefined;
+  type CredsRow = { model_id: string; api_key: string; base_url: string; timeout_ms: number };
+  const override = modelId?.trim();
+  let row: CredsRow | undefined;
+
+  // Pinned default: an exact ai_models row, so the same model under a second
+  // supplier (e.g. another account of the same provider) can be the primary
+  if (!override) {
+    const pinnedId = Number(getAiSetting('ai_default_model_id', '', ''));
+    if (pinnedId) {
+      row = db.prepare(`
+        SELECT m.model_id, s.api_key, s.base_url, s.timeout_ms
+        FROM ai_models m JOIN ai_suppliers s ON s.id = m.supplier_id
+        WHERE m.id = ?
+      `).get(pinnedId) as CredsRow | undefined;
+    }
+  }
+
+  const model = override || row?.model_id || getAiSetting('ai_model', 'AI_MODEL', 'nvidia/nemotron-nano-12b-v2-vl:free');
+
+  // Prefer a supplier with a non-empty key: the same model can exist under
+  // multiple suppliers
+  if (!row) {
+    row = db.prepare(`
+      SELECT m.model_id, s.api_key, s.base_url, s.timeout_ms
+      FROM ai_models m JOIN ai_suppliers s ON s.id = m.supplier_id
+      WHERE m.model_id = ?
+      ORDER BY (s.api_key != '') DESC, m.id
+      LIMIT 1
+    `).get(model) as CredsRow | undefined;
+  }
+
   return {
     modelId: model,
     // `||` not `??`: upgraded installs can have a seeded supplier with an empty
@@ -214,10 +238,16 @@ async function callAIWithFallback(
   const primary = resolveAICreds();
   const fallbackEnabled = getAiSetting('ai_fallback_enabled', '', 'true') === 'true';
 
+  // Dedupe by full credentials, not model id: the same model under a different
+  // supplier (e.g. a second account of the same provider) is a valid fallback
+  const credsKey = (c: AICreds) => `${c.modelId}|${c.baseUrl}|${c.apiKey}`;
   const candidates: AICreds[] = [primary];
   if (fallbackEnabled) {
+    const seen = new Set([credsKey(primary)]);
     for (const c of getAllModelCreds()) {
-      if (c.modelId !== primary.modelId) candidates.push(c);
+      if (seen.has(credsKey(c))) continue;
+      seen.add(credsKey(c));
+      candidates.push(c);
     }
   }
 
@@ -488,6 +518,7 @@ export function waitForBotMessageEdit(
   originalMsgId: number,
   maxMs: number,
   signal?: AbortSignal,
+  peerId?: string,
 ): Promise<Api.Message | null> {
   return new Promise((resolve) => {
     if (signal?.aborted) { resolve(null); return; }
@@ -511,7 +542,10 @@ export function waitForBotMessageEdit(
         const msg = update.message as Api.Message;
         // Catch any inbound edit from the bot (not our own outgoing messages).
         // Some bots edit a different message than the one that had the buttons.
-        if (msg && !msg.out) finish(msg);
+        if (!msg || msg.out) return;
+        // When a peer filter is given, ignore edits from unrelated chats
+        if (peerId && (!msg.peerId || utils.getPeerId(msg.peerId) !== peerId)) return;
+        finish(msg);
       }
     };
 
@@ -719,6 +753,7 @@ export async function runCheckin(
     }
 
     const peer = await client.getInputEntity(botUsername);
+    const botPeerId = await client.getPeerId(botUsername);
     let clicked = false;
 
     for (const row of allBtnRows) {
@@ -735,7 +770,7 @@ export async function runCheckin(
 
           // Start watching BEFORE invoking to avoid missing a fast response.
           // Edit listener catches any inbound bot edit (not just the buttons message).
-          const editPromise = waitForBotMessageEdit(client, buttonsMsg.id, replyTimeoutMs, signal);
+          const editPromise = waitForBotMessageEdit(client, buttonsMsg.id, replyTimeoutMs, signal, botPeerId);
           const newMsgPromise = waitForNewBotMessage(client, botUsername, replyTimeoutMs, signal);
 
           const t_click = Date.now();

@@ -1,9 +1,9 @@
-import { TelegramClient, Api, Logger } from "telegram";
+import { TelegramClient, Api, Logger, utils } from "telegram";
 import { LogLevel } from "telegram/extensions/Logger";
 import { StringSession } from "telegram/sessions";
 import type { TgProxy } from '../types';
 import type { TgDeviceParams } from '../auth/tgAuth';
-import { NewMessage, NewMessageEvent } from "telegram/events";
+import { NewMessage, NewMessageEvent, Raw } from "telegram/events";
 import {
   expandCommand,
   selectButtonWithAI,
@@ -33,6 +33,23 @@ export class CustomJobError extends Error {
   }
 }
 
+// Marker of the last message we sent: anything the bot delivered after this point
+// (higher id, or an edit stamped after our send) is a candidate reply. Anchoring on the
+// sent message's server-side id/date avoids local clock skew.
+type SendAnchor = { msgId: number; dateSec: number };
+
+const hasInlineButtons = (m: Api.Message | null | undefined): boolean =>
+  !!m && (m as any).replyMarkup instanceof Api.ReplyInlineMarkup;
+
+const anchorFromSent = (sent: Api.Message): SendAnchor => ({
+  msgId: sent.id,
+  dateSec: sent.date ?? Math.floor(Date.now() / 1000),
+});
+
+const isEditUpdate = (update: any): boolean =>
+  update?.className === "UpdateEditMessage" ||
+  update?.className === "UpdateEditChannelMessage";
+
 // Authoritative membership check: GetParticipant throws USER_NOT_PARTICIPANT for pending
 // join requests, unlike the Channel.left flag which can lag behind actual state.
 async function isChannelMember(client: TelegramClient, channel: Api.Channel): Promise<boolean> {
@@ -47,14 +64,17 @@ async function isChannelMember(client: TelegramClient, channel: Api.Channel): Pr
   }
 }
 
-// Waits for a message carrying inline buttons that arrives in a specific chat (e.g. the
-// group we just joined), rather than from a particular sender.
-function waitForButtonsInChat(
+// Waits for a message carrying inline buttons in a specific chat (e.g. the group we just
+// joined). Buttons can arrive on a brand-new message OR via an in-place edit of an
+// existing message, so both update paths are watched.
+async function waitForButtonsInChat(
   client: TelegramClient,
   chat: Api.TypeEntityLike,
   maxMs: number,
   signal?: AbortSignal,
 ): Promise<Api.Message[]> {
+  const chatPeerId = await client.getPeerId(chat);
+
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new Error("Job cancelled"));
@@ -66,7 +86,14 @@ function waitForButtonsInChat(
     const cleanup = () => {
       clearTimeout(timer);
       client.removeEventHandler(handler, new NewMessage({}));
+      client.removeEventHandler(editHandler, new Raw({}));
       signal?.removeEventListener("abort", onAbort);
+    };
+
+    const succeed = (msg: Api.Message) => {
+      cleanup();
+      if (!collected.includes(msg)) collected.push(msg);
+      resolve(collected);
     };
 
     const timer = setTimeout(() => {
@@ -83,13 +110,19 @@ function waitForButtonsInChat(
     const handler = async (event: NewMessageEvent) => {
       const msg = event.message as Api.Message;
       collected.push(msg);
-      if ((msg as any).replyMarkup) {
-        cleanup();
-        resolve(collected);
-      }
+      if (hasInlineButtons(msg)) succeed(msg);
+    };
+
+    const editHandler = async (update: any) => {
+      if (!isEditUpdate(update)) return;
+      const msg = update.message as Api.Message;
+      if (!msg || msg.out) return;
+      if (!msg.peerId || utils.getPeerId(msg.peerId) !== chatPeerId) return;
+      if (hasInlineButtons(msg)) succeed(msg);
     };
 
     client.addEventHandler(handler, new NewMessage({ chats: [chat] }));
+    client.addEventHandler(editHandler, new Raw({}));
   });
 }
 
@@ -130,21 +163,46 @@ async function clickGroupVerification(
   maxMs: number,
   step: CustomStepLog,
   signal?: AbortSignal,
+  sinceSec?: number,
 ): Promise<void> {
   const findButtonsMsg = (msgs: Api.Message[]): Api.Message | null =>
-    [...msgs]
-      .reverse()
-      .find((m) => (m as any).replyMarkup instanceof Api.ReplyInlineMarkup) ??
-    null;
+    [...msgs].reverse().find((m) => hasInlineButtons(m)) ?? null;
 
-  let buttonsMsg = await waitForButtonsInChat(client, chat, maxMs, signal)
+  // Waiter catches prompts that arrive (or get edited in) from now on; the scan catches a
+  // prompt that landed in the gap before the listener attached. Whichever finds one first wins.
+  const waitAbort = new AbortController();
+  const forwardAbort = () => waitAbort.abort();
+  signal?.addEventListener("abort", forwardAbort, { once: true });
+
+  const waiterPromise = waitForButtonsInChat(client, chat, maxMs, waitAbort.signal)
     .then(findButtonsMsg)
     .catch(() => null);
 
-  // The prompt may have arrived in the brief gap before the listener attached -- fall back
-  // to scanning the most recent messages in the group.
+  const earlyScan = client
+    .getMessages(chat, { limit: 10 })
+    .then(
+      (recent) =>
+        (recent as Api.Message[]).find(
+          (m) =>
+            m &&
+            !m.out &&
+            hasInlineButtons(m) &&
+            (!sinceSec || Math.max(m.editDate ?? 0, m.date ?? 0) >= sinceSec),
+        ) ?? null,
+    )
+    .catch(() => null);
+
+  let buttonsMsg = await Promise.race([
+    waiterPromise,
+    earlyScan.then((m) => m ?? waiterPromise),
+  ]);
+  waitAbort.abort();
+  signal?.removeEventListener("abort", forwardAbort);
+  if (signal?.aborted) throw new Error("Job cancelled");
+
+  // Last resort: any recent prompt regardless of age
   if (!buttonsMsg) {
-    const recent = (await client.getMessages(chat, { limit: 5 })) as Api.Message[];
+    const recent = (await client.getMessages(chat, { limit: 10 })) as Api.Message[];
     buttonsMsg = findButtonsMsg(recent);
   }
 
@@ -194,14 +252,19 @@ async function clickGroupVerification(
 
 // Collects messages from the target until one has buttons or timeout fires.
 // When successContains/failContains are set, checks message text to resolve or reject early.
-function waitForReply(
+// Watches new messages AND in-place edits; when sinceAnchor is given, also scans recent
+// history so a reply that landed before the listener attached is not lost.
+async function waitForReply(
   client: TelegramClient,
   fromUsername: string,
   maxMs: number,
   successContains?: string,
   failContains?: string,
   signal?: AbortSignal,
+  sinceAnchor?: SendAnchor | null,
 ): Promise<Api.Message[]> {
+  const botPeerId = await client.getPeerId(fromUsername);
+
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new Error("Job cancelled"));
@@ -210,10 +273,13 @@ function waitForReply(
 
     const collected: Api.Message[] = [];
     const useTextMatch = !!(successContains || failContains);
+    let done = false;
 
     const cleanup = () => {
+      done = true;
       clearTimeout(timer);
       client.removeEventHandler(handler, new NewMessage({}));
+      client.removeEventHandler(editHandler, new Raw({}));
       signal?.removeEventListener("abort", onAbort);
     };
 
@@ -234,9 +300,16 @@ function waitForReply(
     };
     signal?.addEventListener("abort", onAbort, { once: true });
 
-    const handler = async (event: NewMessageEvent) => {
-      const msg = event.message as Api.Message;
-      collected.push(msg);
+    // Replace an earlier copy on edit, otherwise append
+    const upsert = (msg: Api.Message) => {
+      const i = collected.findIndex((c) => c.id === msg.id);
+      if (i >= 0) collected[i] = msg;
+      else collected.push(msg);
+    };
+
+    const consider = (msg: Api.Message) => {
+      if (done) return;
+      upsert(msg);
       const text = msg.message ?? "";
 
       if (failContains && text.includes(failContains)) {
@@ -264,26 +337,67 @@ function waitForReply(
       }
 
       // No text matching -- original behaviour: resolve immediately on buttons, else rely on timeout
-      if ((msg as any).replyMarkup) {
+      if (hasInlineButtons(msg)) {
         cleanup();
         resolve(collected);
       }
+    };
+
+    const handler = async (event: NewMessageEvent) =>
+      consider(event.message as Api.Message);
+
+    const editHandler = async (update: any) => {
+      if (!isEditUpdate(update)) return;
+      const msg = update.message as Api.Message;
+      if (!msg || msg.out) return;
+      if (!msg.peerId || utils.getPeerId(msg.peerId) !== botPeerId) return;
+      consider(msg);
     };
 
     client.addEventHandler(
       handler,
       new NewMessage({ fromUsers: [fromUsername] }),
     );
+    client.addEventHandler(editHandler, new Raw({}));
+
+    // Best-effort: pick up replies delivered in the send-to-listen gap
+    if (sinceAnchor) {
+      client
+        .getMessages(fromUsername, { limit: 5 })
+        .then((recent) => {
+          const missed = (recent as Api.Message[])
+            .filter(
+              (m) =>
+                m &&
+                !m.out &&
+                (m.id > sinceAnchor.msgId ||
+                  (m.editDate ?? 0) >= sinceAnchor.dateSec) &&
+                !collected.some((c) => c.id === m.id),
+            )
+            .reverse(); // process oldest first
+          for (const m of missed) consider(m);
+        })
+        .catch(() => {
+          /* history scan is best-effort */
+        });
+    }
   });
 }
 
-// Waits specifically for a message with buttons from the target.
-function waitForButtonsMessage(
+// Waits specifically for a message with inline buttons from the target. Buttons may show
+// up on a brand-new message OR via an in-place edit of an earlier one; when sinceAnchor is
+// given, recent history is also scanned to cover the gap before the listeners attached.
+// excludeId skips one known message (e.g. the one whose buttons we already tried).
+async function waitForButtonsMessage(
   client: TelegramClient,
   fromUsername: string,
   maxMs: number,
   signal?: AbortSignal,
+  sinceAnchor?: SendAnchor | null,
+  excludeId?: number,
 ): Promise<Api.Message[]> {
+  const botPeerId = await client.getPeerId(fromUsername);
+
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new Error("Job cancelled"));
@@ -291,11 +405,21 @@ function waitForButtonsMessage(
     }
 
     const collected: Api.Message[] = [];
+    let done = false;
 
     const cleanup = () => {
+      done = true;
       clearTimeout(timer);
       client.removeEventHandler(handler, new NewMessage({}));
+      client.removeEventHandler(editHandler, new Raw({}));
       signal?.removeEventListener("abort", onAbort);
+    };
+
+    const succeed = (msg: Api.Message) => {
+      if (done) return;
+      cleanup();
+      if (!collected.some((c) => c.id === msg.id)) collected.push(msg);
+      resolve(collected);
     };
 
     const timer = setTimeout(() => {
@@ -312,16 +436,43 @@ function waitForButtonsMessage(
     const handler = async (event: NewMessageEvent) => {
       const msg = event.message as Api.Message;
       collected.push(msg);
-      if ((msg as any).replyMarkup) {
-        cleanup();
-        resolve(collected);
-      }
+      if (hasInlineButtons(msg)) succeed(msg);
+    };
+
+    const editHandler = async (update: any) => {
+      if (!isEditUpdate(update)) return;
+      const msg = update.message as Api.Message;
+      if (!msg || msg.out) return;
+      if (!msg.peerId || utils.getPeerId(msg.peerId) !== botPeerId) return;
+      if (hasInlineButtons(msg)) succeed(msg);
     };
 
     client.addEventHandler(
       handler,
       new NewMessage({ fromUsers: [fromUsername] }),
     );
+    client.addEventHandler(editHandler, new Raw({}));
+
+    // Best-effort: a buttons message may have landed in the send-to-listen gap
+    if (sinceAnchor) {
+      client
+        .getMessages(fromUsername, { limit: 5 })
+        .then((recent) => {
+          const seed = (recent as Api.Message[]).find(
+            (m) =>
+              m &&
+              !m.out &&
+              m.id !== excludeId &&
+              hasInlineButtons(m) &&
+              (m.id > sinceAnchor.msgId ||
+                (m.editDate ?? 0) >= sinceAnchor.dateSec),
+          );
+          if (seed) succeed(seed);
+        })
+        .catch(() => {
+          /* history scan is best-effort */
+        });
+    }
   });
 }
 
@@ -362,6 +513,7 @@ export async function runCustom(
       // State shared across actions within this job attempt
       let lastMessages: Api.Message[] = [];
       let lastButtonsMsg: Api.Message | null = null;
+      let sendAnchor: SendAnchor | null = null;
       let jobAttemptFailed = false;
 
       for (let i = 0; i < config.actions.length; i++) {
@@ -408,6 +560,7 @@ export async function runCustom(
                     undefined,
                     undefined,
                     signal,
+                    sendAnchor,
                   );
                   lastMessages = msgs;
                 }
@@ -436,11 +589,12 @@ export async function runCustom(
                     `AI returned ${aiResult.text.length} chars ("${aiResult.text}") but expected ${action.captchaLength}`,
                   );
                 }
-                await client.sendMessage(botUsername, {
+                const sentCaptcha = await client.sendMessage(botUsername, {
                   message: aiResult.text,
                 });
                 lastMessages = [];
                 lastButtonsMsg = null;
+                sendAnchor = anchorFromSent(sentCaptcha);
                 step.result = `Sent: "${aiResult.text}"`;
                 break;
               }
@@ -480,9 +634,12 @@ export async function runCustom(
                 }
                 const expanded = expandCommand(content);
                 step.label = `Send: "${expanded}"`;
-                await client.sendMessage(botUsername, { message: expanded });
+                const sentCmd = await client.sendMessage(botUsername, {
+                  message: expanded,
+                });
                 lastMessages = [];
                 lastButtonsMsg = null;
+                sendAnchor = anchorFromSent(sentCmd);
                 step.result = "Sent";
                 break;
               }
@@ -545,16 +702,12 @@ export async function runCustom(
                   successContains,
                   failContains,
                   signal,
+                  sendAnchor,
                 );
                 lastMessages = msgs;
                 step.msgCount = msgs.length;
                 const btnMsg =
-                  [...msgs]
-                    .reverse()
-                    .find(
-                      (m) =>
-                        (m as any).replyMarkup instanceof Api.ReplyInlineMarkup,
-                    ) ?? null;
+                  [...msgs].reverse().find((m) => hasInlineButtons(m)) ?? null;
                 if (btnMsg) lastButtonsMsg = btnMsg;
                 const parsed = await parseMessages(msgs, client, signal);
                 step.responseHtml = parsed.html || undefined;
@@ -593,22 +746,31 @@ export async function runCustom(
 
                 let buttonsMsg: Api.Message | null = lastButtonsMsg;
                 let preClickImages: string[] = [];
+                if (buttonsMsg) {
+                  // The bot may have edited the message since we captured it (swapped or
+                  // added buttons); refresh so we click against the current markup
+                  const currentId: number = buttonsMsg.id;
+                  const fresh: Api.Message | null = await client
+                    .getMessages(botUsername, { ids: [currentId] })
+                    .then((r) => (r as Api.Message[])?.[0] ?? null)
+                    .catch(() => null);
+                  if (hasInlineButtons(fresh)) {
+                    buttonsMsg = fresh;
+                    lastButtonsMsg = fresh;
+                  }
+                }
                 if (!buttonsMsg) {
                   const msgs = await waitForButtonsMessage(
                     client,
                     botUsername,
                     action.maxWaitMs,
                     signal,
+                    sendAnchor,
                   );
                   lastMessages = msgs;
                   buttonsMsg =
-                    [...msgs]
-                      .reverse()
-                      .find(
-                        (m) =>
-                          (m as any).replyMarkup instanceof
-                          Api.ReplyInlineMarkup,
-                      ) ?? null;
+                    [...msgs].reverse().find((m) => hasInlineButtons(m)) ??
+                    null;
                   if (buttonsMsg) lastButtonsMsg = buttonsMsg;
                   const preParsed = await parseMessages(msgs, client, signal);
                   if (preParsed.html) step.preClickHtml = preParsed.html;
@@ -685,8 +847,23 @@ export async function runCustom(
                 }
 
                 const peer = await client.getInputEntity(botUsername);
+                const botPeerId = await client.getPeerId(botUsername);
                 let clicked = false;
                 let retryCount = 0;
+
+                const markupContainsTarget = (
+                  m: Api.Message | null,
+                ): boolean =>
+                  hasInlineButtons(m) &&
+                  ((m as any).replyMarkup as Api.ReplyInlineMarkup).rows.some(
+                    (row) =>
+                      row.buttons.some((b: any) => {
+                        const t = ((b.text as string) ?? "");
+                        return useExactMatch
+                          ? t === targetText
+                          : t.includes(targetText);
+                      }),
+                  );
 
                 for (
                   let attempt = 0;
@@ -695,24 +872,39 @@ export async function runCustom(
                 ) {
                   if (attempt > 0) {
                     retryCount = attempt;
-                    const msgs = await waitForButtonsMessage(
-                      client,
-                      botUsername,
-                      action.maxWaitMs,
-                      signal,
-                    ).catch(() => null);
-                    if (msgs) {
-                      lastMessages = msgs;
-                      const bm = [...msgs]
-                        .reverse()
-                        .find(
-                          (m) =>
-                            (m as any).replyMarkup instanceof
-                            Api.ReplyInlineMarkup,
-                        );
-                      if (bm) {
-                        buttonsMsg = bm;
-                        lastButtonsMsg = bm;
+                    // Target may have appeared via an in-place edit of the message we
+                    // already have -- refresh it before waiting for a different one
+                    const fresh: Api.Message | null = await client
+                      .getMessages(botUsername, { ids: [buttonsMsg!.id] })
+                      .then((r) => (r as Api.Message[])?.[0] ?? null)
+                      .catch(() => null);
+                    if (hasInlineButtons(fresh)) {
+                      buttonsMsg = fresh;
+                      lastButtonsMsg = fresh;
+                    }
+                    if (!markupContainsTarget(buttonsMsg)) {
+                      const retryAnchor: SendAnchor = {
+                        msgId: buttonsMsg?.id ?? 0,
+                        dateSec: Math.floor(t0 / 1000),
+                      };
+                      const msgs: Api.Message[] | null =
+                        await waitForButtonsMessage(
+                          client,
+                          botUsername,
+                          action.maxWaitMs,
+                          signal,
+                          retryAnchor,
+                          buttonsMsg?.id,
+                        ).catch(() => null);
+                      if (msgs) {
+                        lastMessages = msgs;
+                        const bm: Api.Message | undefined = [...msgs]
+                          .reverse()
+                          .find((m) => hasInlineButtons(m));
+                        if (bm) {
+                          buttonsMsg = bm;
+                          lastButtonsMsg = bm;
+                        }
                       }
                     }
                   }
@@ -741,6 +933,7 @@ export async function runCustom(
                         buttonsMsg!.id,
                         10_000,
                         clickAbort.signal,
+                        botPeerId,
                       );
                       const newMsgPromise = waitForNewBotMessage(
                         client,
@@ -778,19 +971,42 @@ export async function runCustom(
                         msg: m,
                         src: "new_message" as const,
                       }));
-                      const { msg: responseMsg, src: respSrc } =
-                        await Promise.race([taggedEdit, taggedNew]);
+                      const first = await Promise.race([taggedEdit, taggedNew]);
+                      // Bots often edit the clicked message AND send a follow-up; when the
+                      // first response carries no buttons, give the other source a short
+                      // window -- the next step's buttons are usually there
+                      let second:
+                        | { msg: Api.Message | null; src: "edit" | "new_message" }
+                        | null = null;
+                      if (first.msg && !hasInlineButtons(first.msg)) {
+                        const other =
+                          first.src === "edit" ? taggedNew : taggedEdit;
+                        second = await Promise.race([
+                          other,
+                          new Promise<null>((r) =>
+                            setTimeout(() => r(null), 1_500),
+                          ),
+                        ]);
+                      }
+                      clickAbort.abort();
                       signal?.removeEventListener("abort", forwardAbort);
-                      if (responseMsg && !signal?.aborted) {
-                        step.responseSource = respSrc;
-                        lastMessages = [responseMsg];
-                        if (
-                          (responseMsg as any).replyMarkup instanceof
-                          Api.ReplyInlineMarkup
-                        )
-                          lastButtonsMsg = responseMsg;
+
+                      const responses = [first, second].filter(
+                        (
+                          r,
+                        ): r is { msg: Api.Message; src: "edit" | "new_message" } =>
+                          !!r?.msg && !signal?.aborted,
+                      );
+                      if (responses.length) {
+                        const primary =
+                          responses.find((r) => hasInlineButtons(r.msg)) ??
+                          responses[0];
+                        step.responseSource = primary.src;
+                        lastMessages = responses.map((r) => r.msg);
+                        if (hasInlineButtons(primary.msg))
+                          lastButtonsMsg = primary.msg;
                         const parsed = await parseMessages(
-                          [responseMsg],
+                          lastMessages,
                           client,
                           signal,
                         );
@@ -802,9 +1018,9 @@ export async function runCustom(
                           : undefined;
                       }
 
-                      // Check success/fail text in callback answer or response message
+                      // Check success/fail text in callback answer or response messages
                       if (action.successContains || action.failContains) {
-                        const texts = [answer.message ?? '', responseMsg?.message ?? ''].filter(Boolean).join('\n');
+                        const texts = [answer.message ?? '', ...responses.map((r) => r.msg.message ?? '')].filter(Boolean).join('\n');
                         if (action.failContains && texts.includes(action.failContains)) {
                           throw new Error(`Reply indicates failure: "${action.failContains}" detected`);
                         }
@@ -834,12 +1050,10 @@ export async function runCustom(
 
                 const entity = await client.getEntity(contact);
                 const peer = await client.getInputEntity(entity);
+                const chatPeerId = await client.getPeerId(entity);
 
                 const findButtonsMsg = (msgs: Api.Message[]): Api.Message | null =>
-                  msgs.find(
-                    (m) =>
-                      (m as any).replyMarkup instanceof Api.ReplyInlineMarkup,
-                  ) ?? null;
+                  msgs.find((m) => hasInlineButtons(m)) ?? null;
 
                 // Seed from the contact's most recent messages (newest first); otherwise wait
                 // for an incoming message carrying buttons.
@@ -855,13 +1069,8 @@ export async function runCustom(
                     signal,
                   );
                   buttonsMsg =
-                    [...msgs]
-                      .reverse()
-                      .find(
-                        (m) =>
-                          (m as any).replyMarkup instanceof
-                          Api.ReplyInlineMarkup,
-                      ) ?? null;
+                    [...msgs].reverse().find((m) => hasInlineButtons(m)) ??
+                    null;
                 }
                 if (buttonsMsg) {
                   const preParsed = await parseMessages(
@@ -929,6 +1138,20 @@ export async function runCustom(
                 let clicked = false;
                 let retryCount = 0;
 
+                const markupContainsTarget = (
+                  m: Api.Message | null,
+                ): boolean =>
+                  hasInlineButtons(m) &&
+                  ((m as any).replyMarkup as Api.ReplyInlineMarkup).rows.some(
+                    (row) =>
+                      row.buttons.some((b: any) => {
+                        const t = ((b.text as string) ?? "");
+                        return useExactMatch
+                          ? t === targetText
+                          : t.includes(targetText);
+                      }),
+                  );
+
                 for (
                   let attempt = 0;
                   attempt <= action.maxRetries && !clicked;
@@ -936,21 +1159,26 @@ export async function runCustom(
                 ) {
                   if (attempt > 0) {
                     retryCount = attempt;
-                    const msgs = await waitForButtonsInChat(
-                      client,
-                      entity,
-                      action.maxWaitMs,
-                      signal,
-                    ).catch(() => null);
-                    if (msgs) {
-                      const bm = [...msgs]
-                        .reverse()
-                        .find(
-                          (m) =>
-                            (m as any).replyMarkup instanceof
-                            Api.ReplyInlineMarkup,
-                        );
-                      if (bm) buttonsMsg = bm;
+                    // Target may have appeared via an in-place edit of the message we
+                    // already have -- refresh it before waiting for a different one
+                    const fresh: Api.Message | null = await client
+                      .getMessages(entity, { ids: [buttonsMsg!.id] })
+                      .then((r) => (r as Api.Message[])?.[0] ?? null)
+                      .catch(() => null);
+                    if (hasInlineButtons(fresh)) buttonsMsg = fresh;
+                    if (!markupContainsTarget(buttonsMsg)) {
+                      const msgs = await waitForButtonsInChat(
+                        client,
+                        entity,
+                        action.maxWaitMs,
+                        signal,
+                      ).catch(() => null);
+                      if (msgs) {
+                        const bm = [...msgs]
+                          .reverse()
+                          .find((m) => hasInlineButtons(m));
+                        if (bm) buttonsMsg = bm;
+                      }
                     }
                   }
 
@@ -976,6 +1204,7 @@ export async function runCustom(
                         buttonsMsg!.id,
                         10_000,
                         clickAbort.signal,
+                        chatPeerId,
                       );
                       const newMsgPromise = waitForNewMessageInChat(
                         client,
@@ -1013,13 +1242,38 @@ export async function runCustom(
                         msg: m,
                         src: "new_message" as const,
                       }));
-                      const { msg: responseMsg, src: respSrc } =
-                        await Promise.race([taggedEdit, taggedNew]);
+                      const first = await Promise.race([taggedEdit, taggedNew]);
+                      // When the first response carries no buttons, give the other source
+                      // a short window in case it delivers the next step's buttons
+                      let second:
+                        | { msg: Api.Message | null; src: "edit" | "new_message" }
+                        | null = null;
+                      if (first.msg && !hasInlineButtons(first.msg)) {
+                        const other =
+                          first.src === "edit" ? taggedNew : taggedEdit;
+                        second = await Promise.race([
+                          other,
+                          new Promise<null>((r) =>
+                            setTimeout(() => r(null), 1_500),
+                          ),
+                        ]);
+                      }
+                      clickAbort.abort();
                       signal?.removeEventListener("abort", forwardAbort);
-                      if (responseMsg && !signal?.aborted) {
-                        step.responseSource = respSrc;
+
+                      const responses = [first, second].filter(
+                        (
+                          r,
+                        ): r is { msg: Api.Message; src: "edit" | "new_message" } =>
+                          !!r?.msg && !signal?.aborted,
+                      );
+                      if (responses.length) {
+                        const primary =
+                          responses.find((r) => hasInlineButtons(r.msg)) ??
+                          responses[0];
+                        step.responseSource = primary.src;
                         const parsed = await parseMessages(
-                          [responseMsg],
+                          responses.map((r) => r.msg),
                           client,
                           signal,
                         );
@@ -1032,7 +1286,7 @@ export async function runCustom(
                       }
 
                       if (action.successContains || action.failContains) {
-                        const texts = [answer.message ?? '', responseMsg?.message ?? ''].filter(Boolean).join('\n');
+                        const texts = [answer.message ?? '', ...responses.map((r) => r.msg.message ?? '')].filter(Boolean).join('\n');
                         if (action.failContains && texts.includes(action.failContains)) {
                           throw new Error(`Reply indicates failure: "${action.failContains}" detected`);
                         }
@@ -1113,6 +1367,8 @@ export async function runCustom(
 
                   let pendingApproval = false;
                   let freshlyJoined = false;
+                  // Small tolerance for clock skew against Telegram server time
+                  const joinStartSec = Math.floor(Date.now() / 1000) - 10;
                   try {
                     await client.invoke(new Api.channels.JoinChannel({ channel: entity as any }));
                     step.result = "Joined";
@@ -1148,6 +1404,7 @@ export async function runCustom(
                       action.verifyWaitMs ?? 30000,
                       step,
                       signal,
+                      joinStartSec,
                     );
                   }
                 }

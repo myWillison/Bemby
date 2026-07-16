@@ -33,11 +33,23 @@ import {
   getCachedMessages,
   cacheMessages,
   clearCachedMessages,
+  removeCachedMessages,
+  updateCachedMessageText,
+  setBlocked,
+  reportPeer,
+  deleteHistory,
+  deleteMessages,
+  editMessage,
+  forwardMessages,
+  sendTyping,
   syncMessagesInBackground,
   joinChannel,
   leaveChat,
   getCachedDialogs,
   cacheDialogs,
+  removeCachedDialog,
+  clearAccountCache,
+  cleanAccount,
   syncDialogsInBackground,
   fetchAvatarsBatch,
   checkMembership,
@@ -236,6 +248,126 @@ router.get("/miniapp-proxy", async (req, res) => {
       const buf = await upstream.arrayBuffer();
       res.send(Buffer.from(buf));
     }
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// GET /frameable?url= -- probe whether a page allows cross-origin framing
+router.get("/frameable", async (req, res) => {
+  const url = req.query.url as string;
+  if (!url || !/^https?:\/\//i.test(url)) {
+    res.status(400).json({ error: "valid url required" });
+    return;
+  }
+  try {
+    await assertPublicUrl(url);
+  } catch {
+    res.status(400).json({ error: "URL not allowed" });
+    return;
+  }
+  res.json({ frameable: await isFrameable(url) });
+});
+
+// GET /web-proxy?url=&token= -- proxy a page that refuses framing so the
+// messenger viewer can still render it. The frontend shows the result in an
+// iframe WITHOUT allow-same-origin, so proxied scripts run in an opaque origin
+// and cannot reach Bemby's storage or API. Subresources are rewritten to load
+// directly from the site; link navigation is routed back through the proxy.
+router.get("/web-proxy", async (req, res) => {
+  const url = req.query.url as string;
+  const token = (req.query.token as string) ?? "";
+  if (!url || !/^https?:\/\//i.test(url)) {
+    res.status(400).json({ error: "valid url required" });
+    return;
+  }
+  try {
+    await assertPublicUrl(url);
+  } catch {
+    res.status(400).json({ error: "URL not allowed" });
+    return;
+  }
+  try {
+    const upstream = await ssrfSafeFetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+
+    const contentType = upstream.headers.get("content-type") ?? "text/html";
+    res.setHeader("Content-Type", contentType);
+    res.removeHeader("X-Frame-Options");
+    res.removeHeader("Content-Security-Policy");
+
+    if (!contentType.includes("text/html")) {
+      const buf = await upstream.arrayBuffer();
+      res.send(Buffer.from(buf));
+      return;
+    }
+
+    let html = await upstream.text();
+    const finalUrl = (upstream.url || url).split("#")[0];
+    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : "";
+
+    const toAbs = (resourceUrl: string): string => {
+      try {
+        return new URL(resourceUrl, finalUrl).toString();
+      } catch {
+        return resourceUrl;
+      }
+    };
+
+    // A <base> or meta CSP from the page would break the proxied copy
+    html = html.replace(/<base\b[^>]*>/gi, "");
+    html = html.replace(
+      /<meta\b[^>]+http-equiv\s*=\s*["']?content-security-policy["']?[^>]*>/gi,
+      "",
+    );
+
+    // Route link navigation back through the proxy so clicking around keeps
+    // working (a direct navigation would hit the framing block again)
+    html = html.replace(
+      /(<a\b[^>]*?\shref\s*=\s*)(["'])([^"']+)\2/gi,
+      (m, prefix, q, href) => {
+        if (/^(#|mailto:|tel:|javascript:|data:)/i.test(href)) return m;
+        const abs = toAbs(href);
+        if (!/^https?:\/\//i.test(abs)) return m;
+        return `${prefix}${q}/api/tg-client/web-proxy?url=${encodeURIComponent(abs)}${tokenParam}${q}`;
+      },
+    );
+
+    // Everything else (images, scripts, styles, forms) loads directly from
+    // the site -- make relative URLs absolute
+    html = html.replace(
+      /(\b(?:src|action)\s*=\s*)(["'])(?!data:|https?:\/\/|\/\/|#)([^"']+)\2/gi,
+      (_m, attr, q, val) => `${attr}${q}${toAbs(val)}${q}`,
+    );
+    html = html.replace(/<link\b[^>]+>/gi, (linkTag) =>
+      linkTag.replace(
+        /(href\s*=\s*)(["'])(?!data:|https?:\/\/|\/\/|#)([^"']+)\2/i,
+        (_m, attr, q, href) => `${attr}${q}${toAbs(href)}${q}`,
+      ),
+    );
+    html = html.replace(
+      /(\bsrcset\s*=\s*)(["'])([^"']+)\2/gi,
+      (_m, attr, q, val) => {
+        const rewritten = val
+          .split(",")
+          .map((part: string) => {
+            const [u, ...rest] = part.trim().split(/\s+/);
+            if (!u || /^(data:|https?:\/\/|\/\/)/i.test(u)) return part.trim();
+            return [toAbs(u), ...rest].join(" ");
+          })
+          .join(", ");
+        return `${attr}${q}${rewritten}${q}`;
+      },
+    );
+
+    res.send(html);
   } catch (err: any) {
     res.status(502).json({ error: err.message });
   }
@@ -596,6 +728,164 @@ router.post("/:accountId/pin/:chatId", async (req, res) => {
   try {
     const entry = await getLiveClient(accountId);
     await pinDialog(entry, chatId, Boolean(pinned));
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/typing/:chatId -- broadcast a typing notification
+router.post("/:accountId/typing/:chatId", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  try {
+    const entry = await getLiveClient(accountId);
+    await sendTyping(entry, chatId);
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/block/:chatId -- block or unblock a user
+router.post("/:accountId/block/:chatId", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  const { blocked = true } = req.body as { blocked?: boolean };
+  try {
+    const entry = await getLiveClient(accountId);
+    await setBlocked(entry, chatId, Boolean(blocked));
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/report/:chatId -- report a user, group or channel
+router.post("/:accountId/report/:chatId", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  const { reason, comment = "" } = req.body as {
+    reason?: string;
+    comment?: string;
+  };
+  if (!reason) {
+    res.status(400).json({ error: "reason is required" });
+    return;
+  }
+  try {
+    const entry = await getLiveClient(accountId);
+    await reportPeer(entry, chatId, reason as any, String(comment));
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// DELETE /:accountId/cache -- drop all cached data for the account.
+// Works without a connected client; everything refetches on demand.
+router.delete("/:accountId/cache", (req, res) => {
+  const accountId = Number(req.params.accountId);
+  try {
+    clearAccountCache(accountId);
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/clean -- leave all groups/channels and delete all private
+// chats for both sides. Irreversible; the frontend confirms before calling.
+router.post("/:accountId/clean", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  try {
+    const entry = await getLiveClient(accountId);
+    const result = await cleanAccount(entry, accountId);
+    syncDialogsInBackground(accountId).catch(() => {});
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// DELETE /:accountId/history/:chatId?revoke=1 -- delete chat history
+router.delete("/:accountId/history/:chatId", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  const revoke = req.query.revoke === "1";
+  try {
+    const entry = await getLiveClient(accountId);
+    await deleteHistory(entry, chatId, revoke);
+    clearCachedMessages(accountId, chatId);
+    // Drop the cached dialog row immediately, otherwise the chat
+    // reappears from the cache on the next dialog load
+    removeCachedDialog(accountId, chatId);
+    // Refresh the dialog list so the removed chat disappears
+    syncDialogsInBackground(accountId).catch(() => {});
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/messages/:chatId/delete -- delete messages { ids, revoke }
+router.post("/:accountId/messages/:chatId/delete", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  const { ids, revoke = true } = req.body as {
+    ids?: number[];
+    revoke?: boolean;
+  };
+  if (!Array.isArray(ids) || !ids.length) {
+    res.status(400).json({ error: "ids is required" });
+    return;
+  }
+  const msgIds = ids.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+  try {
+    const entry = await getLiveClient(accountId);
+    await deleteMessages(entry, chatId, msgIds, Boolean(revoke));
+    removeCachedMessages(accountId, chatId, msgIds);
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/messages/:chatId/:msgId/edit -- edit an own message { text }
+router.post("/:accountId/messages/:chatId/:msgId/edit", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  const msgId = Number(req.params.msgId);
+  const { text } = req.body as { text?: string };
+  if (!text?.trim()) {
+    res.status(400).json({ error: "text is required" });
+    return;
+  }
+  try {
+    const entry = await getLiveClient(accountId);
+    await editMessage(entry, chatId, msgId, text.trim());
+    updateCachedMessageText(accountId, chatId, msgId, text.trim());
+    res.json({ ok: true });
+  } catch (err: any) {
+    tgError(err, accountId, res);
+  }
+});
+
+// POST /:accountId/messages/:chatId/forward -- forward messages { toChatId, ids }
+router.post("/:accountId/messages/:chatId/forward", async (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const chatId = decodeURIComponent(req.params.chatId);
+  const { toChatId, ids } = req.body as { toChatId?: string; ids?: number[] };
+  if (!toChatId || !Array.isArray(ids) || !ids.length) {
+    res.status(400).json({ error: "toChatId and ids are required" });
+    return;
+  }
+  const msgIds = ids.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+  try {
+    const entry = await getLiveClient(accountId);
+    await forwardMessages(entry, chatId, String(toChatId), msgIds);
+    // Sync the target chat so the forwarded messages appear promptly
+    syncMessagesInBackground(accountId, String(toChatId)).catch(() => {});
     res.json({ ok: true });
   } catch (err: any) {
     tgError(err, accountId, res);

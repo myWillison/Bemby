@@ -145,6 +145,12 @@
                     在<strong>高级</strong>选项卡中查看已注册的通行密钥（WebAuthn，含名称、添加与最近使用时间）并可移除。新增通行密钥仍需在官方 Telegram 客户端中进行。
                   </td>
                 </tr>
+                <tr>
+                  <td>国家 / 国旗</td>
+                  <td>
+                    根据手机号的国家代码自动解析所属国家，在手机号下方显示国旗与国家名称，悬停可查看完整名称。
+                  </td>
+                </tr>
               </tbody>
             </table>
             <div class="help-badges-row">
@@ -272,6 +278,14 @@
                     Telegram client.
                   </td>
                 </tr>
+                <tr>
+                  <td>Country / flag</td>
+                  <td>
+                    The country is resolved automatically from the phone
+                    number's calling code and shown as a flag and name below
+                    the number, with the full name on hover.
+                  </td>
+                </tr>
               </tbody>
             </table>
             <div class="help-badges-row">
@@ -305,6 +319,27 @@
               内置 Telegram 消息客户端，可直接在 Bemby
               中与联系人、群组和频道实时聊天。
               点击导航栏中的<strong>消息</strong>图标即可打开。
+            </p>
+
+            <div
+              class="card-section-title"
+              style="margin-top: 16px; font-size: 11px"
+            >
+              聊天搜索
+            </div>
+            <p class="help-para">
+              聊天列表顶部的搜索框会先匹配本地已加入聊天的标题与用户名，再对已退出/已归档/无用户名的聊天做全局消息内容匹配，并对公开聊天做全局用户名匹配，结果按相关度排序。加入群组失败时会给出具体原因（私有群组、邀请链接失效、已是成员等），私有群加入失败时自动弹出"输入网址"对话框方便粘贴邀请链接。
+            </p>
+
+            <div
+              class="card-section-title"
+              style="margin-top: 16px; font-size: 11px"
+            >
+              移动端聊天头部
+            </div>
+            <p class="help-para">
+              移动端聊天头部的操作按钮（搜索、清空缓存、小程序模式、打开网址、关闭聊天）合并为单个 ⋯
+              菜单，避免挤占聊天名称显示空间。消息区域滚动离底部较远时，右下角会出现"跳转到最新消息"悬浮按钮，并带未读消息数角标。
             </p>
 
             <div
@@ -426,8 +461,10 @@
               打开网址
             </div>
             <p class="help-para">
-              工具栏中的地球图标可打开"输入网址"对话框，支持粘贴任意 URL 或 t.me 链接，
-              直接在消息客户端或浏览器中打开，无需离开应用。
+              工具栏中的地球图标可打开"输入网址"对话框，支持粘贴任意 URL 或 t.me 链接。
+              点击站外链接时会弹出选择卡片，可选"在 Bemby 中打开"或"在浏览器中打开"。
+              选择在 Bemby 中打开时，会先探测目标网站是否允许被嵌入 iframe；不允许时自动改为通过内置代理加载，
+              页面上方会显示提示条，说明登录及部分交互功能可能无法使用。t.me 链接始终在应用内直接处理，不会弹出选择框。
             </p>
 
             <div
@@ -440,6 +477,60 @@
               点击输入框旁的附件图标可选择图片或任意文件并发送，发送前会在输入框上方显示待发送附件预览。
               图片可选择"以文件方式发送"以保留原始质量。
             </p>
+
+            <div
+              class="card-section-title"
+              style="margin-top: 16px; font-size: 11px"
+            >
+              拉黑与举报
+            </div>
+            <p class="help-para">
+              在聊天右键菜单或联系人资料面板中可拉黑/取消拉黑用户或机器人。举报支持选择举报原因（垂类，如骚扰信息、色情内容、虚假账号等）并填写可选备注；
+              举报用户或机器人时会同时将其拉黑并删除该聊天，对话框中会明确提示此行为。
+            </p>
+
+            <div
+              class="card-section-title"
+              style="margin-top: 16px; font-size: 11px"
+            >
+              删除聊天 / 消息
+            </div>
+            <p class="help-para">
+              右键聊天可选择"删除聊天"，用户/机器人聊天可勾选"同时为对方删除"。单条消息可通过悬停操作删除，也可进入多选模式批量删除，均可勾选"为对方也删除"（频道消息始终对所有人删除）。
+            </p>
+
+            <div
+              class="card-section-title"
+              style="margin-top: 16px; font-size: 11px"
+            >
+              编辑与转发消息
+            </div>
+            <p class="help-para">
+              悬停自己发送的文字消息可点击铅笔图标直接编辑；悬停任意消息可点击转发图标，在弹出的聊天列表中选择目标聊天转发。多选模式下可批量转发或删除。
+            </p>
+
+            <div
+              class="card-section-title"
+              style="margin-top: 16px; font-size: 11px"
+            >
+              输入中提示
+            </div>
+            <p class="help-para">
+              对方正在输入时，聊天列表预览行与聊天窗口头部会显示"正在输入…"；你在输入框中输入内容时，对方也会看到你的输入状态。
+            </p>
+
+            <div
+              class="card-section-title"
+              style="margin-top: 16px; font-size: 11px"
+            >
+              清除缓存 / 清理账号
+            </div>
+            <p class="help-para">
+              消息视图右上角新增两个按钮：<strong>清除缓存</strong>清空该账号在 Bemby
+              本地的缓存数据并重新从 Telegram 拉取，用于排查显示异常，不影响 Telegram
+              上的实际数据；<strong>清理账号</strong>会退出所选账号的所有群组与频道、删除所有私聊记录、移除所有联系人及自定义文件夹（自动保留"收藏夹"、Telegram 官方通知和
+              SpamBot）。此操作<strong>不可撤销</strong>，需在确认框中核对账号信息并勾选风险提示后才能执行，完成后会显示成功/失败的处理数量。
+            </p>
           </template>
           <template v-else>
             <div class="card-section-title">Messenger</div>
@@ -447,6 +538,38 @@
               A built-in Telegram chat client lets you message contacts, groups,
               and channels directly from Bemby. Click the
               <strong>Messages</strong> icon in the sidebar to open it.
+            </p>
+
+            <div
+              class="card-section-title"
+              style="margin-top: 16px; font-size: 11px"
+            >
+              Chat search
+            </div>
+            <p class="help-para">
+              The search box above the chat list matches your own chats by
+              title or username first, then falls back to a global message
+              search for chats you've left, archived, or that have no
+              username, plus a global username search for public chats,
+              ranked by relevance. Failed group joins show a specific reason
+              (private group, expired invite link, already a member), and a
+              failed private-group join auto-opens the "Go to URL" dialog so
+              you can paste the invite link.
+            </p>
+
+            <div
+              class="card-section-title"
+              style="margin-top: 16px; font-size: 11px"
+            >
+              Mobile chat header
+            </div>
+            <p class="help-para">
+              On mobile, the chat header's action buttons (search, clear
+              cache, mini app mode, open URL, close chat) collapse into a
+              single ⋯ menu so the chat name keeps its space. A floating
+              "jump to latest" button appears in the bottom-right once you've
+              scrolled away from the bottom, with an unseen-message count
+              badge.
             </p>
 
             <div
@@ -579,8 +702,13 @@
             </div>
             <p class="help-para">
               The globe button in the toolbar opens a dialog where you can paste
-              any URL or t.me link and open it in the messenger or browser
-              without leaving the app.
+              any URL or t.me link. Clicking a non-Telegram link shows a chooser
+              card with "Open in Bemby" or "Open in browser". Choosing Bemby
+              first checks whether the target site allows being embedded in an
+              iframe; if it doesn't, the page loads through a built-in proxy
+              instead, with a banner noting that sign-ins and some interactive
+              features may not work. t.me links are always handled directly
+              in-app and never show the chooser.
             </p>
 
             <div
@@ -594,6 +722,80 @@
               or any file and send it; a preview of the pending attachment
               appears above the compose box before sending. Images offer a "send
               as file" option to preserve the original quality.
+            </p>
+
+            <div
+              class="card-section-title"
+              style="margin-top: 16px; font-size: 11px"
+            >
+              Block and report
+            </div>
+            <p class="help-para">
+              Block or unblock a user or bot from the chat context menu or the
+              contact's profile panel. Reporting lets you pick a reason
+              (spam, violence, a fake account, etc.) and add an optional
+              comment; reporting a user or bot also blocks them and deletes the
+              chat, with the confirmation card calling this out.
+            </p>
+
+            <div
+              class="card-section-title"
+              style="margin-top: 16px; font-size: 11px"
+            >
+              Delete chats / messages
+            </div>
+            <p class="help-para">
+              Right-click a chat and choose "Delete chat"; for user/bot chats
+              you can also tick "also delete for them". Individual messages can
+              be deleted from the hover actions, or in bulk via multi-select,
+              both with the same revoke option (channel messages are always
+              deleted for everyone).
+            </p>
+
+            <div
+              class="card-section-title"
+              style="margin-top: 16px; font-size: 11px"
+            >
+              Edit and forward messages
+            </div>
+            <p class="help-para">
+              Hover your own text message and click the pencil icon to edit it
+              in place. Hover any message and click the forward icon to pick a
+              destination chat from the popup list. Multi-select mode lets you
+              forward or delete several messages at once.
+            </p>
+
+            <div
+              class="card-section-title"
+              style="margin-top: 16px; font-size: 11px"
+            >
+              Typing indicators
+            </div>
+            <p class="help-para">
+              When the other side is typing, "typing…" appears in the dialog
+              list preview and the open chat's header. Your own typing status is
+              broadcast to them the same way while you compose a message.
+            </p>
+
+            <div
+              class="card-section-title"
+              style="margin-top: 16px; font-size: 11px"
+            >
+              Clear cache / Clean account
+            </div>
+            <p class="help-para">
+              Two buttons in the top-right of the Messenger view:
+              <strong>Clear cache</strong> wipes Bemby's local cache for the
+              account and refetches everything from Telegram — useful when
+              something looks stale or wrong, and has no effect on your actual
+              Telegram data. <strong>Clean account</strong> leaves every group
+              and channel, deletes every private chat history, and removes all
+              contacts and custom folders for the selected account (Saved
+              Messages, the official Telegram service chat, and SpamBot are
+              always kept). This is <strong>irreversible</strong> — the
+              confirmation dialog requires checking the account details and
+              ticking a risk acknowledgement before it runs, and reports how
+              many items succeeded or failed afterwards.
             </p>
           </template>
         </div>
@@ -864,7 +1066,7 @@
               任务筛选与搜索
             </div>
             <p class="help-para">
-              当系统存在多个账号或多个机器人/网址时，任务列表顶部会显示对应的筛选下拉框，可按账号或机器人/网址过滤任务。列表顶部同时提供名称搜索框，可按任务名称快速筛选。
+              当系统存在多个账号或多个机器人/网址时，任务列表顶部会显示对应的筛选下拉框，可按账号或机器人/网址过滤任务。列表顶部同时提供名称搜索框，可按任务名称快速筛选。任务、账户、日志、模板列表均为服务端分页，分页控件位于表格上方；筛选下拉选项覆盖全部数据而非仅当前页。
             </p>
 
             <div
@@ -1230,7 +1432,10 @@
               When more than one account or bot/URL exists, filter dropdowns
               appear at the top of the jobs list, letting you show only jobs for
               a specific account or bot target. A name search box at the top of
-              the list narrows jobs by name.
+              the list narrows jobs by name. Jobs, Accounts, Logs, and
+              Templates all page through results server-side, with the
+              pagination bar above the table; filter dropdown options cover
+              the whole dataset, not just the loaded page.
             </p>
 
             <div
@@ -1470,7 +1675,7 @@
                     模型，在此处填入 API 密钥即可启用
                     <code>{aiBtn}</code>、<code>{aiInput}</code>
                     和"输入验证码"功能。支持添加任意 OpenAI
-                    兼容服务商，并可开启"报错时自动切换服务商"，在默认模型限速或出错时自动尝试其他已配置的服务商。
+                    兼容服务商，并可开启"报错时自动切换服务商"，在默认模型限速或出错时自动尝试其他已配置的服务商。默认模型下拉框精确对应到具体的"服务商 + 模型"记录，即使两个服务商提供同名模型也不会混淆。
                   </td>
                 </tr>
                 <tr>
@@ -1594,6 +1799,9 @@
                     OpenAI-compatible provider can be added, and an
                     "auto-fallback on error" toggle tries other configured
                     providers when the default model is rate-limited or errors.
+                    The Default Model dropdown pins to an exact provider +
+                    model combination, so two identically named models from
+                    different providers are never confused.
                   </td>
                 </tr>
                 <tr>

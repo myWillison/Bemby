@@ -76,9 +76,71 @@ type LiveEntry = {
   // Tracks the highest outgoing message ID the recipient has read, per chatId
   readOutboxCache: Map<string, number>;
   readSubscribers: Set<(chatId: string, maxId: number) => void>;
+  typingSubscribers: Set<(event: TgTypingEvent) => void>;
+  // Full dialog list cached briefly so per-keystroke searches don't refetch
+  dialogSearchCache?: { ts: number; items: TgDialogItem[] };
+  // Last time this entry was requested or had subscribers -- drives idle eviction
+  lastActiveAt: number;
+};
+
+export type TgTypingEvent = {
+  chatId: string;
+  userId: string | null;
+  userName: string | null;
+  cancelled: boolean;
 };
 
 const liveClients = new Map<number, LiveEntry>();
+
+// --- Idle eviction and cache bounds (issue #14) ---
+// A connected client receives every update for its account and GramJS's
+// internal entity cache grows for as long as the client lives, so memory
+// climbs steadily on long-running deployments. Evict clients nobody is
+// watching and keep the per-entry caches bounded.
+
+const IDLE_DISCONNECT_MS = 30 * 60_000;
+const SWEEP_INTERVAL_MS = 5 * 60_000;
+const ENTITY_CACHE_MAX = 1_000;
+const AVATAR_CACHE_MAX = 300;
+const READ_OUTBOX_CACHE_MAX = 1_000;
+
+function hasSubscribers(entry: LiveEntry): boolean {
+  return (
+    entry.subscribers.size > 0 ||
+    entry.dialogSubscribers.size > 0 ||
+    entry.readSubscribers.size > 0 ||
+    entry.typingSubscribers.size > 0
+  );
+}
+
+// Maps iterate in insertion order, so this drops the oldest entries first
+function trimCache(cache: Map<string, unknown>, max: number): void {
+  for (const key of cache.keys()) {
+    if (cache.size <= max) return;
+    cache.delete(key);
+  }
+}
+
+export function sweepLiveClients(now = Date.now()): void {
+  for (const [accountId, entry] of liveClients) {
+    if (hasSubscribers(entry)) entry.lastActiveAt = now;
+
+    if (now - entry.lastActiveAt >= IDLE_DISCONNECT_MS) {
+      liveClients.delete(accountId);
+      // destroy() tears down the update loop and senders; disconnect() alone
+      // keeps the client reusable and holding its internal caches
+      entry.client.destroy().catch(() => {});
+      continue;
+    }
+
+    trimCache(entry.entityCache, ENTITY_CACHE_MAX);
+    trimCache(entry.avatarCache, AVATAR_CACHE_MAX);
+    trimCache(entry.readOutboxCache, READ_OUTBOX_CACHE_MAX);
+  }
+}
+
+// unref() so the sweep never keeps the process (or test runner) alive
+setInterval(() => sweepLiveClients(), SWEEP_INTERVAL_MS).unref();
 
 type AccountRow = {
   api_id: number | null;
@@ -302,7 +364,8 @@ export async function reconnectClient(accountId: number): Promise<void> {
   const entry = liveClients.get(accountId);
   if (entry) {
     try {
-      await entry.client.disconnect();
+      // destroy, not disconnect -- the old client is discarded for good
+      await entry.client.destroy();
     } catch {
       /* ignore */
     }
@@ -330,7 +393,7 @@ export function markSessionExpired(accountId: number): void {
   ).run(accountId);
   const entry = liveClients.get(accountId);
   if (entry) {
-    entry.client.disconnect().catch(() => {});
+    entry.client.destroy().catch(() => {});
     liveClients.delete(accountId);
   }
 }
@@ -338,6 +401,7 @@ export function markSessionExpired(accountId: number): void {
 export async function getLiveClient(accountId: number): Promise<LiveEntry> {
   let entry = liveClients.get(accountId);
   if (entry) {
+    entry.lastActiveAt = Date.now();
     if (!entry.client.connected) await entry.client.connect();
     return entry;
   }
@@ -399,6 +463,8 @@ export async function getLiveClient(accountId: number): Promise<LiveEntry> {
     avatarCache: new Map(),
     readOutboxCache: new Map(),
     readSubscribers: new Set(),
+    typingSubscribers: new Set(),
+    lastActiveAt: Date.now(),
   };
   liveClients.set(accountId, entry);
 
@@ -465,6 +531,57 @@ export async function getLiveClient(accountId: number): Promise<LiveEntry> {
       entry!.readSubscribers.forEach((sub) => sub(chatId, update.maxId));
     },
     new Raw({ types: [Api.UpdateReadChannelOutbox] }),
+  );
+
+  // Typing notifications for private chats, basic groups and supergroups
+  const emitTyping = (
+    chatId: string,
+    fromId: string | null,
+    action: Api.TypeSendMessageAction,
+  ) => {
+    let userName: string | null = null;
+    if (fromId) {
+      const sender = entry!.entityCache.get(fromId);
+      if (sender) userName = entityName(sender);
+    }
+    entry!.typingSubscribers.forEach((sub) =>
+      sub({
+        chatId,
+        userId: fromId,
+        userName,
+        cancelled: action instanceof Api.SendMessageCancelAction,
+      }),
+    );
+  };
+
+  client.addEventHandler(
+    (update: Api.UpdateUserTyping) => {
+      const uid = `u${update.userId.toString()}`;
+      emitTyping(uid, uid, update.action);
+    },
+    new Raw({ types: [Api.UpdateUserTyping] }),
+  );
+
+  client.addEventHandler(
+    (update: Api.UpdateChatUserTyping) => {
+      emitTyping(
+        `g${update.chatId.toString()}`,
+        update.fromId ? peerToChatId(update.fromId) : null,
+        update.action,
+      );
+    },
+    new Raw({ types: [Api.UpdateChatUserTyping] }),
+  );
+
+  client.addEventHandler(
+    (update: Api.UpdateChannelUserTyping) => {
+      emitTyping(
+        `c${update.channelId.toString()}`,
+        update.fromId ? peerToChatId(update.fromId) : null,
+        update.action,
+      );
+    },
+    new Raw({ types: [Api.UpdateChannelUserTyping] }),
   );
 
   return entry;
@@ -555,13 +672,24 @@ export async function getMessages(
   const entity = entry.entityCache.get(chatId);
   if (!entity) throw new Error("Chat not found -- open the dialogs list first");
 
-  const all = await entry.client.getMessages(entity, {
-    limit,
-    ...(offsetId ? { offsetId } : {}),
-    ...(search ? { search } : {}),
-  });
-  // Drop service messages (join/leave/pin announcements) and empty placeholders
-  const msgs = all.filter((m) => m instanceof Api.Message);
+  // Service messages (join/leave/pin announcements) are dropped, so keep fetching
+  // until a full page of real messages is collected. Returning a short page would
+  // make the frontend believe history is exhausted and stop paginating.
+  const msgs: Api.Message[] = [];
+  let cursor = offsetId;
+  for (let hop = 0; hop < 5 && msgs.length < limit; hop++) {
+    const batch = await entry.client.getMessages(entity, {
+      limit,
+      ...(cursor ? { offsetId: cursor } : {}),
+      ...(search ? { search } : {}),
+    });
+    if (!batch.length) break;
+    for (const m of batch) {
+      if (m instanceof Api.Message && msgs.length < limit) msgs.push(m);
+    }
+    cursor = batch[batch.length - 1].id;
+    if (batch.length < limit) break; // genuine end of history
+  }
 
   // Batch-fetch reply-to message texts for quote display
   const replyIdSet = new Set<number>();
@@ -825,51 +953,202 @@ export async function editContact(
   };
 }
 
+// Full dialog list for name matching. Telegram's contacts.Search only matches
+// username substrings reliably (titles, especially CJK ones, are often missed),
+// so own chats must be matched locally the way official clients do. Cached for
+// 60s per account to keep per-keystroke searches off the network.
+const DIALOG_SEARCH_CACHE_MS = 60_000;
+const DIALOG_SEARCH_LIMIT = 1000;
+
+async function searchableDialogs(entry: LiveEntry): Promise<TgDialogItem[]> {
+  const cached = entry.dialogSearchCache;
+  if (cached && Date.now() - cached.ts < DIALOG_SEARCH_CACHE_MS) {
+    return cached.items;
+  }
+  const items = await loadDialogs(entry, DIALOG_SEARCH_LIMIT);
+  entry.dialogSearchCache = { ts: Date.now(), items };
+  return items;
+}
+
+function entityToDialogItem(
+  entity: Api.User | Api.Chat | Api.Channel,
+): TgDialogItem {
+  if (entity instanceof Api.User) {
+    return {
+      chatId: entityToChatId(entity),
+      name: entityName(entity),
+      type: entity.bot ? "bot" : "user",
+      username: entity.username ?? null,
+      unreadCount: 0,
+      lastMessage: null,
+    };
+  }
+  return {
+    chatId: entityToChatId(entity),
+    name: entityName(entity),
+    type:
+      entity instanceof Api.Channel
+        ? entity.megagroup
+          ? "group"
+          : "channel"
+        : "group",
+    username: (entity as any).username ?? null,
+    unreadCount: 0,
+    lastMessage: null,
+    left: entity instanceof Api.Channel ? Boolean(entity.left) : false,
+  };
+}
+
 export async function searchPeers(
   entry: LiveEntry,
   query: string,
 ): Promise<TgDialogItem[]> {
-  const result = await entry.client.invoke(
-    new Api.contacts.Search({ q: query, limit: 20 }),
-  );
+  const q = query.toLowerCase();
+  const seen = new Set<string>();
+  const dialogMatches: TgDialogItem[] = [];
+  const titleMatches: TgDialogItem[] = [];
+  const globalMatches: TgDialogItem[] = [];
+  const messageMatches: TgDialogItem[] = [];
 
-  const items: TgDialogItem[] = [];
-
-  for (const u of result.users as Api.User[]) {
-    if (u.deleted) continue;
-    const chatId = entityToChatId(u);
-    entry.entityCache.set(chatId, u);
-    items.push({
-      chatId,
-      name: entityName(u),
-      type: u.bot ? "bot" : "user",
-      username: u.username ?? null,
-      unreadCount: 0,
-      lastMessage: null,
-    });
+  // The server matches strictly, so a query with extra trailing tokens (e.g.
+  // "... v3") can return nothing while a shorter prefix matches -- retry with
+  // trailing words dropped when a search comes back empty.
+  const words = query.split(/\s+/).filter(Boolean);
+  const attempts = [query];
+  for (let n = words.length - 1; n >= 1 && attempts.length < 3; n--) {
+    const sub = words.slice(0, n).join(" ");
+    if (sub && sub !== query) attempts.push(sub);
   }
 
-  for (const c of result.chats as (Api.Chat | Api.Channel)[]) {
-    if ((c as any).deactivated || (c as any).forbidden) continue;
-    const chatId = entityToChatId(c as Api.Chat | Api.Channel);
-    entry.entityCache.set(chatId, c as Api.Chat | Api.Channel);
-    items.push({
-      chatId,
-      name: entityName(c as Api.Chat | Api.Channel),
-      type:
-        c instanceof Api.Channel
-          ? c.megagroup
-            ? "group"
-            : "channel"
-          : "group",
-      username: (c as any).username ?? null,
-      unreadCount: 0,
-      lastMessage: null,
-      left: c instanceof Api.Channel ? Boolean(c.left) : false,
-    });
+  // 1. Own chats by title/username substring across the full dialog list --
+  // covers private groups and CJK titles the server-side search cannot find
+  try {
+    for (const d of await searchableDialogs(entry)) {
+      if (
+        d.name.toLowerCase().includes(q) ||
+        d.username?.toLowerCase().includes(q)
+      ) {
+        if (!seen.has(d.chatId)) {
+          seen.add(d.chatId);
+          dialogMatches.push(d);
+        }
+      }
+    }
+  } catch {
+    // Dialog fetch failed (e.g. flood wait) -- server searches below still run
   }
 
-  return items;
+  // 2. Global message search -- the server also matches chats by TITLE here,
+  // which is how official clients find member chats that are no longer in the
+  // dialog list (e.g. removed/archived) and have no username
+  for (const attempt of attempts) {
+    let result: Api.messages.TypeMessages;
+    try {
+      result = await entry.client.invoke(
+        new Api.messages.SearchGlobal({
+          q: attempt,
+          filter: new Api.InputMessagesFilterEmpty(),
+          minDate: 0,
+          maxDate: 0,
+          offsetRate: 0,
+          offsetPeer: new Api.InputPeerEmpty(),
+          offsetId: 0,
+          limit: 20,
+        }),
+      );
+    } catch {
+      continue;
+    }
+
+    const msgs = ((result as any).messages ?? []) as Api.TypeMessage[];
+    const entities = new Map<string, Api.User | Api.Chat | Api.Channel>();
+    for (const c of ((result as any).chats ?? []) as (Api.Chat | Api.Channel)[]) {
+      entities.set(entityToChatId(c), c);
+    }
+    for (const u of ((result as any).users ?? []) as Api.User[]) {
+      entities.set(entityToChatId(u), u);
+    }
+
+    // The server title-matches chats and returns them in the entity list even
+    // when none of the matched messages belong to them (e.g. a group the user
+    // left) -- surface those first, they are what the user is looking for
+    const attemptLc = attempt.toLowerCase();
+    for (const [chatId, ent] of entities) {
+      if (seen.has(chatId) || ent instanceof Api.User) continue;
+      if ((ent as any).deactivated || (ent as any).forbidden) continue;
+      const item = entityToDialogItem(ent);
+      const name = item.name.toLowerCase();
+      if (name.includes(q) || name.includes(attemptLc)) {
+        seen.add(chatId);
+        entry.entityCache.set(chatId, ent);
+        titleMatches.push(item);
+      }
+    }
+
+    for (const m of msgs) {
+      if (!(m instanceof Api.Message) || !m.peerId) continue;
+      const chatId = peerToChatId(m.peerId);
+      if (seen.has(chatId)) continue;
+      const ent = entities.get(chatId);
+      if (!ent) continue;
+      if ((ent as any).deactivated || (ent as any).forbidden) continue;
+      seen.add(chatId);
+      entry.entityCache.set(chatId, ent);
+      const item = entityToDialogItem(ent);
+      item.lastMessage = {
+        text: m.message ?? "",
+        date: m.date,
+        fromMe: Boolean(m.out),
+      };
+      // A mere mention in some message text ranks last
+      messageMatches.push(item);
+    }
+
+    if (msgs.length > 0 || titleMatches.length > 0) break;
+  }
+
+  // 3. Global search for public chats/users by username
+  for (const attempt of attempts) {
+    let result: Api.contacts.TypeFound;
+    try {
+      result = await entry.client.invoke(
+        new Api.contacts.Search({ q: attempt, limit: 20 }),
+      );
+    } catch {
+      continue; // e.g. QUERY_TOO_SHORT on a shortened attempt
+    }
+
+    let found = false;
+
+    for (const u of result.users as Api.User[]) {
+      if (u.deleted) continue;
+      found = true;
+      const chatId = entityToChatId(u);
+      if (seen.has(chatId)) continue;
+      seen.add(chatId);
+      entry.entityCache.set(chatId, u);
+      globalMatches.push(entityToDialogItem(u));
+    }
+
+    for (const c of result.chats as (Api.Chat | Api.Channel)[]) {
+      if ((c as any).deactivated || (c as any).forbidden) continue;
+      found = true;
+      const chatId = entityToChatId(c as Api.Chat | Api.Channel);
+      if (seen.has(chatId)) continue;
+      seen.add(chatId);
+      entry.entityCache.set(chatId, c as Api.Chat | Api.Channel);
+      globalMatches.push(entityToDialogItem(c as Api.Chat | Api.Channel));
+    }
+
+    if (found) break;
+  }
+
+  return [
+    ...dialogMatches,
+    ...titleMatches,
+    ...globalMatches,
+    ...messageMatches,
+  ];
 }
 
 export async function fetchPhoto(
@@ -960,6 +1239,7 @@ export type TgProfileInfo = {
   memberCount: number | null;
   firstName: string | null;
   lastName: string | null;
+  blocked: boolean | null;
 };
 
 export async function getEntityDetails(
@@ -983,6 +1263,7 @@ export async function getEntityDetails(
 
   let bio: string | null = null;
   let memberCount: number | null = null;
+  let blocked: boolean | null = null;
 
   try {
     if (entity instanceof Api.User) {
@@ -990,6 +1271,7 @@ export async function getEntityDetails(
         new Api.users.GetFullUser({ id: entity as any }),
       );
       bio = (full as any).fullUser?.about ?? null;
+      blocked = Boolean((full as any).fullUser?.blocked);
     } else if (entity instanceof Api.Channel) {
       const full = await entry.client.invoke(
         new Api.channels.GetFullChannel({ channel: entity as any }),
@@ -1019,7 +1301,169 @@ export async function getEntityDetails(
     memberCount,
     firstName: isUser ? ((entity as Api.User).firstName ?? null) : null,
     lastName: isUser ? ((entity as Api.User).lastName ?? null) : null,
+    blocked,
   };
+}
+
+// Block or unblock a user (contacts.Block / contacts.Unblock)
+export async function setBlocked(
+  entry: LiveEntry,
+  chatId: string,
+  blocked: boolean,
+): Promise<void> {
+  await ensureEntityCached(entry, chatId);
+  const entity = entry.entityCache.get(chatId);
+  if (!(entity instanceof Api.User))
+    throw new Error("Only users and bots can be blocked");
+  if (blocked) {
+    await entry.client.invoke(new Api.contacts.Block({ id: entity as any }));
+  } else {
+    await entry.client.invoke(new Api.contacts.Unblock({ id: entity as any }));
+  }
+}
+
+export type TgReportReason =
+  | "spam"
+  | "violence"
+  | "pornography"
+  | "childAbuse"
+  | "illegalDrugs"
+  | "personalDetails"
+  | "fake"
+  | "copyright"
+  | "other";
+
+const REPORT_REASON_MAP: Record<TgReportReason, () => Api.TypeReportReason> = {
+  spam: () => new Api.InputReportReasonSpam(),
+  violence: () => new Api.InputReportReasonViolence(),
+  pornography: () => new Api.InputReportReasonPornography(),
+  childAbuse: () => new Api.InputReportReasonChildAbuse(),
+  illegalDrugs: () => new Api.InputReportReasonIllegalDrugs(),
+  personalDetails: () => new Api.InputReportReasonPersonalDetails(),
+  fake: () => new Api.InputReportReasonFake(),
+  copyright: () => new Api.InputReportReasonCopyright(),
+  other: () => new Api.InputReportReasonOther(),
+};
+
+// Report a user, group or channel to Telegram
+export async function reportPeer(
+  entry: LiveEntry,
+  chatId: string,
+  reason: TgReportReason,
+  comment = "",
+): Promise<void> {
+  await ensureEntityCached(entry, chatId);
+  const entity = entry.entityCache.get(chatId);
+  if (!entity) throw new Error("Chat not found");
+  const makeReason = REPORT_REASON_MAP[reason];
+  if (!makeReason) throw new Error("Unknown report reason");
+  await entry.client.invoke(
+    new Api.account.ReportPeer({
+      peer: entity as any,
+      reason: makeReason(),
+      message: comment,
+    }),
+  );
+}
+
+// Delete chat history. revoke=true also removes it for the other side
+// (private chats only). Channels/supergroups clear the local copy only.
+export async function deleteHistory(
+  entry: LiveEntry,
+  chatId: string,
+  revoke: boolean,
+): Promise<void> {
+  await ensureEntityCached(entry, chatId);
+  const entity = entry.entityCache.get(chatId);
+  if (!entity) throw new Error("Chat not found");
+  if (entity instanceof Api.Channel) {
+    await entry.client.invoke(
+      new Api.channels.DeleteHistory({ channel: entity as any, maxId: 0 }),
+    );
+  } else {
+    await entry.client.invoke(
+      new Api.messages.DeleteHistory({
+        peer: entity as any,
+        maxId: 0,
+        revoke,
+      }),
+    );
+  }
+}
+
+// Delete specific messages. revoke=true deletes for everyone
+// (channel/supergroup deletes are always for everyone).
+export async function deleteMessages(
+  entry: LiveEntry,
+  chatId: string,
+  ids: number[],
+  revoke: boolean,
+): Promise<void> {
+  await ensureEntityCached(entry, chatId);
+  const entity = entry.entityCache.get(chatId);
+  if (!entity) throw new Error("Chat not found");
+  if (entity instanceof Api.Channel) {
+    await entry.client.invoke(
+      new Api.channels.DeleteMessages({ channel: entity as any, id: ids }),
+    );
+  } else {
+    await entry.client.invoke(
+      new Api.messages.DeleteMessages({ id: ids, revoke }),
+    );
+  }
+}
+
+// Edit the text of an own message
+export async function editMessage(
+  entry: LiveEntry,
+  chatId: string,
+  msgId: number,
+  text: string,
+): Promise<void> {
+  await ensureEntityCached(entry, chatId);
+  const entity = entry.entityCache.get(chatId);
+  if (!entity) throw new Error("Chat not found");
+  await entry.client.invoke(
+    new Api.messages.EditMessage({
+      peer: entity as any,
+      id: msgId,
+      message: text,
+    }),
+  );
+}
+
+// Broadcast that this account is typing in a chat (auto-expires after ~6s)
+export async function sendTyping(
+  entry: LiveEntry,
+  chatId: string,
+): Promise<void> {
+  await ensureEntityCached(entry, chatId);
+  const entity = entry.entityCache.get(chatId);
+  if (!entity) throw new Error("Chat not found");
+  await entry.client.invoke(
+    new Api.messages.SetTyping({
+      peer: entity as any,
+      action: new Api.SendMessageTypingAction(),
+    }),
+  );
+}
+
+// Forward messages to another chat
+export async function forwardMessages(
+  entry: LiveEntry,
+  fromChatId: string,
+  toChatId: string,
+  ids: number[],
+): Promise<void> {
+  await ensureEntityCached(entry, fromChatId);
+  await ensureEntityCached(entry, toChatId);
+  const fromEntity = entry.entityCache.get(fromChatId);
+  const toEntity = entry.entityCache.get(toChatId);
+  if (!fromEntity || !toEntity) throw new Error("Chat not found");
+  await entry.client.forwardMessages(toEntity, {
+    messages: ids,
+    fromPeer: fromEntity,
+  });
 }
 
 export type TgFolderItem = {
@@ -1451,6 +1895,30 @@ export async function startBot(
   };
 }
 
+/**
+ * Parses a t.me/BotName[/AppShortName]?startapp=PARAM mini app link.
+ * The startapp value is percent-decoded and stripped of base64 padding:
+ * Telegram only accepts [A-Za-z0-9_-] in start_param, so raw links carrying
+ * %3D-encoded padding fail with START_PARAM_INVALID (issue seen with
+ * telegram.me/.../panel?startapp=...%3D%3D).
+ */
+export function parseMiniAppLink(
+  tmeOrUrl: string,
+): { botUsername: string; appShortName?: string; startParam: string } | null {
+  const m = tmeOrUrl.match(
+    /t(?:elegram)?\.me\/([A-Za-z]\w+)(?:\/([A-Za-z]\w+))?\?startapp=([^&\s]+)/i,
+  );
+  if (!m) return null;
+  let startParam = m[3];
+  try {
+    startParam = decodeURIComponent(startParam);
+  } catch {
+    // Malformed escape sequence -- keep the raw value
+  }
+  startParam = startParam.replace(/=+$/, "");
+  return { botUsername: m[1], appShortName: m[2], startParam };
+}
+
 // Resolves a mini app URL to an authenticated web app URL.
 // Handles two cases:
 //   - t.me/BotName?startapp=HASH            -- uses RequestMainWebView
@@ -1462,12 +1930,9 @@ export async function resolveWebApp(
   botChatId?: string, // for direct URLs we need to know which bot owns the app
   peerChatId?: string, // chat where the webview button lives (for RequestWebView)
 ): Promise<{ url: string; resolved: boolean }> {
-  // t.me/BotName[/AppShortName]?startapp=HASH pattern
-  const startappM = tmeOrUrl.match(
-    /t(?:elegram)?\.me\/([A-Za-z]\w+)(?:\/([A-Za-z]\w+))?\?startapp=([^&\s]+)/i,
-  );
-  if (startappM) {
-    const [, botUsername, appShortName, startParam] = startappM;
+  const miniApp = parseMiniAppLink(tmeOrUrl);
+  if (miniApp) {
+    const { botUsername, appShortName, startParam } = miniApp;
     const bot = (await entry.client.getEntity(botUsername)) as Api.User;
     entry.entityCache.set(entityToChatId(bot), bot);
 
@@ -1567,6 +2032,152 @@ export async function checkMembership(
   return false;
 }
 
+// Matches t.me/+HASH and t.me/joinchat/HASH invite links
+const INVITE_HASH_RE = /t\.me\/(?:\+|joinchat\/)([A-Za-z0-9_-]{5,})/g;
+
+function extractInviteHashes(msgs: Api.TypeMessage[]): string[] {
+  const hashes: string[] = [];
+  const seen = new Set<string>();
+  for (const m of msgs) {
+    if (!(m instanceof Api.Message)) continue;
+    // Links can sit in plain text, behind text entities, or on inline buttons
+    const sources: string[] = [m.message ?? ""];
+    for (const ent of (m.entities ?? []) as any[]) {
+      if (typeof ent?.url === "string") sources.push(ent.url);
+    }
+    for (const row of ((m as any).replyMarkup?.rows ?? []) as any[]) {
+      for (const btn of (row?.buttons ?? []) as any[]) {
+        if (typeof btn?.url === "string") sources.push(btn.url);
+      }
+    }
+    for (const src of sources) {
+      for (const match of src.matchAll(INVITE_HASH_RE)) {
+        if (!seen.has(match[1])) {
+          seen.add(match[1]);
+          hashes.push(match[1]);
+        }
+      }
+    }
+  }
+  return hashes;
+}
+
+// True when a message visibly references the channel (forward header, reply,
+// or being its peer) -- the references InputChannelFromMessage accepts
+function referencesChannel(m: Api.Message, channelId: any): boolean {
+  const id = channelId.toString();
+  const refs = [
+    (m.peerId as any)?.channelId,
+    (m.fwdFrom?.fromId as any)?.channelId,
+    ((m.fwdFrom as any)?.savedFromPeer as any)?.channelId,
+    ((m.replyTo as any)?.replyToPeerId as any)?.channelId,
+  ];
+  return refs.some((r) => r != null && r.toString() === id);
+}
+
+// Private chats reject channels.JoinChannel on a min entity (as cached from
+// search results). Recover the way official clients can: derive a full channel
+// reference from a message that mentions it (no invite needed), or find invite
+// links in messages that mention the chat's title, verify each candidate
+// resolves to this chat, then join through the newest valid one.
+async function joinPrivateChannel(
+  entry: LiveEntry,
+  entity: Api.Channel,
+): Promise<JoinResult | null> {
+  const title = entityName(entity);
+  if (!title) return null;
+  const targetChatId = entityToChatId(entity);
+
+  let msgs: Api.TypeMessage[] = [];
+  try {
+    const result = await entry.client.invoke(
+      new Api.messages.SearchGlobal({
+        q: title,
+        filter: new Api.InputMessagesFilterEmpty(),
+        minDate: 0,
+        maxDate: 0,
+        offsetRate: 0,
+        offsetPeer: new Api.InputPeerEmpty(),
+        offsetId: 0,
+        limit: 50,
+      }),
+    );
+    msgs = ((result as any).messages ?? []) as Api.TypeMessage[];
+  } catch {
+    /* fall through with no messages */
+  }
+
+  // Strategy 1: join via a message reference -- works without any invite link
+  let fromMsgAttempts = 0;
+  for (const m of msgs) {
+    if (fromMsgAttempts >= 5) break;
+    if (!(m instanceof Api.Message) || !m.peerId) continue;
+    if (!referencesChannel(m, entity.id)) continue;
+    fromMsgAttempts++;
+    try {
+      const peer = await entry.client.getInputEntity(m.peerId);
+      await entry.client.invoke(
+        new Api.channels.JoinChannel({
+          channel: new Api.InputChannelFromMessage({
+            peer,
+            msgId: m.id,
+            channelId: entity.id,
+          }),
+        }),
+      );
+      (entity as any).left = false;
+      return { joined: true };
+    } catch (err: any) {
+      if (err?.message?.includes("INVITE_REQUEST_SENT")) {
+        return { requestSent: true };
+      }
+      if (err?.message?.includes("FLOOD")) throw err;
+      continue;
+    }
+  }
+
+  // Strategy 2: invite links found in the same messages
+  const hashes = extractInviteHashes(msgs);
+
+  // Cap the invite checks -- CheckChatInvite flood-limits aggressively
+  for (const hash of hashes.slice(0, 6)) {
+    let preview: TgInvitePreview;
+    try {
+      preview = await checkInvite(entry, hash);
+    } catch (err: any) {
+      if (err?.message?.includes("FLOOD")) throw err;
+      continue; // expired or revoked link
+    }
+
+    if (preview.alreadyJoined) {
+      if (preview.chatId === targetChatId) {
+        (entity as any).left = false;
+        return { joined: true };
+      }
+      continue;
+    }
+    // ChatInvite previews carry no chat id -- match on the exact title
+    if (preview.title !== title) continue;
+
+    try {
+      await joinInvite(entry, hash);
+      (entity as any).left = false;
+      return { joined: true };
+    } catch (err: any) {
+      if (err?.message?.includes("INVITE_REQUEST_SENT")) {
+        return { requestSent: true };
+      }
+      if (err?.message?.includes("USER_ALREADY_PARTICIPANT")) {
+        (entity as any).left = false;
+        return { joined: true };
+      }
+      if (err?.message?.includes("FLOOD")) throw err;
+      continue;
+    }
+  }
+  return null;
+}
+
 export async function joinChannel(
   entry: LiveEntry,
   chatId: string,
@@ -1586,6 +2197,11 @@ export async function joinChannel(
     // INVITE_REQUEST_SENT = group requires admin approval; request was submitted
     if (err?.message?.includes("INVITE_REQUEST_SENT")) {
       return { requestSent: true };
+    }
+    // Private chat -- recover via a message reference or a discovered invite
+    if (err?.message?.includes("CHANNEL_PRIVATE")) {
+      const recovered = await joinPrivateChannel(entry, entity);
+      if (recovered) return recovered;
     }
     throw err;
   }
@@ -1748,6 +2364,16 @@ export function subscribeToDialogs(
   return () => entry.dialogSubscribers.delete(handler);
 }
 
+export function subscribeToTyping(
+  accountId: number,
+  handler: (event: TgTypingEvent) => void,
+): () => void {
+  const entry = liveClients.get(accountId);
+  if (!entry) return () => {};
+  entry.typingSubscribers.add(handler);
+  return () => entry.typingSubscribers.delete(handler);
+}
+
 // --- Message cache helpers ---
 
 const MSG_CACHE_MAX = 500;
@@ -1791,6 +2417,39 @@ export function cacheMessages(
       SELECT msg_id FROM tg_message_cache WHERE account_id = ? AND chat_id = ? ORDER BY msg_id DESC LIMIT ?
     )`,
   ).run(accountId, chatId, accountId, chatId, MSG_CACHE_MAX);
+}
+
+// Rewrite the cached payload text after an edit so reloads show the new text
+export function updateCachedMessageText(
+  accountId: number,
+  chatId: string,
+  msgId: number,
+  text: string,
+): void {
+  const row = db
+    .prepare(
+      "SELECT payload FROM tg_message_cache WHERE account_id = ? AND chat_id = ? AND msg_id = ?",
+    )
+    .get(accountId, chatId, msgId) as { payload: string } | undefined;
+  if (!row) return;
+  const payload = JSON.parse(row.payload) as TgMsgPayload;
+  payload.text = text;
+  payload.html = entitiesToHtml(text, undefined);
+  db.prepare(
+    "UPDATE tg_message_cache SET payload = ? WHERE account_id = ? AND chat_id = ? AND msg_id = ?",
+  ).run(JSON.stringify(payload), accountId, chatId, msgId);
+}
+
+export function removeCachedMessages(
+  accountId: number,
+  chatId: string,
+  ids: number[],
+): void {
+  if (!ids.length) return;
+  const placeholders = ids.map(() => "?").join(",");
+  db.prepare(
+    `DELETE FROM tg_message_cache WHERE account_id = ? AND chat_id = ? AND msg_id IN (${placeholders})`,
+  ).run(accountId, chatId, ...ids);
 }
 
 export function clearCachedMessages(accountId: number, chatId: string): void {
@@ -1856,6 +2515,49 @@ export function cacheDialogs(accountId: number, dialogs: TgDialogItem[]): void {
   })();
 }
 
+// Drop everything cached for an account: SQLite message/dialog caches and the
+// live client's in-memory entity, avatar and read-state caches. All of it is
+// refetched from Telegram on demand.
+export function clearAccountCache(accountId: number): void {
+  db.prepare("DELETE FROM tg_message_cache WHERE account_id = ?").run(
+    accountId,
+  );
+  db.prepare("DELETE FROM tg_dialog_cache WHERE account_id = ?").run(
+    accountId,
+  );
+  const entry = liveClients.get(accountId);
+  if (entry) {
+    entry.entityCache.clear();
+    entry.avatarCache.clear();
+    entry.readOutboxCache.clear();
+  }
+}
+
+export function removeCachedDialog(accountId: number, chatId: string): void {
+  db.prepare(
+    "DELETE FROM tg_dialog_cache WHERE account_id = ? AND chat_id = ?",
+  ).run(accountId, chatId);
+}
+
+// Removes cached rows for chats no longer in a full dialog load
+// (deleted chats, left groups). Upserts alone never drop them.
+function pruneCachedDialogs(
+  accountId: number,
+  dialogs: TgDialogItem[],
+): void {
+  if (!dialogs.length) return;
+  const keep = new Set(dialogs.map((d) => d.chatId));
+  const rows = db
+    .prepare("SELECT chat_id FROM tg_dialog_cache WHERE account_id = ?")
+    .all(accountId) as { chat_id: string }[];
+  const del = db.prepare(
+    "DELETE FROM tg_dialog_cache WHERE account_id = ? AND chat_id = ?",
+  );
+  for (const r of rows) {
+    if (!keep.has(r.chat_id)) del.run(accountId, r.chat_id);
+  }
+}
+
 export async function syncDialogsInBackground(
   accountId: number,
 ): Promise<void> {
@@ -1863,7 +2565,137 @@ export async function syncDialogsInBackground(
   if (!entry) return;
   try {
     const dialogs = await loadDialogs(entry);
+    pruneCachedDialogs(accountId, dialogs);
     cacheDialogs(accountId, dialogs);
     entry.dialogSubscribers.forEach((sub) => sub(dialogs));
   } catch {}
+}
+
+export type TgCleanResult = {
+  left: number;
+  deleted: number;
+  contacts: number;
+  folders: number;
+  failed: { chatId: string; name: string; error: string }[];
+};
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Bulk-clean an account: leave every group and channel, delete every private
+// chat for both sides, remove all contacts and all custom chat folders.
+// Saved Messages is kept. Destructive and irreversible -- the caller is
+// responsible for confirming with the user first.
+// Dialog loads are capped, so process in rounds until nothing is pending.
+export async function cleanAccount(
+  entry: LiveEntry,
+  accountId: number,
+): Promise<TgCleanResult> {
+  const result: TgCleanResult = {
+    left: 0,
+    deleted: 0,
+    contacts: 0,
+    folders: 0,
+    failed: [],
+  };
+  const failedIds = new Set<string>();
+
+  for (let round = 0; round < 10; round++) {
+    const dialogs = await loadDialogs(entry);
+    const pending = dialogs.filter((d) => {
+      if (failedIds.has(d.chatId)) return false;
+      const entity = entry.entityCache.get(d.chatId);
+      if (entity instanceof Api.User) {
+        // Never wipe the user's own Saved Messages
+        if (entity.self) return false;
+        // Keep Telegram service notifications (u777000) and SpamBot --
+        // both are needed for account status and appeal messages
+        if (entity.id.toString() === "777000") return false;
+        if ((entity.username ?? "").toLowerCase() === "spambot") return false;
+      }
+      return true;
+    });
+    if (!pending.length) break;
+
+    for (const d of pending) {
+      try {
+        if (d.type === "group" || d.type === "channel") {
+          await leaveChat(entry, d.chatId);
+          // Leaving does not always drop the dialog -- clear the leftover copy
+          try {
+            await deleteHistory(entry, d.chatId, false);
+          } catch {}
+          result.left++;
+        } else {
+          await deleteHistory(entry, d.chatId, true);
+          result.deleted++;
+        }
+        removeCachedDialog(accountId, d.chatId);
+        clearCachedMessages(accountId, d.chatId);
+        // Pace the calls to stay clear of Telegram flood limits
+        await sleep(250);
+      } catch (err: any) {
+        failedIds.add(d.chatId);
+        result.failed.push({
+          chatId: d.chatId,
+          name: d.name,
+          error: err?.message ?? String(err),
+        });
+      }
+    }
+  }
+
+  // Remove all custom chat folders (the default "All chats" view has no id).
+  // UpdateDialogFilter without a filter payload deletes the folder.
+  try {
+    const raw = await entry.client.invoke(new Api.messages.GetDialogFilters());
+    const filters: any[] = Array.isArray(raw)
+      ? raw
+      : ((raw as any)?.filters ?? []);
+    for (const f of filters) {
+      if (!f.id) continue;
+      await entry.client.invoke(
+        new Api.messages.UpdateDialogFilter({ id: f.id }),
+      );
+      result.folders++;
+      await sleep(250);
+    }
+  } catch (err: any) {
+    result.failed.push({
+      chatId: "folders",
+      name: "Folders",
+      error: err?.message ?? String(err),
+    });
+  }
+
+  // Remove all contacts, deleted accounts included
+  try {
+    const res = await entry.client.invoke(
+      new Api.contacts.GetContacts({ hash: BigInt(0) as any }),
+    );
+    if ("users" in res) {
+      const ids = (res.users as Api.User[]).map(
+        (u) =>
+          new Api.InputUser({
+            userId: u.id,
+            accessHash: u.accessHash ?? (BigInt(0) as any),
+          }),
+      );
+      for (let i = 0; i < ids.length; i += 100) {
+        const batch = ids.slice(i, i + 100);
+        await entry.client.invoke(
+          new Api.contacts.DeleteContacts({ id: batch }),
+        );
+        result.contacts += batch.length;
+        await sleep(250);
+      }
+    }
+  } catch (err: any) {
+    result.failed.push({
+      chatId: "contacts",
+      name: "Contacts",
+      error: err?.message ?? String(err),
+    });
+  }
+
+  return result;
 }

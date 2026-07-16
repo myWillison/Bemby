@@ -4,11 +4,12 @@
 const { mockRun, mockAll, mockPrepare, mockPurge, mockRefresh } = vi.hoisted(() => {
   const mockRun = vi.fn();
   const mockAll = vi.fn().mockReturnValue([]);
-  const mockPrepare = vi.fn().mockReturnValue({
+  const mockPrepare = vi.fn((sql: string) => ({
     run: mockRun,
     all: mockAll,
-    get: vi.fn(),
-  });
+    // aiKeyConfigured counts ai_suppliers rows and reads `.n` off the result
+    get: vi.fn().mockReturnValue(sql.includes('COUNT(*) AS n') ? { n: 0 } : undefined),
+  }));
   return {
     mockRun,
     mockAll,

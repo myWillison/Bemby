@@ -1,6 +1,7 @@
 import { Router } from "express";
 import crypto from "crypto";
 import { db, getDefaultTgApiCredentials } from "../db/database";
+import { parsePaging, parseSort, textParam, escapeLike } from "./list-query";
 import {
   requestCode,
   submitCode,
@@ -188,11 +189,68 @@ function saveTgMeta(
   ).run(displayName || null, username || null, id);
 }
 
+const ACCOUNT_SORTS: Record<string, string> = {
+  order: "sort_order, id",
+  name: "name COLLATE NOCASE",
+  phone: "phone_number",
+  status: "auth_status",
+  created: "created_at",
+};
+
 router.get("/", (req, res) => {
+  const query = req.query as Record<string, unknown>;
+  const paging = parsePaging(query);
+  const search = textParam(query.search);
+  const authStatus = textParam(query.authStatus);
+  const disabled = textParam(query.disabled);
+
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (search) {
+    conditions.push(`(
+      name LIKE ? ESCAPE '\\' OR phone_number LIKE ? ESCAPE '\\'
+      OR COALESCE(tg_display_name, '') LIKE ? ESCAPE '\\'
+      OR COALESCE(tg_username, '') LIKE ? ESCAPE '\\'
+      OR COALESCE(notes, '') LIKE ? ESCAPE '\\'
+    )`);
+    const like = `%${escapeLike(search)}%`;
+    params.push(like, like, like, like, like);
+  }
+  if (authStatus) {
+    conditions.push("auth_status = ?");
+    params.push(authStatus);
+  }
+  if (disabled === "1" || disabled === "0") {
+    conditions.push("COALESCE(disabled, 0) = ?");
+    params.push(Number(disabled));
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const orderClause = parseSort(query, ACCOUNT_SORTS, ACCOUNT_SORTS.order);
+
+  if (!paging) {
+    const rows = db
+      .prepare(`SELECT * FROM tg_accounts ${where} ORDER BY ${orderClause}`)
+      .all(...params) as AccountRow[];
+    res.json(rows.map(toJson));
+    return;
+  }
+
+  const totalRow = db
+    .prepare(`SELECT COUNT(*) AS total FROM tg_accounts ${where}`)
+    .get(...params) as { total: number };
+
   const rows = db
-    .prepare("SELECT * FROM tg_accounts ORDER BY sort_order, id")
-    .all() as AccountRow[];
-  res.json(rows.map(toJson));
+    .prepare(`SELECT * FROM tg_accounts ${where} ORDER BY ${orderClause} LIMIT ? OFFSET ?`)
+    .all(...params, paging.limit, paging.offset) as AccountRow[];
+
+  res.json({
+    items: rows.map(toJson),
+    total: totalRow.total,
+    page: paging.page,
+    pageSize: paging.pageSize,
+  });
 });
 
 router.post("/", (req, res) => {
