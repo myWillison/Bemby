@@ -1,0 +1,26 @@
+name: Sync Fork
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # 每天北京时间早上 8 点自动运行 (UTC 0:00)
+  workflow_dispatch: # 允许手动在 Actions 页面触发同步
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }} # 使用默认的 Token
+          # 如果你的仓库有自定义修改，需要保留，建议查阅相关 action 的配置
+
+      - name: Sync upstream changes
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
+        with:
+          target_sync_branch: main # 你的 Fork 仓库要同步的分支
+          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
+          upstream_sync_branch: main # 原仓库（源头）的分支名
+          upstream_sync_repo: owner/repo # 原仓库的 GitHub 路径 (例如: vuejs/core)
+          
+          # test_mode: true # 如果想先测试一下，可以开启这行
