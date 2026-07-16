@@ -79,6 +79,8 @@ type LiveEntry = {
   typingSubscribers: Set<(event: TgTypingEvent) => void>;
   // Full dialog list cached briefly so per-keystroke searches don't refetch
   dialogSearchCache?: { ts: number; items: TgDialogItem[] };
+  // Last time this entry was requested or had subscribers -- drives idle eviction
+  lastActiveAt: number;
 };
 
 export type TgTypingEvent = {
@@ -89,6 +91,56 @@ export type TgTypingEvent = {
 };
 
 const liveClients = new Map<number, LiveEntry>();
+
+// --- Idle eviction and cache bounds (issue #14) ---
+// A connected client receives every update for its account and GramJS's
+// internal entity cache grows for as long as the client lives, so memory
+// climbs steadily on long-running deployments. Evict clients nobody is
+// watching and keep the per-entry caches bounded.
+
+const IDLE_DISCONNECT_MS = 30 * 60_000;
+const SWEEP_INTERVAL_MS = 5 * 60_000;
+const ENTITY_CACHE_MAX = 1_000;
+const AVATAR_CACHE_MAX = 300;
+const READ_OUTBOX_CACHE_MAX = 1_000;
+
+function hasSubscribers(entry: LiveEntry): boolean {
+  return (
+    entry.subscribers.size > 0 ||
+    entry.dialogSubscribers.size > 0 ||
+    entry.readSubscribers.size > 0 ||
+    entry.typingSubscribers.size > 0
+  );
+}
+
+// Maps iterate in insertion order, so this drops the oldest entries first
+function trimCache(cache: Map<string, unknown>, max: number): void {
+  for (const key of cache.keys()) {
+    if (cache.size <= max) return;
+    cache.delete(key);
+  }
+}
+
+export function sweepLiveClients(now = Date.now()): void {
+  for (const [accountId, entry] of liveClients) {
+    if (hasSubscribers(entry)) entry.lastActiveAt = now;
+
+    if (now - entry.lastActiveAt >= IDLE_DISCONNECT_MS) {
+      liveClients.delete(accountId);
+      // destroy() tears down the update loop and senders; disconnect() alone
+      // keeps the client reusable and holding its internal caches
+      entry.client.destroy().catch(() => {});
+      continue;
+    }
+
+    trimCache(entry.entityCache, ENTITY_CACHE_MAX);
+    trimCache(entry.avatarCache, AVATAR_CACHE_MAX);
+    trimCache(entry.readOutboxCache, READ_OUTBOX_CACHE_MAX);
+  }
+}
+
+// unref() so the sweep never keeps the process (or test runner) alive
+setInterval(() => sweepLiveClients(), SWEEP_INTERVAL_MS).unref();
 
 type AccountRow = {
   api_id: number | null;
@@ -312,7 +364,8 @@ export async function reconnectClient(accountId: number): Promise<void> {
   const entry = liveClients.get(accountId);
   if (entry) {
     try {
-      await entry.client.disconnect();
+      // destroy, not disconnect -- the old client is discarded for good
+      await entry.client.destroy();
     } catch {
       /* ignore */
     }
@@ -340,7 +393,7 @@ export function markSessionExpired(accountId: number): void {
   ).run(accountId);
   const entry = liveClients.get(accountId);
   if (entry) {
-    entry.client.disconnect().catch(() => {});
+    entry.client.destroy().catch(() => {});
     liveClients.delete(accountId);
   }
 }
@@ -348,6 +401,7 @@ export function markSessionExpired(accountId: number): void {
 export async function getLiveClient(accountId: number): Promise<LiveEntry> {
   let entry = liveClients.get(accountId);
   if (entry) {
+    entry.lastActiveAt = Date.now();
     if (!entry.client.connected) await entry.client.connect();
     return entry;
   }
@@ -410,6 +464,7 @@ export async function getLiveClient(accountId: number): Promise<LiveEntry> {
     readOutboxCache: new Map(),
     readSubscribers: new Set(),
     typingSubscribers: new Set(),
+    lastActiveAt: Date.now(),
   };
   liveClients.set(accountId, entry);
 

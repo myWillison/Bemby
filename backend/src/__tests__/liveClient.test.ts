@@ -35,6 +35,7 @@ const {
 
   const mockClientInstance = {
     connect:         vi.fn().mockResolvedValue(undefined),
+    destroy:         vi.fn().mockResolvedValue(undefined),
     connected:       true,
     addEventHandler: mockAddEventHandler,
     getDialogs:      mockGetDialogs,
@@ -136,6 +137,7 @@ import {
   searchPeers,
   joinChannel,
   subscribeToMessages,
+  sweepLiveClients,
   parseMiniAppLink,
 } from '../tg/liveClient';
 import { db } from '../db/database';
@@ -786,5 +788,75 @@ describe('parseMiniAppLink', () => {
   it('returns null for non-mini-app links', () => {
     expect(parseMiniAppLink('https://t.me/somebot?start=abc')).toBeNull();
     expect(parseMiniAppLink('https://example.com/?startapp=abc')).toBeNull();
+  });
+});
+
+// ---- sweepLiveClients (issue #14: memory growth) ----------------------------
+
+describe('sweepLiveClients', () => {
+  const IDLE_MS = 30 * 60_000;
+
+  // The liveClients map is module-level, so entries from earlier tests leak
+  // into these ones. Evict every idle leftover, then reset the counters the
+  // assertions below rely on.
+  beforeEach(() => {
+    sweepLiveClients(Date.now() + IDLE_MS * 1000);
+    mockClientInstance.destroy.mockClear();
+    MockTelegramClient.mockClear();
+  });
+
+  it('destroys and evicts a client left idle past the threshold', async () => {
+    await getLiveClient(400);
+
+    sweepLiveClients(Date.now() + IDLE_MS + 1);
+
+    expect(mockClientInstance.destroy).toHaveBeenCalledTimes(1);
+    // Next request builds a fresh client instead of reusing the evicted entry
+    await getLiveClient(400);
+    expect(MockTelegramClient).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a client alive while it has subscribers', async () => {
+    await getLiveClient(401);
+    const unsubscribe = subscribeToMessages(401, () => {});
+
+    sweepLiveClients(Date.now() + IDLE_MS * 10);
+
+    expect(mockClientInstance.destroy).not.toHaveBeenCalled();
+    await getLiveClient(401);
+    expect(MockTelegramClient).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it('evicts once the last subscriber is gone and the idle window elapses', async () => {
+    await getLiveClient(402);
+    const unsubscribe = subscribeToMessages(402, () => {});
+
+    // Subscribed sweep refreshes the idle window rather than evicting
+    const later = Date.now() + IDLE_MS * 10;
+    sweepLiveClients(later);
+    unsubscribe();
+
+    sweepLiveClients(later + IDLE_MS - 1);
+    expect(mockClientInstance.destroy).not.toHaveBeenCalled();
+
+    sweepLiveClients(later + IDLE_MS + 1);
+    expect(mockClientInstance.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('trims oversized caches on a live entry without evicting it', async () => {
+    const entry = await getLiveClient(403);
+    subscribeToMessages(403, () => {});
+    for (let i = 0; i < 1200; i++) {
+      entry.entityCache.set(`u${i}`, {} as any);
+    }
+
+    sweepLiveClients(Date.now());
+
+    expect(entry.entityCache.size).toBe(1000);
+    // Oldest insertions are dropped first
+    expect(entry.entityCache.has('u0')).toBe(false);
+    expect(entry.entityCache.has('u1199')).toBe(true);
+    expect(mockClientInstance.destroy).not.toHaveBeenCalled();
   });
 });
