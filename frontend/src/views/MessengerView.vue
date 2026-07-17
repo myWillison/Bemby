@@ -644,7 +644,7 @@
                                 btnLoadingKey === `${msg.id}-${ri}-${bi}`,
                             }"
                             :disabled="
-                              (!btn.data && !btn.url) ||
+                              (!btn.data && !btn.url && !btn.send) ||
                               btnLoadingKey === `${msg.id}-${ri}-${bi}`
                             "
                             @click="clickInlineButton(msg, btn, ri, bi)"
@@ -3322,12 +3322,25 @@ async function clickInlineButton(
     data: string | null;
     url: string | null;
     webApp: boolean;
+    send: boolean;
   },
   ri: number,
   bi: number,
 ) {
   if (!selectedAccountId.value || !activeChatId.value) return;
   const key = `${msg.id}-${ri}-${bi}`;
+  // Reply-keyboard button: send its label back as a normal message
+  if (btn.send && !btn.data && !btn.url) {
+    if (sending.value || !btn.text) return;
+    btnLoadingKey.value = key;
+    try {
+      inputText.value = btn.text;
+      await sendMessage();
+    } finally {
+      btnLoadingKey.value = null;
+    }
+    return;
+  }
   if (btn.url) {
     btnLoadingKey.value = key;
     try {

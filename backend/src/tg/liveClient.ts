@@ -23,6 +23,7 @@ export type TgButton = {
   data: string | null; // base64-encoded callback data
   url: string | null;
   webApp: boolean; // Telegram Mini App button -- must open in a real browser
+  send: boolean; // reply-keyboard button -- clicking sends its text as a message
 };
 
 export type TgMsgPayload = {
@@ -307,8 +308,27 @@ function extractButtons(msg: Api.Message): TgButton[][] | null {
         webApp:
           btn instanceof Api.KeyboardButtonWebView ||
           btn instanceof Api.KeyboardButtonSimpleWebView,
+        send: false,
       })),
     );
+  }
+  // Reply keyboards (e.g. @SpamBot's "This is a mistake"): plain buttons whose
+  // text is sent back as a message when tapped.
+  if (msg.replyMarkup instanceof Api.ReplyKeyboardMarkup) {
+    const rows = msg.replyMarkup.rows.map((row) =>
+      row.buttons.map((btn: any): TgButton => ({
+        text: btn.text ?? "",
+        data: null,
+        url: btn.url ?? null,
+        webApp:
+          btn instanceof Api.KeyboardButtonWebView ||
+          btn instanceof Api.KeyboardButtonSimpleWebView,
+        // Only plain text buttons can be fulfilled by sending their text;
+        // request-phone/location/poll/webview variants can't, so leave them inert.
+        send: btn instanceof Api.KeyboardButton,
+      })),
+    );
+    return rows.length ? rows : null;
   }
   return null;
 }

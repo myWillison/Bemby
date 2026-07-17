@@ -896,6 +896,7 @@ export type TgButton = {
   data: string | null;
   url: string | null;
   webApp: boolean; // Telegram Mini App -- must open in a real browser
+  send: boolean; // reply-keyboard button -- clicking sends its text as a message
 };
 
 export type TgReaction = {
