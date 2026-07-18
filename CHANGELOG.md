@@ -4,6 +4,22 @@ All notable changes to Bemby are documented here.
 
 ---
 
+## v0.9.31
+
+### 中文
+
+**修复**
+- **彻底修复内存持续增长问题（Issue #14）** -- v0.9.30 只处理了常驻的长连接客户端，但每次定时任务运行、任务重试、发送 TG 通知、检查账号状态以及各类认证操作都会临时创建一个 Telegram 客户端，用完后仅调用了 disconnect()。GramJS 的 disconnect() 不会停止客户端内部的心跳循环：该循环会把整个客户端对象永久固定在内存中，并且每 9 秒向一个不再被消费的发送队列追加一条 ping 请求，因此即使系统完全空闲，内存也会随任务运行次数累积而平滑增长。现所有临时客户端在用完后改用 destroy() 彻底销毁并释放内存
+- **修复登录成功后可能因连接清理超时而报错** -- 提交验证码或 2FA 密码成功后，若清理临时连接时 GramJS 抛出超时错误，此前会导致本已成功的登录被误报为失败；现清理错误不再影响登录结果
+
+### English
+
+**Fixes**
+- **Fully fix continued memory growth (issue #14)** -- v0.9.30 only covered the long-lived live clients, but every scheduled job run, retry, TG notification, account status check, and auth operation creates a short-lived Telegram client that was torn down with disconnect() only. GramJS's disconnect() does not stop the client's internal keepalive loop: the loop pins the whole client object in memory forever and appends a ping request every 9 seconds to a send queue nothing drains any more, so memory grew steadily with every job run even while the system was completely idle. All short-lived clients are now torn down with destroy(), fully releasing their memory
+- **Fix a successful login occasionally reported as failed** -- after a successful code or 2FA submission, a GramJS timeout thrown while cleaning up the temporary connection could fail the already-successful login; cleanup errors no longer affect the login result
+
+---
+
 ## v0.9.30
 
 ### 中文
