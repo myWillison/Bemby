@@ -30,12 +30,22 @@ import { runEmbywatch } from '../jobs/embywatch';
 
 const baseConfig = { username: 'user', password: 'pass', playDuration: 1 };
 
+// Key-aware settings mock: returns a row only for the given keys, so e.g. the
+// proxies JSON is never misread as a device-name template. `run` covers the
+// device-name persistence path.
+function mockSettings(settings: Record<string, string> = {}) {
+  vi.mocked(db.prepare).mockReturnValue({
+    get: vi.fn((key: string) => (key in settings ? { value: settings[key] } : undefined)),
+    run: vi.fn(),
+  } as any);
+}
+
 // Each test only needs to verify which dispatcher is used on the first request (auth).
 // We let it fail after that -- no need to simulate full playback.
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(db.prepare).mockReturnValue({ get: vi.fn().mockReturnValue(undefined) } as any);
+  mockSettings();
   mockUndiciFetch.mockRejectedValue(
     Object.assign(new Error('net'), { cause: { code: 'ECONNREFUSED' } }),
   );
@@ -54,11 +64,9 @@ describe('embywatch fetch routing', () => {
   });
 
   it('uses ProxyAgent when a proxy URL is resolved', async () => {
-    vi.mocked(db.prepare).mockReturnValue({
-      get: vi.fn().mockReturnValue({
-        value: JSON.stringify([{ id: 'p1', name: 'My Proxy', url: 'http://proxy.local:3128' }]),
-      }),
-    } as any);
+    mockSettings({
+      proxies: JSON.stringify([{ id: 'p1', name: 'My Proxy', url: 'http://proxy.local:3128' }]),
+    });
 
     await expect(runEmbywatch('https://emby.example.com', { ...baseConfig, proxyId: 'p1' }))
       .rejects.toThrow('Cannot reach Emby server');
@@ -69,14 +77,12 @@ describe('embywatch fetch routing', () => {
   });
 
   it('falls back to IPv4 agent when proxyId does not match any stored proxy', async () => {
-    vi.mocked(db.prepare).mockReturnValue({
-      get: vi.fn().mockReturnValue({
-        value: JSON.stringify([{ id: 'other', url: 'http://x' }]),
-      }),
-    } as any);
+    mockSettings({
+      proxies: JSON.stringify([{ id: 'other', url: 'http://x' }]),
+    });
 
     await expect(runEmbywatch('https://emby.example.com', { ...baseConfig, proxyId: 'missing' }))
-      .rejects.toThrow();
+      .rejects.toThrow('Cannot reach Emby server');
 
     expect(MockProxyAgent).not.toHaveBeenCalled();
   });
@@ -87,9 +93,7 @@ describe('embywatch fetch routing', () => {
   });
 
   it('sanitises whitespace in DeviceId but keeps the display device name', async () => {
-    vi.mocked(db.prepare).mockReturnValue({
-      get: vi.fn().mockReturnValue({ value: 'Macbook Pro' }),
-    } as any);
+    mockSettings({ default_device_name: 'Macbook Pro' });
 
     await expect(runEmbywatch('https://emby.example.com', baseConfig)).rejects.toThrow();
 
