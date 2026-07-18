@@ -651,7 +651,9 @@ export async function checkSpamStatus(
 
     return { spamStatus: parseSpamStatus(rawMessage), rawMessage };
   } finally {
-    try { await client.disconnect(); } catch { /* ignore */ }
+    // destroy, not disconnect -- disconnect leaves the GramJS ping loop running,
+    // which pins the client and grows its send queue forever (issue #14)
+    try { await client.destroy(); } catch { /* ignore */ }
   }
 }
 
@@ -839,7 +841,8 @@ export async function runCheckin(
     if (Array.isArray(err?.aiRetries) && err.aiRetries.length) log.aiRetries = err.aiRetries;
     throw new CheckinError(log.error!, log);
   } finally {
-    // GramJS throws TIMEOUT when the update loop stops on disconnect; always swallow here
-    try { await client.disconnect(); } catch { /* ignore */ }
+    // GramJS throws TIMEOUT when the update loop stops; always swallow here.
+    // destroy, not disconnect -- only destroy stops the ping loop (issue #14)
+    try { await client.destroy(); } catch { /* ignore */ }
   }
 }

@@ -755,6 +755,9 @@
                 class="form-input"
                 placeholder="Mac"
               />
+              <p style="font-size: 12px; color: #888; margin: 4px 0 0">
+                {{ t("settings.deviceNameVars") }}
+              </p>
             </div>
           </div>
 

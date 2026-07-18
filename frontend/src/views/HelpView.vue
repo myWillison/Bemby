@@ -28,6 +28,10 @@
             <p class="help-note">
               筛选条件、列排序方式和上次访问的页面在刷新或重新登录后自动恢复。
             </p>
+            <p class="help-note">
+              Telegram 连接按需建立：任务运行结束后立即释放；消息页面的实时连接在闲置
+              30 分钟后自动断开并释放内存，再次使用时自动重连，无需任何操作。
+            </p>
           </template>
           <template v-else>
             <div class="card-section-title">Overview</div>
@@ -58,6 +62,12 @@
             <p class="help-note">
               Filter selections, column sort order, and last visited page are
               automatically restored on refresh or re-login.
+            </p>
+            <p class="help-note">
+              Telegram connections are created on demand: job connections are
+              released as soon as the run finishes, and the Messenger's live
+              connection disconnects automatically after 30 minutes of
+              inactivity to free memory, reconnecting seamlessly on next use.
             </p>
           </template>
         </div>

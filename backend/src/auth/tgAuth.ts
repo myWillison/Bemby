@@ -52,7 +52,7 @@ export async function requestCode(
 ): Promise<SendCodeResult> {
   const existing = pending.get(accountId);
   if (existing) {
-    await existing.client.disconnect().catch(() => undefined);
+    await existing.client.destroy().catch(() => undefined);
     pending.delete(accountId);
   }
 
@@ -110,7 +110,7 @@ export async function submitCode(
     );
 
     const session = entry.client.session.save() as unknown as string;
-    await entry.client.disconnect();
+    await entry.client.destroy().catch(() => undefined);
     pending.delete(accountId);
     return { needsPassword: false, session };
   } catch (err: any) {
@@ -234,7 +234,7 @@ export async function checkAccountStatus(
 
     throw err;
   } finally {
-    await client.disconnect().catch(() => undefined);
+    await client.destroy().catch(() => undefined);
   }
 }
 
@@ -265,7 +265,7 @@ export async function updateTwoFa(
       hint: opts.hint ?? "",
     });
   } finally {
-    await client.disconnect().catch(() => undefined);
+    await client.destroy().catch(() => undefined);
   }
 }
 
@@ -296,7 +296,7 @@ export async function getProfile(
       about: full.fullUser.about ?? "",
     };
   } finally {
-    await client.disconnect().catch(() => undefined);
+    await client.destroy().catch(() => undefined);
   }
 }
 
@@ -326,7 +326,7 @@ export async function updateProfile(
       about: opts.about ?? "",
     };
   } finally {
-    await client.disconnect().catch(() => undefined);
+    await client.destroy().catch(() => undefined);
   }
 }
 
@@ -381,7 +381,7 @@ export async function getSessions(
       region: a.region,
     }));
   } finally {
-    await client.disconnect().catch(() => undefined);
+    await client.destroy().catch(() => undefined);
   }
 }
 
@@ -408,7 +408,7 @@ export async function terminateSession(
     await client.connect();
     await client.invoke(new Api.account.ResetAuthorization({ hash: BigInt(hash) as any }));
   } finally {
-    await client.disconnect().catch(() => undefined);
+    await client.destroy().catch(() => undefined);
   }
 }
 
@@ -434,7 +434,7 @@ export async function terminateOtherSessions(
     await client.connect();
     await client.invoke(new Api.auth.ResetAuthorizations());
   } finally {
-    await client.disconnect().catch(() => undefined);
+    await client.destroy().catch(() => undefined);
   }
 }
 
@@ -455,7 +455,7 @@ export async function submitPassword(
   );
 
   const session = entry.client.session.save() as unknown as string;
-  await entry.client.disconnect();
+  await entry.client.destroy().catch(() => undefined);
   pending.delete(accountId);
   return session;
 }
@@ -504,7 +504,7 @@ export async function getPasswordInfo(
       loginEmailPattern: pwd.loginEmailPattern ?? null,
     };
   } finally {
-    await client.disconnect().catch(() => undefined);
+    await client.destroy().catch(() => undefined);
   }
 }
 
@@ -540,7 +540,7 @@ export async function sendLoginEmailCode(
     );
     return { emailPattern: sent.emailPattern, codeLength: sent.length };
   } finally {
-    await client.disconnect().catch(() => undefined);
+    await client.destroy().catch(() => undefined);
   }
 }
 
@@ -564,7 +564,7 @@ export async function verifyLoginEmail(
     );
     return { email: "email" in verified ? (verified.email ?? null) : null };
   } finally {
-    await client.disconnect().catch(() => undefined);
+    await client.destroy().catch(() => undefined);
   }
 }
 
@@ -583,7 +583,7 @@ export async function getPasskeys(
     await client.connect();
     return await invokeGetPasskeys(client);
   } finally {
-    await client.disconnect().catch(() => undefined);
+    await client.destroy().catch(() => undefined);
   }
 }
 
@@ -600,6 +600,6 @@ export async function deletePasskey(
     await client.connect();
     return await invokeDeletePasskey(client, passkeyId);
   } finally {
-    await client.disconnect().catch(() => undefined);
+    await client.destroy().catch(() => undefined);
   }
 }

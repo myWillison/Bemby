@@ -2,17 +2,17 @@
 // vi.hoisted ensures mock values are available inside the vi.mock() factory
 // (which is hoisted to the top of the file before const declarations run).
 
-const { mockConnect, mockSendCode, mockDisconnect, MockTelegramClient } = vi.hoisted(() => {
+const { mockConnect, mockSendCode, mockDestroy, MockTelegramClient } = vi.hoisted(() => {
   const mockConnect    = vi.fn().mockResolvedValue(undefined);
   const mockSendCode   = vi.fn().mockResolvedValue({ phoneCodeHash: 'hash123' });
-  const mockDisconnect = vi.fn().mockResolvedValue(undefined);
+  const mockDestroy    = vi.fn().mockResolvedValue(undefined);
   const MockTelegramClient = vi.fn().mockReturnValue({
     connect: mockConnect,
     sendCode: mockSendCode,
-    disconnect: mockDisconnect,
+    destroy: mockDestroy,
     session: { save: vi.fn().mockReturnValue('') },
   });
-  return { mockConnect, mockSendCode, mockDisconnect, MockTelegramClient };
+  return { mockConnect, mockSendCode, mockDestroy, MockTelegramClient };
 });
 
 vi.mock('telegram', () => ({
@@ -59,13 +59,13 @@ describe('requestCode', () => {
     expect((opts.proxy as TgProxy).socksType).toBe(4);
   });
 
-  it('disconnects an existing pending session before reconnecting for the same account', async () => {
+  it('destroys an existing pending session before reconnecting for the same account', async () => {
     await requestCode(104, 12345, 'apihash', '+61400000001');
     vi.clearAllMocks();
     await requestCode(104, 12345, 'apihash', '+61400000001');
 
-    // Second call must disconnect the prior session and create a fresh client
-    expect(mockDisconnect).toHaveBeenCalledTimes(1);
+    // Second call must destroy the prior session and create a fresh client
+    expect(mockDestroy).toHaveBeenCalledTimes(1);
     expect(MockTelegramClient).toHaveBeenCalledTimes(1);
   });
 

@@ -785,8 +785,9 @@ export async function runAutoreg(
     if (err instanceof AutoregJobError) throw err;
     throw new AutoregJobError(err?.message ?? String(err), log);
   } finally {
+    // destroy, not disconnect -- only destroy stops the GramJS ping loop (issue #14)
     try {
-      await client.disconnect();
+      await client.destroy();
     } catch {
       /* ignore */
     }

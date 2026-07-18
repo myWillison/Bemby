@@ -10,18 +10,18 @@ import Database from 'better-sqlite3';
 
 let testDb!: InstanceType<typeof Database>;
 
-const { MockTelegramClient, mockConnect, mockSendCode, mockGetMe, mockDisconnect } = vi.hoisted(() => {
+const { MockTelegramClient, mockConnect, mockSendCode, mockGetMe, mockDestroy } = vi.hoisted(() => {
   const mockConnect    = vi.fn().mockResolvedValue(undefined);
   const mockSendCode   = vi.fn().mockResolvedValue({ phoneCodeHash: 'hash' });
   const mockGetMe      = vi.fn().mockResolvedValue({
     firstName: 'Test', deleted: false, restricted: false, restrictionReason: [],
   });
-  const mockDisconnect = vi.fn().mockResolvedValue(undefined);
+  const mockDestroy = vi.fn().mockResolvedValue(undefined);
   const MockTelegramClient = vi.fn().mockReturnValue({
     connect: mockConnect, sendCode: mockSendCode, getMe: mockGetMe,
-    disconnect: mockDisconnect, session: { save: vi.fn().mockReturnValue('') },
+    destroy: mockDestroy, session: { save: vi.fn().mockReturnValue('') },
   });
-  return { MockTelegramClient, mockConnect, mockSendCode, mockGetMe, mockDisconnect };
+  return { MockTelegramClient, mockConnect, mockSendCode, mockGetMe, mockDestroy };
 });
 
 vi.mock('telegram', () => ({ TelegramClient: MockTelegramClient, Api: {}, Logger: vi.fn().mockReturnValue({}) }));
@@ -376,7 +376,7 @@ describe('accounts CRUD — app_client_id', () => {
 // ---------------------------------------------------------------------------
 
 describe('checkAccountStatus — account state detection', () => {
-  beforeEach(() => { vi.mocked(TelegramClient).mockClear(); mockConnect.mockClear(); mockGetMe.mockClear(); mockDisconnect.mockClear(); });
+  beforeEach(() => { vi.mocked(TelegramClient).mockClear(); mockConnect.mockClear(); mockGetMe.mockClear(); mockDestroy.mockClear(); });
 
   it('returns isActive true and isRestricted false for a normal account', async () => {
     mockGetMe.mockResolvedValueOnce({ firstName: 'Alice', deleted: false, restricted: false, restrictionReason: [] });

@@ -2,6 +2,49 @@ import { Agent, ProxyAgent, fetch as undiciFetch } from 'undici';
 import { lookup } from 'node:dns';
 import { db } from '../db/database';
 import type { EmbywatchConfig, EmbywatchLog } from '../types';
+import { expandCommand } from './checkin';
+
+// Per-username cache of the expanded device name. Persisting it keeps random
+// tokens (e.g. {word:4}) stable across runs; we only re-expand when the template
+// changes (captured by `sig`). Keyed by Emby username since {username} varies.
+const DEVICE_NAMES_KEY = 'emby_device_names';
+
+type CachedDeviceName = { sig: string; deviceName: string };
+
+function readDeviceNames(): Record<string, CachedDeviceName> {
+  try {
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(DEVICE_NAMES_KEY) as
+      | { value: string }
+      | undefined;
+    if (!row?.value) return {};
+    return JSON.parse(row.value) as Record<string, CachedDeviceName>;
+  } catch {
+    return {};
+  }
+}
+
+function saveDeviceName(username: string, entry: CachedDeviceName): void {
+  const map = readDeviceNames();
+  map[username] = entry;
+  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
+    DEVICE_NAMES_KEY,
+    JSON.stringify(map),
+  );
+}
+
+// Expand template variables in the device name. {username} is the Emby account
+// username for the job; random tokens ({word:N}, {num:N}, {alpha:N}, {uuid})
+// come from expandCommand. The expanded value is persisted per username so random
+// tokens stay stable across runs, and is only re-rolled when the template changes.
+function resolveDeviceName(template: string, username: string): string {
+  if (!template.includes('{')) return template;
+  const sig = template;
+  const cached = readDeviceNames()[username];
+  if (cached && cached.sig === sig) return cached.deviceName;
+  const deviceName = expandCommand(template, { username });
+  saveDeviceName(username, { sig, deviceName });
+  return deviceName;
+}
 
 // Forces IPv4-only DNS resolution so Happy Eyeballs doesn't waste the connect
 // timeout on broken IPv6 routes in container environments.
@@ -103,7 +146,7 @@ export async function testEmbyConnection(
   opts: { username: string; password: string; userAgent?: string; proxyId?: string },
 ): Promise<{ ok: boolean; userName?: string; error?: string }> {
   const ua = opts.userAgent || getSetting('default_ua') || DEFAULT_UA;
-  const deviceName = getSetting('default_device_name') ?? 'Mac';
+  const deviceName = resolveDeviceName(getSetting('default_device_name') ?? 'Mac', opts.username);
   const proxyUrl = resolveProxyUrl(opts.proxyId);
   try {
     const auth = await embyRequest<any>(serverUrl, '/Users/AuthenticateByName', {
@@ -215,7 +258,7 @@ async function isMediaAvailable(
 export async function runEmbywatch(serverUrl: string, config: EmbywatchConfig): Promise<EmbywatchLog> {
   const ua = config.userAgent ?? getSetting('default_ua') ?? DEFAULT_UA;
   const playDuration = config.playDuration ?? Number(getSetting('default_play_duration') ?? 300);
-  const deviceName = getSetting('default_device_name') ?? 'Yamby';
+  const deviceName = resolveDeviceName(getSetting('default_device_name') ?? 'Yamby', config.username);
 
   const proxyUrl = resolveProxyUrl(config.proxyId);
 
