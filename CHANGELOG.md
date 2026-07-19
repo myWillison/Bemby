@@ -4,6 +4,20 @@ All notable changes to Bemby are documented here.
 
 ---
 
+## v0.9.32
+
+### 中文
+
+**修复**
+- **修复推理模型导致 AI 返回空响应（Issue #17）** -- 签到验证码识别与 AI 选择按钮此前只给了 20/50 的极小 token 上限。DeepSeek、商汤等推理模型会先输出思维链，极小的 token 上限在模型给出答案前就被思维链耗尽，导致 content 返回为空并报"AI API returned an empty response"，而调试界面因默认 token 上限较大（5000）故一切正常。现任务侧统一改用更宽裕的 token 上限，并自动剥离模型内联的 `<think>` 思维链；当 token 上限仍不足以给出答案时，改为提示 token 被截断而非笼统的空响应错误
+
+### English
+
+**Fixes**
+- **Fix reasoning models returning an empty AI response (issue #17)** -- captcha recognition and AI button selection used a tiny 20/50 token cap. Reasoning models (DeepSeek, SenseTime, etc.) emit chain-of-thought first, exhausting that tiny budget before producing an answer, so content came back empty with "AI API returned an empty response" -- while the debug interface kept working thanks to its larger default cap (5000). The task path now uses a generous token budget and strips inline `<think>` chain-of-thought; when the budget is still exhausted before an answer, the error names token truncation instead of a generic empty response
+
+---
+
 ## v0.9.31
 
 ### 中文
