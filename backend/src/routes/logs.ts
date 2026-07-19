@@ -136,12 +136,23 @@ router.patch('/:id/retire', (req, res) => {
 
 router.post('/:id/cancel', (req, res) => {
   const logId = Number(req.params.id);
-  if (!isJobRunning(logId)) {
+  if (isJobRunning(logId)) {
+    cancelJob(logId);
+    res.json({ message: 'Cancel signal sent' });
+    return;
+  }
+  // No live process: the row is likely orphaned after a restart. Force-mark a
+  // stuck 'running' row as failed so it can be cleared from the UI. (issue #18)
+  const row = db.prepare('SELECT status FROM job_logs WHERE id = ?').get(logId) as
+    | { status: string }
+    | undefined;
+  if (!row) { res.status(404).json({ error: 'Not found' }); return; }
+  if (row.status !== 'running') {
     res.status(404).json({ error: 'No running job found for this log entry' });
     return;
   }
-  cancelJob(logId);
-  res.json({ message: 'Cancel signal sent' });
+  db.prepare("UPDATE job_logs SET status = 'failed', message = 'Force stopped' WHERE id = ?").run(logId);
+  res.json({ message: 'Force stopped' });
 });
 
 export default router;

@@ -1921,7 +1921,7 @@
             </p>
             <p class="help-note">
               对于状态为<strong>运行中</strong>的任务，详情面板每秒自动刷新，可实时查看步骤进展。
-              可点击消息列的<strong>停止</strong>按钮随时中止正在运行的任务。
+              可点击消息列的<strong>停止</strong>按钮随时中止正在运行的任务。若任务因升级或重启而卡在<strong>运行中</strong>（对应进程已不存在），点击停止会将其强制标记为失败以便清理；重启后残留的运行中记录也会自动标记为失败。
             </p>
             <p class="help-para" style="margin-top: 10px">
               <strong>Emby 观看任务详情</strong>
@@ -2043,7 +2043,11 @@
               While a job is <strong>Running</strong>, the detail panel
               refreshes automatically every second so you can watch steps
               complete in real time. Click the <strong>Stop</strong> button in
-              the message column to cancel a running job at any time.
+              the message column to cancel a running job at any time. If a job is
+              stuck in <strong>Running</strong> after an upgrade or restart (its
+              underlying process no longer exists), Stop force-marks it as failed
+              so it can be cleared; leftover running entries are also
+              automatically marked failed on restart.
             </p>
             <p class="help-para" style="margin-top: 10px">
               <strong>Emby Watch detail view</strong>
