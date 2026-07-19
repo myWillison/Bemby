@@ -60,8 +60,11 @@ function setSetting(key: string, value: string) {
     .run(key, value);
 }
 
-function aiResponse(text: string) {
-  return new Response(JSON.stringify({ choices: [{ message: { content: text } }] }), { status: 200 });
+function aiResponse(text: string, finishReason = "stop") {
+  return new Response(
+    JSON.stringify({ choices: [{ message: { content: text }, finish_reason: finishReason }] }),
+    { status: 200 },
+  );
 }
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -148,6 +151,35 @@ describe("pinned default model (ai_default_model_id)", () => {
     expect(authKeyOfCall(0)).toBe("key-other");
     const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(body.model).toBe("other/model");
+  });
+});
+
+describe("reasoning-model responses", () => {
+  it("strips inline <think> chain-of-thought from the answer", async () => {
+    insertSupplier("deepseek", "key-1", [MODEL]);
+    fetchMock.mockResolvedValueOnce(aiResponse("<think>the code reads 1 2 3 4</think>1234"));
+
+    const result = await recognizeCaptchaWithAI([IMG]);
+
+    expect(result.text).toBe("1234");
+  });
+
+  it("gives a clear error when the token budget is exhausted before an answer", async () => {
+    insertSupplier("deepseek", "key-1", [MODEL]);
+    setSetting("ai_fallback_enabled", "false");
+    fetchMock.mockResolvedValue(aiResponse("<think>still reasoning", "length"));
+
+    await expect(recognizeCaptchaWithAI([IMG])).rejects.toThrow(/finish_reason=length/);
+  });
+
+  it("sends a generous token budget so reasoning models can answer", async () => {
+    insertSupplier("deepseek", "key-1", [MODEL]);
+    fetchMock.mockResolvedValueOnce(aiResponse("ABCD"));
+
+    await recognizeCaptchaWithAI([IMG]);
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.max_tokens).toBeGreaterThanOrEqual(1000);
   });
 });
 
