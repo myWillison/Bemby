@@ -4,6 +4,22 @@ All notable changes to Bemby are documented here.
 
 ---
 
+## v0.9.33
+
+### 中文
+
+**修复**
+- **修复模板无法新建（Issue #19）** -- `job_templates` 表的 `run_every_days` 字段迁移（ALTER）被错误地排在建表（CREATE）之前，全新安装首次启动时该迁移因表尚不存在而静默失败，导致建表时缺少此字段，新建模板报错 "table job_templates has no column named run_every_days"，且需重启容器才会自愈。现将该字段直接写入建表语句，并把兼容旧库的迁移移到建表之后，首次启动即正确
+- **修复任务失败后卡在"运行中"且无法清除（Issue #18）** -- 升级或重启时若正好有任务在运行，其进程随之消失，但日志记录会永久停留在"运行中"状态：停止按钮找不到对应进程而失败，归档按钮又对运行中记录隐藏，导致该记录既停不掉也删不掉。现启动时会自动将残留的"运行中"记录标记为失败；对进程已不存在的卡住记录，点击停止会将其强制标记为失败以便清理
+
+### English
+
+**Fixes**
+- **Fix templates failing to create (issue #19)** -- the `run_every_days` column migration (ALTER) for `job_templates` ran before the table's CREATE, so on a fresh install's first boot the ALTER silently failed (no table yet) and the table was created without the column, breaking template creation with "table job_templates has no column named run_every_days" until the container was restarted. The column is now part of the CREATE statement, and the upgrade-path ALTER moved after it, so it is correct from the first boot
+- **Fix tasks stuck in "Running" after a failure, with no way to clear them (issue #18)** -- if a job was running during an upgrade or restart, its process vanished but the log row stayed "Running" forever: the stop button couldn't find the process and the archive button is hidden for running rows, so the entry could neither be stopped nor removed. Leftover "Running" rows are now automatically marked failed on startup, and for a stuck row whose process no longer exists, Stop force-marks it as failed so it can be cleared
+
+---
+
 ## v0.9.32
 
 ### 中文
