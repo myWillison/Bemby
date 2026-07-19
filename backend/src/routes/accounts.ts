@@ -432,33 +432,35 @@ router.post("/import", (req, res) => {
   let imported = 0;
   let skipped = 0;
   const defaults = getDefaultTgApiCredentials();
-  for (const a of items) {
-    if (!a.phoneNumber || ((!a.apiId || !a.apiHash) && !defaults)) {
-      skipped++;
-      continue;
+  db.transaction(() => {
+    for (const a of items) {
+      if (!a.phoneNumber || ((!a.apiId || !a.apiHash) && !defaults)) {
+        skipped++;
+        continue;
+      }
+      const existing = db
+        .prepare("SELECT id FROM tg_accounts WHERE phone_number = ?")
+        .get(a.phoneNumber) as { id: number } | undefined;
+      if (existing) {
+        skipped++;
+        continue;
+      }
+      db.prepare(
+        "INSERT INTO tg_accounts (name, phone_number, api_id, api_hash, session_string, auth_status, proxy_id, app_client_id, disabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(
+        a.name || a.phoneNumber,
+        a.phoneNumber,
+        a.apiId ? Number(a.apiId) : null,
+        a.apiHash,
+        forceReauth ? null : (a.sessionString ?? null),
+        forceReauth ? "unauthenticated" : (a.authStatus ?? "unauthenticated"),
+        a.proxyId ?? null,
+        a.appClientId ?? null,
+        a.disabled ? 1 : 0,
+      );
+      imported++;
     }
-    const existing = db
-      .prepare("SELECT id FROM tg_accounts WHERE phone_number = ?")
-      .get(a.phoneNumber) as { id: number } | undefined;
-    if (existing) {
-      skipped++;
-      continue;
-    }
-    db.prepare(
-      "INSERT INTO tg_accounts (name, phone_number, api_id, api_hash, session_string, auth_status, proxy_id, app_client_id, disabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    ).run(
-      a.name || a.phoneNumber,
-      a.phoneNumber,
-      Number(a.apiId),
-      a.apiHash,
-      forceReauth ? null : (a.sessionString ?? null),
-      forceReauth ? "unauthenticated" : (a.authStatus ?? "unauthenticated"),
-      a.proxyId ?? null,
-      a.appClientId ?? null,
-      a.disabled ? 1 : 0,
-    );
-    imported++;
-  }
+  })();
   res.json({ imported, skipped });
 });
 
@@ -495,7 +497,7 @@ router.put("/:id", (req, res) => {
   ).run(
     name ?? existing.name,
     phoneNumber ?? existing.phone_number,
-    Number(apiId ?? existing.api_id),
+    apiId !== undefined ? Number(apiId) : existing.api_id,
     apiHash ?? existing.api_hash,
     newProxyId,
     newDisabled,

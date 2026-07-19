@@ -182,43 +182,45 @@ export async function executeJob(
   account: TgAccount | null,
 ): Promise<void> {
   await acquireRunSlot();
-  // Re-fetch job settings so changes made after scheduling take effect
-  const freshJob = db
-    .prepare("SELECT * FROM jobs WHERE id = ?")
-    .get(job.id) as any;
-  if (freshJob) {
-    job = {
-      id: freshJob.id,
-      name: freshJob.name,
-      accountId: freshJob.account_id ?? null,
-      jobType: freshJob.job_type,
-      botUsername: freshJob.bot_username,
-      scheduleWindowStart: freshJob.schedule_window_start,
-      scheduleWindowEnd: freshJob.schedule_window_end,
-      timezone: freshJob.timezone,
-      replyTimeoutMs: freshJob.reply_timeout_ms,
-      retryMax: freshJob.retry_max,
-      enabled: Boolean(freshJob.enabled),
-      createdAt: freshJob.created_at,
-      config: freshJob.config ?? null,
-      startCommand: freshJob.start_command || "/start",
-      checkinButton: freshJob.checkin_button || "签到",
-      templateId: freshJob.template_id ?? null,
-      runEveryDays: freshJob.run_every_days ?? 1,
-    };
-  }
-
-  const ranAt = new Date().toISOString();
-  const { lastInsertRowid: logId } = db
-    .prepare(
-      "INSERT INTO job_logs (job_id, ran_at, status, message) VALUES (?, ?, 'running', 'Scheduled')",
-    )
-    .run(job.id, ranAt);
-
   const detailLogs: JobDetailLog[] = [];
-  const signal = registerJob(Number(logId));
-  registerLiveDetail(Number(logId), detailLogs);
+  let logId: number | bigint | undefined;
   try {
+    // Re-fetch job settings so changes made after scheduling take effect
+    const freshJob = db
+      .prepare("SELECT * FROM jobs WHERE id = ?")
+      .get(job.id) as any;
+    if (freshJob) {
+      job = {
+        id: freshJob.id,
+        name: freshJob.name,
+        accountId: freshJob.account_id ?? null,
+        jobType: freshJob.job_type,
+        botUsername: freshJob.bot_username,
+        scheduleWindowStart: freshJob.schedule_window_start,
+        scheduleWindowEnd: freshJob.schedule_window_end,
+        timezone: freshJob.timezone,
+        replyTimeoutMs: freshJob.reply_timeout_ms,
+        retryMax: freshJob.retry_max,
+        enabled: Boolean(freshJob.enabled),
+        createdAt: freshJob.created_at,
+        config: freshJob.config ?? null,
+        startCommand: freshJob.start_command || "/start",
+        checkinButton: freshJob.checkin_button || "签到",
+        templateId: freshJob.template_id ?? null,
+        runEveryDays: freshJob.run_every_days ?? 1,
+      };
+    }
+
+    const ranAt = new Date().toISOString();
+    logId = db
+      .prepare(
+        "INSERT INTO job_logs (job_id, ran_at, status, message) VALUES (?, ?, 'running', 'Scheduled')",
+      )
+      .run(job.id, ranAt).lastInsertRowid;
+
+    const signal = registerJob(Number(logId));
+    registerLiveDetail(Number(logId), detailLogs);
+
     // Re-fetch session in case it was updated since scheduling
     if (account) {
       const fresh = db
@@ -247,10 +249,12 @@ export async function executeJob(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     const isCancelled = message === "Job cancelled";
-    const detail = detailLogs.length ? JSON.stringify(detailLogs) : null;
-    db.prepare(
-      "UPDATE job_logs SET status = 'failed', message = ?, detail = ? WHERE id = ?",
-    ).run(isCancelled ? "Cancelled" : message, detail, logId);
+    if (logId !== undefined) {
+      const detail = detailLogs.length ? JSON.stringify(detailLogs) : null;
+      db.prepare(
+        "UPDATE job_logs SET status = 'failed', message = ?, detail = ? WHERE id = ?",
+      ).run(isCancelled ? "Cancelled" : message, detail, logId);
+    }
     console.error(`[scheduler] "${job.name}" failed:`, message);
     if (!isCancelled && account?.sessionString) {
       const cfg = getNotifyConfig();
@@ -265,9 +269,19 @@ export async function executeJob(
     }
   } finally {
     releaseRunSlot();
-    unregisterJob(Number(logId));
-    clearLiveDetail(Number(logId));
-    scheduleOne(job, account, job.runEveryDays ?? 1);
+    if (logId !== undefined) {
+      unregisterJob(Number(logId));
+      clearLiveDetail(Number(logId));
+    }
+    // Only re-arm the timer if the job still exists and is enabled — a job
+    // disabled or deleted mid-run must not reschedule itself (refreshJobs is
+    // the authority and would otherwise not catch it before the next fire).
+    const current = db
+      .prepare("SELECT enabled FROM jobs WHERE id = ?")
+      .get(job.id) as { enabled: number } | undefined;
+    if (current?.enabled) {
+      scheduleOne(job, account, job.runEveryDays ?? 1);
+    }
   }
 }
 

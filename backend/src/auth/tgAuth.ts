@@ -65,17 +65,24 @@ export async function requestCode(
     baseLogger: new Logger(LogLevel.NONE),
     ...(proxy ? { proxy } : {}),
   });
-  await client.connect();
-
-  const sent = await client.sendCode({ apiId, apiHash }, phoneNumber);
-  const isCodeViaApp = (sent as any).type?.className === "auth.SentCodeTypeApp";
-  pending.set(accountId, {
-    client,
-    phoneNumber,
-    phoneCodeHash: sent.phoneCodeHash,
-    step: "code",
-  });
-  return { isCodeViaApp };
+  try {
+    await client.connect();
+    const sent = await client.sendCode({ apiId, apiHash }, phoneNumber);
+    const isCodeViaApp =
+      (sent as any).type?.className === "auth.SentCodeTypeApp";
+    pending.set(accountId, {
+      client,
+      phoneNumber,
+      phoneCodeHash: sent.phoneCodeHash,
+      step: "code",
+    });
+    return { isCodeViaApp };
+  } catch (err) {
+    // Nothing holds a reference to this client yet — destroy it so a failed
+    // send (bad/blocked number, flood-wait) doesn't leak a connected session.
+    await client.destroy().catch(() => undefined);
+    throw err;
+  }
 }
 
 export async function resendCodeAsSms(accountId: number): Promise<void> {
@@ -114,7 +121,7 @@ export async function submitCode(
     pending.delete(accountId);
     return { needsPassword: false, session };
   } catch (err: any) {
-    if (err.errorMessage === "SESSION_PASSWORD_NEEDED") {
+    if (err?.errorMessage === "SESSION_PASSWORD_NEEDED") {
       entry.step = "2fa";
       return { needsPassword: true };
     }
@@ -198,7 +205,7 @@ export async function checkAccountStatus(
       phone: user.phone,
     };
   } catch (err: any) {
-    const code: string = err.errorMessage ?? "";
+    const code: string = err?.errorMessage ?? "";
 
     if (BANNED_CODES.includes(code)) {
       return {

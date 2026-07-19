@@ -338,7 +338,8 @@ router.post('/import', async (req, res) => {
 
   const results = { accountsImported: 0, accountsSkipped: 0, templatesImported: 0, jobsImported: 0, aiSuppliersImported: 0, aiModelsImported: 0, settingsUpdated: 0 };
 
-  db.transaction(() => {
+  try {
+    db.transaction(() => {
     if (mode === 'replace') {
       // FK order: models -> suppliers, jobs -> templates/accounts
       db.prepare('DELETE FROM ai_models').run();
@@ -489,7 +490,16 @@ router.post('/import', async (req, res) => {
         if (typeof value === 'string') { stmt.run(key, value); results.settingsUpdated++; }
       }
     }
-  })();
+    })();
+  } catch (err) {
+    // A malformed backup can throw inside the transaction (bad bind value,
+    // constraint violation). Roll back and respond, rather than letting the
+    // rejection escape the async handler and hang the request.
+    res.status(400).json({
+      error: `Import failed: ${err instanceof Error ? err.message : String(err)}`,
+    });
+    return;
+  }
 
   refreshScheduler();
   res.json({ message: 'Import complete', ...results });
