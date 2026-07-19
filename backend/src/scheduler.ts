@@ -374,8 +374,26 @@ export function purgeOldLogs(): void {
   }
 }
 
+/**
+ * Mark any job_logs still in 'running' state as failed. On a fresh process
+ * start nothing is actually running, so a leftover 'running' row means the
+ * previous process was killed mid-run (e.g. during an upgrade), leaving the
+ * log stuck and un-stoppable. (issue #18)
+ */
+export function reconcileOrphanedRuns(): void {
+  const { changes } = db
+    .prepare(
+      "UPDATE job_logs SET status = 'failed', message = 'Interrupted by server restart' WHERE status = 'running'",
+    )
+    .run();
+  if (changes > 0) {
+    console.log(`[scheduler] Marked ${changes} interrupted run(s) as failed`);
+  }
+}
+
 export function startScheduler(): void {
   console.log("[scheduler] Starting");
+  reconcileOrphanedRuns();
   refreshJobs();
   // Re-check every 5 minutes to pick up new/changed jobs
   setInterval(refreshJobs, 5 * 60 * 1000);
