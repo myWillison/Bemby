@@ -4,6 +4,28 @@ All notable changes to Bemby are documented here.
 
 ---
 
+## v0.9.33-patch-1
+
+### 中文
+
+- **修复手动执行任务报错（Issue #21）** -- 手动运行任务时，若任务以非 Error 对象拒绝，错误处理代码直接读取 `err.message` 会抛出 `TypeError: Cannot read properties of undefined (reading 'message')`，进而变成未处理的拒绝：日志记录永久卡在"运行中"，真实的失败原因也被掩盖。现所有错误处理统一先规整错误值，任务失败会正确记录为"失败"并显示真实错误信息（调度任务路径存在同样问题，一并修复）
+- **修复调度器可能停止执行所有任务** -- 并发槽在写入运行日志之前就被占用，若该写入失败（数据库繁忙、锁、磁盘满等），槽位永不释放；累计到并发上限后调度器彻底卡死，重启前不再执行任何任务。现将槽位纳入 `try/finally`，确保始终释放
+- **修复运行中被禁用/删除的任务仍会重新排期** -- 任务运行结束后无条件重新排期，即使它已在运行途中被禁用或删除。现仅在任务仍存在且启用时才重新排期
+- **修复登录发送验证码失败时泄漏连接** -- 请求验证码时若 `sendCode` 失败（号码无效/被封、触发限流等），已连接的 Telegram 客户端无人引用且永不销毁。现失败时会销毁该客户端
+- **修复导入损坏备份时请求卡死** -- 导入畸形备份文件时事务内抛错会逃逸为未处理拒绝，请求永久无响应。现返回明确的错误提示，且账号导入与模板批量创建改为事务化，中途失败会整体回滚而非留下残缺数据
+- **修复编辑使用默认 API 凭据的账号会损坏其 API ID** -- 编辑此类账号（`api_id` 为空）时会把 API ID 写成 `0`。现保留原值
+
+### English
+
+- **Fix manual task run error (issue #21)** -- when a manually-run job rejected with a non-Error value, the error handler read `err.message` directly and threw `TypeError: Cannot read properties of undefined (reading 'message')`, which became an unhandled rejection: the log row stayed stuck in "Running" forever and the real failure cause was masked. All error handling now normalises the error value first, so a failed job is correctly recorded as "Failed" with the real message (the scheduled-run path had the same flaw and was fixed too)
+- **Fix scheduler potentially halting all job execution** -- a concurrency slot was acquired before the run-log INSERT, so if that write failed (DB busy, locked, disk full) the slot was never released; once this reached the concurrency cap the scheduler deadlocked and ran no further jobs until restart. Slot handling is now inside a `try/finally` so it is always released
+- **Fix disabled/deleted jobs rescheduling themselves mid-run** -- a job was re-armed unconditionally after running, even if it had been disabled or deleted while running. It now reschedules only if the job still exists and is enabled
+- **Fix connection leak when requesting a login code fails** -- if `sendCode` failed while requesting a code (invalid/blocked number, flood-wait), the connected Telegram client was orphaned and never destroyed. It is now destroyed on failure
+- **Fix request hanging when importing a corrupted backup** -- a throw inside the import transaction escaped as an unhandled rejection and the request never responded. It now returns a clear error, and account import and template bulk-create are transactional so a mid-way failure rolls back rather than leaving partial data
+- **Fix editing an account that uses default API credentials corrupting its API ID** -- editing such an account (empty `api_id`) stored the API ID as `0`. The original value is now preserved
+
+---
+
 ## v0.9.33
 
 ### 中文
