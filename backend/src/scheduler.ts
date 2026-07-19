@@ -244,20 +244,21 @@ export async function executeJob(
         ).catch((e) => console.warn("[notify] TG notification failed:", e));
       }
     }
-  } catch (err: any) {
-    const isCancelled = err?.message === "Job cancelled";
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    const isCancelled = message === "Job cancelled";
     const detail = detailLogs.length ? JSON.stringify(detailLogs) : null;
     db.prepare(
       "UPDATE job_logs SET status = 'failed', message = ?, detail = ? WHERE id = ?",
-    ).run(isCancelled ? "Cancelled" : err.message, detail, logId);
-    console.error(`[scheduler] "${job.name}" failed:`, err.message);
+    ).run(isCancelled ? "Cancelled" : message, detail, logId);
+    console.error(`[scheduler] "${job.name}" failed:`, message);
     if (!isCancelled && account?.sessionString) {
       const cfg = getNotifyConfig();
       if (cfg.events.includes("failed")) {
         const target = cfg.username ?? "me";
         sendTgNotify(
           account,
-          buildFailureMessage(job.name, job.jobType, err.message),
+          buildFailureMessage(job.name, job.jobType, message),
           target,
         ).catch((e) => console.warn("[notify] TG notification failed:", e));
       }
