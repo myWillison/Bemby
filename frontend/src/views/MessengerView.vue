@@ -156,7 +156,12 @@
                   </div>
                   <div class="tgc-dialog-row">
                     <span
-                      v-if="isTyping(d.chatId)"
+                      v-if="searchQuery"
+                      class="tgc-dialog-preview tgc-dialog-username"
+                      >{{ d.username ? "@" + d.username : "" }}</span
+                    >
+                    <span
+                      v-else-if="isTyping(d.chatId)"
                       class="tgc-dialog-preview tgc-typing"
                       >{{ typingLabel(d.chatId) }}</span
                     >
@@ -5023,6 +5028,10 @@ async function saveContactEdit() {
   text-overflow: ellipsis;
   flex: 1;
   min-width: 0;
+}
+
+.tgc-dialog-username {
+  color: #4361ee;
 }
 
 .tgc-unread-badge {
