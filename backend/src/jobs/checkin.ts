@@ -131,6 +131,11 @@ export function parseAiBtnHint(val: string): string | undefined {
 
 type AICreds = { modelId: string; apiKey: string; baseUrl: string; timeoutMs: number };
 
+// The answer itself (captcha chars / button text) is tiny, but reasoning models
+// burn the budget on chain-of-thought first; too small and content comes back
+// empty. Generous cap — non-reasoning models still stop early once done.
+const AI_ANSWER_MAX_TOKENS = 2048;
+
 function resolveAICreds(modelId?: string): AICreds {
   type CredsRow = { model_id: string; api_key: string; base_url: string; timeout_ms: number };
   const override = modelId?.trim();
@@ -211,9 +216,33 @@ async function callAIWithCreds(
     throw new Error(`AI API error ${res.status}: ${body}`);
   }
 
-  const data = await res.json() as { choices?: { message?: { content?: string } }[] };
-  const response = data.choices?.[0]?.message?.content?.trim() ?? '';
+  const data = await res.json() as {
+    choices?: { message?: { content?: string }; finish_reason?: string }[];
+  };
+  const choice = data.choices?.[0];
+  const response = stripReasoning(choice?.message?.content ?? '');
+
+  // Reasoning models spend the token budget on chain-of-thought; when it runs
+  // out before any answer, content comes back empty with finish_reason 'length'
+  if (!response && choice?.finish_reason === 'length') {
+    throw new Error(
+      `AI response truncated before an answer (finish_reason=length, max_tokens=${maxTokens}). ` +
+      `The model "${creds.modelId}" is likely a reasoning model — try a larger token budget or a non-reasoning model.`,
+    );
+  }
+
   return { response };
+}
+
+/**
+ * Strips chain-of-thought that reasoning models emit inline despite being told
+ * not to, so the answer isn't buried in (or masked by) <think> blocks.
+ */
+function stripReasoning(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<think>[\s\S]*$/i, '') // unterminated block (truncated response)
+    .trim();
 }
 
 /** Generic AI call: sends images + prompt, returns the raw text response. */
@@ -291,7 +320,7 @@ export async function recognizeCaptchaWithAI(
   if (!images.length) throw new Error('{aiInput} requires an image in the previous message');
 
   const prompt = buildCaptchaPrompt(length);
-  const { response: recognized } = await callAIWithFallback(images, prompt, 20);
+  const { response: recognized } = await callAIWithFallback(images, prompt, AI_ANSWER_MAX_TOKENS);
   if (!recognized) throw new Error('AI returned empty response for captcha recognition');
   return { text: recognized, prompt, response: recognized };
 }
@@ -316,7 +345,7 @@ export async function selectButtonWithAI(
   const failedResponses: string[] = [];
 
   for (let attempt = 0; attempt <= effectiveMax; attempt++) {
-    const { response: picked } = await callAIWithFallback(images, prompt, 50);
+    const { response: picked } = await callAIWithFallback(images, prompt, AI_ANSWER_MAX_TOKENS);
     if (!picked) throw new Error('AI API returned an empty response');
 
     const exact = flat.find(b => b === picked);
@@ -651,7 +680,9 @@ export async function checkSpamStatus(
 
     return { spamStatus: parseSpamStatus(rawMessage), rawMessage };
   } finally {
-    try { await client.disconnect(); } catch { /* ignore */ }
+    // destroy, not disconnect -- disconnect leaves the GramJS ping loop running,
+    // which pins the client and grows its send queue forever (issue #14)
+    try { await client.destroy(); } catch { /* ignore */ }
   }
 }
 
@@ -839,7 +870,8 @@ export async function runCheckin(
     if (Array.isArray(err?.aiRetries) && err.aiRetries.length) log.aiRetries = err.aiRetries;
     throw new CheckinError(log.error!, log);
   } finally {
-    // GramJS throws TIMEOUT when the update loop stops on disconnect; always swallow here
-    try { await client.disconnect(); } catch { /* ignore */ }
+    // GramJS throws TIMEOUT when the update loop stops; always swallow here.
+    // destroy, not disconnect -- only destroy stops the ping loop (issue #14)
+    try { await client.destroy(); } catch { /* ignore */ }
   }
 }

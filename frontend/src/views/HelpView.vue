@@ -28,6 +28,10 @@
             <p class="help-note">
               筛选条件、列排序方式和上次访问的页面在刷新或重新登录后自动恢复。
             </p>
+            <p class="help-note">
+              Telegram 连接按需建立：任务运行结束后立即释放；消息页面的实时连接在闲置
+              30 分钟后自动断开并释放内存，再次使用时自动重连，无需任何操作。
+            </p>
           </template>
           <template v-else>
             <div class="card-section-title">Overview</div>
@@ -58,6 +62,12 @@
             <p class="help-note">
               Filter selections, column sort order, and last visited page are
               automatically restored on refresh or re-login.
+            </p>
+            <p class="help-note">
+              Telegram connections are created on demand: job connections are
+              released as soon as the run finishes, and the Messenger's live
+              connection disconnects automatically after 30 minutes of
+              inactivity to free memory, reconnecting seamlessly on next use.
             </p>
           </template>
         </div>
@@ -1911,7 +1921,7 @@
             </p>
             <p class="help-note">
               对于状态为<strong>运行中</strong>的任务，详情面板每秒自动刷新，可实时查看步骤进展。
-              可点击消息列的<strong>停止</strong>按钮随时中止正在运行的任务。
+              可点击消息列的<strong>停止</strong>按钮随时中止正在运行的任务。若任务因升级或重启而卡在<strong>运行中</strong>（对应进程已不存在），点击停止会将其强制标记为失败以便清理；重启后残留的运行中记录也会自动标记为失败。
             </p>
             <p class="help-para" style="margin-top: 10px">
               <strong>Emby 观看任务详情</strong>
@@ -2033,7 +2043,11 @@
               While a job is <strong>Running</strong>, the detail panel
               refreshes automatically every second so you can watch steps
               complete in real time. Click the <strong>Stop</strong> button in
-              the message column to cancel a running job at any time.
+              the message column to cancel a running job at any time. If a job is
+              stuck in <strong>Running</strong> after an upgrade or restart (its
+              underlying process no longer exists), Stop force-marks it as failed
+              so it can be cleared; leftover running entries are also
+              automatically marked failed on restart.
             </p>
             <p class="help-para" style="margin-top: 10px">
               <strong>Emby Watch detail view</strong>

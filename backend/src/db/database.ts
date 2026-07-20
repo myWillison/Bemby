@@ -189,11 +189,6 @@ try {
   );
 } catch {}
 try {
-  db.exec(
-    "ALTER TABLE job_templates ADD COLUMN run_every_days INTEGER NOT NULL DEFAULT 1",
-  );
-} catch {}
-try {
   db.exec("ALTER TABLE tg_accounts ADD COLUMN tg_display_name TEXT");
 } catch {}
 try {
@@ -283,9 +278,17 @@ db.exec(`
     config           TEXT,
     start_command    TEXT    NOT NULL DEFAULT '/start',
     checkin_button   TEXT    NOT NULL DEFAULT '签到',
+    run_every_days   INTEGER NOT NULL DEFAULT 1,
     created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
+// Upgrade path: older databases created job_templates before run_every_days
+// existed. This ALTER must run after the CREATE above, not before it. (issue #19)
+try {
+  db.exec(
+    "ALTER TABLE job_templates ADD COLUMN run_every_days INTEGER NOT NULL DEFAULT 1",
+  );
+} catch {}
 
 // Jobs and templates historically froze the default timezone at creation, so
 // changing the default in Settings never affected them (issue #13). An empty

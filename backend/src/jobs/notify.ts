@@ -67,8 +67,9 @@ export async function sendTgNotify(
     await client.connect();
     await client.sendMessage(target, { message });
   } finally {
+    // destroy, not disconnect -- only destroy stops the GramJS ping loop (issue #14)
     try {
-      await client.disconnect();
+      await client.destroy();
     } catch {
       /* ignore */
     }

@@ -170,6 +170,15 @@ describe('full upgrade path — no data lost from oldest schema to current', () 
       expect(db.prepare('SELECT COUNT(*) AS n FROM jobs').get()).toEqual({ n: 0 });
       const cols = db.prepare('PRAGMA table_info(jobs)').all() as Array<{ name: string; notnull: number }>;
       expect(cols.find(c => c.name === 'account_id')?.notnull).toBe(0);
+
+      // issue #19: on a fresh install's first boot the job_templates ALTER used
+      // to run before the CREATE, leaving run_every_days missing and breaking
+      // template creation until the container restarted.
+      const templateCols = db.prepare('PRAGMA table_info(job_templates)').all() as Array<{ name: string }>;
+      expect(templateCols.some(c => c.name === 'run_every_days')).toBe(true);
+      expect(() =>
+        db.prepare('INSERT INTO job_templates (name, run_every_days) VALUES (?, ?)').run('t', 2),
+      ).not.toThrow();
     } finally {
       db.close();
     }

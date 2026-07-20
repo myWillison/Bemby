@@ -156,7 +156,12 @@
                   </div>
                   <div class="tgc-dialog-row">
                     <span
-                      v-if="isTyping(d.chatId)"
+                      v-if="searchQuery"
+                      class="tgc-dialog-preview tgc-dialog-username"
+                      >{{ d.username ? "@" + d.username : "" }}</span
+                    >
+                    <span
+                      v-else-if="isTyping(d.chatId)"
                       class="tgc-dialog-preview tgc-typing"
                       >{{ typingLabel(d.chatId) }}</span
                     >
@@ -644,7 +649,7 @@
                                 btnLoadingKey === `${msg.id}-${ri}-${bi}`,
                             }"
                             :disabled="
-                              (!btn.data && !btn.url) ||
+                              (!btn.data && !btn.url && !btn.send) ||
                               btnLoadingKey === `${msg.id}-${ri}-${bi}`
                             "
                             @click="clickInlineButton(msg, btn, ri, bi)"
@@ -3322,12 +3327,25 @@ async function clickInlineButton(
     data: string | null;
     url: string | null;
     webApp: boolean;
+    send: boolean;
   },
   ri: number,
   bi: number,
 ) {
   if (!selectedAccountId.value || !activeChatId.value) return;
   const key = `${msg.id}-${ri}-${bi}`;
+  // Reply-keyboard button: send its label back as a normal message
+  if (btn.send && !btn.data && !btn.url) {
+    if (sending.value || !btn.text) return;
+    btnLoadingKey.value = key;
+    try {
+      inputText.value = btn.text;
+      await sendMessage();
+    } finally {
+      btnLoadingKey.value = null;
+    }
+    return;
+  }
   if (btn.url) {
     btnLoadingKey.value = key;
     try {
@@ -5010,6 +5028,10 @@ async function saveContactEdit() {
   text-overflow: ellipsis;
   flex: 1;
   min-width: 0;
+}
+
+.tgc-dialog-username {
+  color: #4361ee;
 }
 
 .tgc-unread-badge {

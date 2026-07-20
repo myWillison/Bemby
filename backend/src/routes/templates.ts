@@ -359,38 +359,40 @@ router.post('/:id/create-jobs', (req, res) => {
 
   const createdIds: number[] = [];
 
-  for (const j of jobs) {
-    // For embywatch, merge per-job credentials into template config
-    let jobConfig = template.config;
-    if (j.config && template.job_type === 'embywatch') {
-      const tplCfg = template.config ? JSON.parse(template.config) : {};
-      jobConfig = JSON.stringify({ ...tplCfg, ...j.config });
-    }
+  db.transaction(() => {
+    for (const j of jobs) {
+      // For embywatch, merge per-job credentials into template config
+      let jobConfig = template.config;
+      if (j.config && template.job_type === 'embywatch') {
+        const tplCfg = template.config ? JSON.parse(template.config) : {};
+        jobConfig = JSON.stringify({ ...tplCfg, ...j.config });
+      }
 
-    const result = db.prepare(`
-      INSERT INTO jobs (
-        name, account_id, job_type, bot_username,
-        schedule_window_start, schedule_window_end, timezone,
-        reply_timeout_ms, retry_max, enabled, config,
-        start_command, checkin_button, template_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
-    `).run(
-      j.name,
-      j.accountId,
-      template.job_type,
-      template.bot_username,
-      Number(scheduleWindowStart),
-      Number(scheduleWindowEnd),
-      template.timezone,
-      template.reply_timeout_ms,
-      template.retry_max,
-      jobConfig,
-      template.start_command,
-      template.checkin_button,
-      template.id,
-    );
-    createdIds.push(Number(result.lastInsertRowid));
-  }
+      const result = db.prepare(`
+        INSERT INTO jobs (
+          name, account_id, job_type, bot_username,
+          schedule_window_start, schedule_window_end, timezone,
+          reply_timeout_ms, retry_max, enabled, config,
+          start_command, checkin_button, template_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+      `).run(
+        j.name,
+        j.accountId,
+        template.job_type,
+        template.bot_username,
+        Number(scheduleWindowStart),
+        Number(scheduleWindowEnd),
+        template.timezone,
+        template.reply_timeout_ms,
+        template.retry_max,
+        jobConfig,
+        template.start_command,
+        template.checkin_button,
+        template.id,
+      );
+      createdIds.push(Number(result.lastInsertRowid));
+    }
+  })();
 
   refreshScheduler();
   res.status(201).json({ created: createdIds.length, ids: createdIds });

@@ -4,6 +4,74 @@ All notable changes to Bemby are documented here.
 
 ---
 
+## v0.9.33-patch-1
+
+### 中文
+
+- **修复手动执行任务报错（Issue #21）** -- 手动运行任务时，若任务以非 Error 对象拒绝，错误处理代码直接读取 `err.message` 会抛出 `TypeError: Cannot read properties of undefined (reading 'message')`，进而变成未处理的拒绝：日志记录永久卡在"运行中"，真实的失败原因也被掩盖。现所有错误处理统一先规整错误值，任务失败会正确记录为"失败"并显示真实错误信息（调度任务路径存在同样问题，一并修复）
+- **修复调度器可能停止执行所有任务** -- 并发槽在写入运行日志之前就被占用，若该写入失败（数据库繁忙、锁、磁盘满等），槽位永不释放；累计到并发上限后调度器彻底卡死，重启前不再执行任何任务。现将槽位纳入 `try/finally`，确保始终释放
+- **修复运行中被禁用/删除的任务仍会重新排期** -- 任务运行结束后无条件重新排期，即使它已在运行途中被禁用或删除。现仅在任务仍存在且启用时才重新排期
+- **修复登录发送验证码失败时泄漏连接** -- 请求验证码时若 `sendCode` 失败（号码无效/被封、触发限流等），已连接的 Telegram 客户端无人引用且永不销毁。现失败时会销毁该客户端
+- **修复导入损坏备份时请求卡死** -- 导入畸形备份文件时事务内抛错会逃逸为未处理拒绝，请求永久无响应。现返回明确的错误提示，且账号导入与模板批量创建改为事务化，中途失败会整体回滚而非留下残缺数据
+- **修复编辑使用默认 API 凭据的账号会损坏其 API ID** -- 编辑此类账号（`api_id` 为空）时会把 API ID 写成 `0`。现保留原值
+
+### English
+
+- **Fix manual task run error (issue #21)** -- when a manually-run job rejected with a non-Error value, the error handler read `err.message` directly and threw `TypeError: Cannot read properties of undefined (reading 'message')`, which became an unhandled rejection: the log row stayed stuck in "Running" forever and the real failure cause was masked. All error handling now normalises the error value first, so a failed job is correctly recorded as "Failed" with the real message (the scheduled-run path had the same flaw and was fixed too)
+- **Fix scheduler potentially halting all job execution** -- a concurrency slot was acquired before the run-log INSERT, so if that write failed (DB busy, locked, disk full) the slot was never released; once this reached the concurrency cap the scheduler deadlocked and ran no further jobs until restart. Slot handling is now inside a `try/finally` so it is always released
+- **Fix disabled/deleted jobs rescheduling themselves mid-run** -- a job was re-armed unconditionally after running, even if it had been disabled or deleted while running. It now reschedules only if the job still exists and is enabled
+- **Fix connection leak when requesting a login code fails** -- if `sendCode` failed while requesting a code (invalid/blocked number, flood-wait), the connected Telegram client was orphaned and never destroyed. It is now destroyed on failure
+- **Fix request hanging when importing a corrupted backup** -- a throw inside the import transaction escaped as an unhandled rejection and the request never responded. It now returns a clear error, and account import and template bulk-create are transactional so a mid-way failure rolls back rather than leaving partial data
+- **Fix editing an account that uses default API credentials corrupting its API ID** -- editing such an account (empty `api_id`) stored the API ID as `0`. The original value is now preserved
+
+---
+
+## v0.9.33
+
+### 中文
+
+**修复**
+- **修复模板无法新建（Issue #19）** -- `job_templates` 表的 `run_every_days` 字段迁移（ALTER）被错误地排在建表（CREATE）之前，全新安装首次启动时该迁移因表尚不存在而静默失败，导致建表时缺少此字段，新建模板报错 "table job_templates has no column named run_every_days"，且需重启容器才会自愈。现将该字段直接写入建表语句，并把兼容旧库的迁移移到建表之后，首次启动即正确
+- **修复任务失败后卡在"运行中"且无法清除（Issue #18）** -- 升级或重启时若正好有任务在运行，其进程随之消失，但日志记录会永久停留在"运行中"状态：停止按钮找不到对应进程而失败，归档按钮又对运行中记录隐藏，导致该记录既停不掉也删不掉。现启动时会自动将残留的"运行中"记录标记为失败；对进程已不存在的卡住记录，点击停止会将其强制标记为失败以便清理
+
+### English
+
+**Fixes**
+- **Fix templates failing to create (issue #19)** -- the `run_every_days` column migration (ALTER) for `job_templates` ran before the table's CREATE, so on a fresh install's first boot the ALTER silently failed (no table yet) and the table was created without the column, breaking template creation with "table job_templates has no column named run_every_days" until the container was restarted. The column is now part of the CREATE statement, and the upgrade-path ALTER moved after it, so it is correct from the first boot
+- **Fix tasks stuck in "Running" after a failure, with no way to clear them (issue #18)** -- if a job was running during an upgrade or restart, its process vanished but the log row stayed "Running" forever: the stop button couldn't find the process and the archive button is hidden for running rows, so the entry could neither be stopped nor removed. Leftover "Running" rows are now automatically marked failed on startup, and for a stuck row whose process no longer exists, Stop force-marks it as failed so it can be cleared
+
+---
+
+## v0.9.32
+
+### 中文
+
+**修复**
+- **修复推理模型导致 AI 返回空响应（Issue #17）** -- 签到验证码识别与 AI 选择按钮此前只给了 20/50 的极小 token 上限。DeepSeek、商汤等推理模型会先输出思维链，极小的 token 上限在模型给出答案前就被思维链耗尽，导致 content 返回为空并报"AI API returned an empty response"，而调试界面因默认 token 上限较大（5000）故一切正常。现任务侧统一改用更宽裕的 token 上限，并自动剥离模型内联的 `<think>` 思维链；当 token 上限仍不足以给出答案时，改为提示 token 被截断而非笼统的空响应错误
+
+### English
+
+**Fixes**
+- **Fix reasoning models returning an empty AI response (issue #17)** -- captcha recognition and AI button selection used a tiny 20/50 token cap. Reasoning models (DeepSeek, SenseTime, etc.) emit chain-of-thought first, exhausting that tiny budget before producing an answer, so content came back empty with "AI API returned an empty response" -- while the debug interface kept working thanks to its larger default cap (5000). The task path now uses a generous token budget and strips inline `<think>` chain-of-thought; when the budget is still exhausted before an answer, the error names token truncation instead of a generic empty response
+
+---
+
+## v0.9.31
+
+### 中文
+
+**修复**
+- **彻底修复内存持续增长问题（Issue #14）** -- v0.9.30 只处理了常驻的长连接客户端，但每次定时任务运行、任务重试、发送 TG 通知、检查账号状态以及各类认证操作都会临时创建一个 Telegram 客户端，用完后仅调用了 disconnect()。GramJS 的 disconnect() 不会停止客户端内部的心跳循环：该循环会把整个客户端对象永久固定在内存中，并且每 9 秒向一个不再被消费的发送队列追加一条 ping 请求，因此即使系统完全空闲，内存也会随任务运行次数累积而平滑增长。现所有临时客户端在用完后改用 destroy() 彻底销毁并释放内存
+- **修复登录成功后可能因连接清理超时而报错** -- 提交验证码或 2FA 密码成功后，若清理临时连接时 GramJS 抛出超时错误，此前会导致本已成功的登录被误报为失败；现清理错误不再影响登录结果
+
+### English
+
+**Fixes**
+- **Fully fix continued memory growth (issue #14)** -- v0.9.30 only covered the long-lived live clients, but every scheduled job run, retry, TG notification, account status check, and auth operation creates a short-lived Telegram client that was torn down with disconnect() only. GramJS's disconnect() does not stop the client's internal keepalive loop: the loop pins the whole client object in memory forever and appends a ping request every 9 seconds to a send queue nothing drains any more, so memory grew steadily with every job run even while the system was completely idle. All short-lived clients are now torn down with destroy(), fully releasing their memory
+- **Fix a successful login occasionally reported as failed** -- after a successful code or 2FA submission, a GramJS timeout thrown while cleaning up the temporary connection could fail the already-successful login; cleanup errors no longer affect the login result
+
+---
+
 ## v0.9.30
 
 ### 中文

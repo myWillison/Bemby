@@ -1533,8 +1533,9 @@ export async function runCustom(
     if (err?.message === "Job cancelled") throw err;
     throw new CustomJobError(err?.message ?? String(err), log);
   } finally {
+    // destroy, not disconnect -- only destroy stops the GramJS ping loop (issue #14)
     try {
-      await client.disconnect();
+      await client.destroy();
     } catch {
       /* ignore */
     }

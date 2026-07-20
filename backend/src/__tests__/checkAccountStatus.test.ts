@@ -2,17 +2,17 @@
 // Uses the same vi.hoisted + vi.mock pattern as tgAuth.test.ts so the
 // MockTelegramClient reference is shared between the factory and assertions.
 
-const { mockGetMe, mockConnect, mockDisconnect, MockTelegramClient } = vi.hoisted(() => {
+const { mockGetMe, mockConnect, mockDestroy, MockTelegramClient } = vi.hoisted(() => {
   const mockGetMe    = vi.fn();
   const mockConnect  = vi.fn().mockResolvedValue(undefined);
-  const mockDisconnect = vi.fn().mockResolvedValue(undefined);
+  const mockDestroy = vi.fn().mockResolvedValue(undefined);
   const MockTelegramClient = vi.fn().mockReturnValue({
     connect:    mockConnect,
     getMe:      mockGetMe,
-    disconnect: mockDisconnect,
+    destroy: mockDestroy,
     session:    { save: vi.fn().mockReturnValue('') },
   });
-  return { mockGetMe, mockConnect, mockDisconnect, MockTelegramClient };
+  return { mockGetMe, mockConnect, mockDestroy, MockTelegramClient };
 });
 
 vi.mock('telegram', () => ({
@@ -176,18 +176,18 @@ describe('checkAccountStatus — proxy', () => {
 // Disconnect behaviour
 // ---------------------------------------------------------------------------
 
-describe('checkAccountStatus — disconnect', () => {
-  it('disconnects after a successful check', async () => {
+describe('checkAccountStatus — destroy', () => {
+  it('destroys the client after a successful check', async () => {
     mockGetMe.mockResolvedValue({
       firstName: 'Frank', deleted: false, restricted: false, restrictionReason: [],
     });
     await checkAccountStatus(1, 'hash', 'sess');
-    expect(mockDisconnect).toHaveBeenCalledOnce();
+    expect(mockDestroy).toHaveBeenCalledOnce();
   });
 
-  it('disconnects even when getMe throws', async () => {
+  it('destroys the client even when getMe throws', async () => {
     mockGetMe.mockRejectedValue(new Error('SESSION_REVOKED'));
     await expect(checkAccountStatus(1, 'hash', 'sess')).rejects.toThrow('SESSION_REVOKED');
-    expect(mockDisconnect).toHaveBeenCalledOnce();
+    expect(mockDestroy).toHaveBeenCalledOnce();
   });
 });

@@ -1114,10 +1114,12 @@ async function stopJob(log: Log) {
 }
 
 async function rerunJob(log: Log) {
+  if (!confirm(t("logs.confirmRerun"))) return;
   rerunning.value.add(log.id);
   rerunning.value = new Set(rerunning.value);
   try {
     await jobsApi.run(log.jobId);
+    await load();
   } finally {
     rerunning.value.delete(log.id);
     rerunning.value = new Set(rerunning.value);
